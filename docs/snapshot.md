@@ -140,14 +140,24 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
   live on a real 16 GB T4) · T4-int8 diagnosed (cutlass int8 needs sm80+, "Error Internal" @sm75)
   · T4 fp16 baseline (24/24 EXACT; fp16≈bf16 speed on T4) · CONTRIBUTING.md.
 - ✅ **M8 weight-only int8 (w8a16)** [[F0018]] (2026-07-02): `rwkv7_w8.cu` mirrors the w4 family
-  (gemv_m1 + gemm_small bit-identical rows + dequant); **greedy 24/24 EXACT** (lossless in
-  practice, matrix err 5.9e-3); e2e 1.5B **1.37/1.31/1.27/1.06× fp16 at bsz 1/2/4/8** (227/392/
-  732/1181 tok/s), bsz32 0.65× (dequant fallback — w8 TC tile = follow-up); VRAM 8502 vs 9152;
-  checkpoint 1.8 vs 2.9 GB; runs on EVERY arch (JIT), unlike cutlass w8a8 (sm80–90). `RWKV_W8=1`,
-  quantizer `bench/quant_w4.py --bits 8`.
-- 🔄 **remaining**: v0.1.0 tag + release notes (drafted, `scratchpad/release_notes_v0.1.0.md`) ·
-  int4 fused tensor-core GEMM for M>8 · per-arch small-M cutover (T4 crossover earlier than 3090) ·
-  fp8 · (stretch) time-mix mega-fusion · TP/PP · upstream PR.
+  (gemv_m1 + gemm_small bit-identical rows + **gemm_w8_tc** wmma/smem-dequant/split-K + dequant);
+  **greedy 24/24 EXACT** (lossless in practice, matrix err 5.9e-3); e2e 1.5B
+  **1.37/1.31/1.27/1.06/1.12/1.02× fp16 at bsz 1/2/4/8/16/32** (227/392/732/1181/2513/3936 tok/s)
+  — **≥fp16 at every bsz≤32**; bsz64 0.74× (same M=64 long-K crossover as int4); VRAM 8502 vs
+  9152; checkpoint 1.8 vs 2.9 GB; runs on EVERY arch (JIT), unlike cutlass w8a8 (sm80–90).
+  `RWKV_W8=1`, quantizer `bench/quant_w4.py --bits 8`.
+- ✅ **M9 sglang-main port + TP** (2026-07-02, commits 66ceafd+d539d07): overlay verified on
+  **sglang main @a3f6680** (official `dev-cu12` CUDA-12.9 container on the 3090; GeForce can't
+  run CUDA-13 containers — forward-compat excludes it; the image's `/usr/local/cuda/compat`
+  libcuda must be shadowed via `LD_LIBRARY_PATH=`): **0.1B + 1.5B greedy 24/24 EXACT on main**,
+  same code base as v0.5.10 (`_linear_backend()` runtime accessor; NoOp full-attn stub carries
+  pool refs; port artifacts + apply guide in `sglang_main_port/`). **Head-parallel TP landed**
+  (r/k/v/LoRA-up column-parallel no-gather, o/ffn.value row-parallel allreduce, per-channel
+  params/g_norm/WKV state on the local head slice, conv token-shift state full-width;
+  W4/W8 gated tp=1): tp=1 regression 3/3 EXACT; tp=2 gate on 2×GPU = in flight.
+- 🔄 **remaining**: w4/w8 M=64 long-K tiling (cp.async pipeline in flight) · tp=2 runtime gate
+  (2×GPU box, in flight) · PP (implementation in flight) · per-arch small-M cutover (T4) ·
+  7.2B GPTQ streamed calibration · fp8 · upstream PR (main port DONE — unblocked).
 
 > Dev model: `sglang_overlay/` (new+edited files) → `scripts/deploy.sh` rsyncs into the
 > box's wheel sglang site-packages (no editable build). Head config = 12×64 (from r_k).
@@ -193,7 +203,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 | F0014 | Clean same-precision standing — raw speed loses, accuracy TIES, VRAM/int8/serving win; CUDA endgame chosen | info | open |
 | F0015 | CUDA endgame result — fused fp16 GEMV greedy-EXACT, +5-9% bsz1 decode @1.5B/7.2B; cuda-graph amortizes the eager win; mega-kernel to match albatross DECLINED | info | open |
 | F0016 | Serving-scale measured — ~50× concurrency throughput at flat VRAM; context-invariant memory (O(1)-state wedge) | info | open |
-| F0018 | Hand-written weight-only int8 (w8a16) — greedy-EXACT 24/24; 1.06–1.37× fp16 @bsz≤8 e2e; runs on every arch (JIT; vs cutlass w8a8 sm80–90 only) | info | open |
+| F0018 | Hand-written weight-only int8 (w8a16) — greedy-EXACT 24/24; ≥fp16 at every bsz≤32 (1.02–1.37×); runs on every arch (JIT; vs cutlass w8a8 sm80–90 only) | info | open |
 | F0017 | Hand-written weight-only int4 — faster than fp16 at every bsz≤8 (1.04–1.56×); 7.2B: 102.8 tok/s bsz1 (1.29× albatross-fp16), fixture-EXACT, lambada −2.64pt, 9.8GB total; GPTQ 1.5B −3.34pt; M>8 dequant ~0.5× (fused GEMM = endgame) | info | open |
 
 ## Environment (single source of truth)
@@ -227,5 +237,6 @@ untracked `~/.rwkv_secrets.sh`, never committed). References on Mac under `refs/
    1.5B has the full scored lambada/MMLU parity run).
 4. (optional) **serving polish**: World-tokenizer + OpenAI-API surface; extreme-context
    prefill (T≥4096); state-aware MambaRadixCache for RWKV prefix reuse (re-enable radix safely).
-5. (stretch) **upstream PR** to sgl-project — needs a re-port onto sglang `main` + a
-   CUDA-13 box (or a cloud GPU) to runtime-verify against main (box driver = CUDA 12.9).
+5. **upstream PR** to sgl-project — UNBLOCKED (2026-07-02): the overlay is verified greedy-EXACT
+   on sglang main @a3f6680 in the official dev-cu12 container (`sglang_main_port/` has the patch
+   + new-file bundle + apply guide). Remaining: fork, apply, CI-green, PR text.

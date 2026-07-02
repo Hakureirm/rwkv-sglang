@@ -46,7 +46,7 @@ is the honest, dated trail of how each result was reached + verified.
 | [F0014](findings/0014-clean-same-precision-standing.md) | Clean same-precision standing (honest: albatross wins raw speed) |
 | [F0015](findings/0015-cuda-endgame-result.md) | CUDA endgame result — fused GEMV + the honest ceiling |
 | [F0016](findings/0016-serving-scale-wedge.md) | Serving-scale measured — ~50× concurrency throughput at flat VRAM; context-invariant memory (the O(1)-state wedge) |
-| [F0018](findings/0018-w8-weight-only.md) | Hand-written weight-only int8 (w8a16) — greedy-EXACT 24/24, 1.06–1.37× fp16 at bsz≤8, JIT-runs on every arch (vs cutlass w8a8 sm80–90) |
+| [F0018](findings/0018-w8-weight-only.md) | Hand-written weight-only int8 (w8a16) — greedy-EXACT 24/24, ≥fp16 at every bsz≤32 (1.02–1.37×), JIT-runs on every arch (vs cutlass w8a8 sm80–90) |
 | [F0017](findings/0017-w4-int4-quant.md) | Hand-written weight-only int4 — faster than fp16 at every bsz≤8 (1.04–1.56×); 7.2B: 102.8 tok/s (1.29× albatross-fp16), 9.8GB total, lambada −2.64pt; GPTQ 1.5B −3.34pt; M>8 fused-GEMM = endgame |
 
 See **[`../bench/results/`](../bench/results/)** for the committed measurement artifacts each
