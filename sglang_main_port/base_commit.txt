@@ -1,0 +1,1 @@
+a3f6680 [AMD]: docker(rocm) bump Mooncake to latest main + enable multi-protocol (#27730)

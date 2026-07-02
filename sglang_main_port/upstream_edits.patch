@@ -1,0 +1,219 @@
+diff --git a/python/sglang/srt/configs/__init__.py b/python/sglang/srt/configs/__init__.py
+index aa05b73..4216711 100644
+--- a/python/sglang/srt/configs/__init__.py
++++ b/python/sglang/srt/configs/__init__.py
+@@ -33,6 +33,7 @@ from sglang.srt.configs.olmo3 import Olmo3Config
+ from sglang.srt.configs.qwen3_5 import Qwen3_5Config, Qwen3_5MoeConfig
+ from sglang.srt.configs.qwen3_asr import Qwen3ASRConfig
+ from sglang.srt.configs.qwen3_next import Qwen3NextConfig
++from sglang.srt.configs.rwkv7 import Rwkv7Config
+ from sglang.srt.configs.step3_vl import (
+     Step3TextConfig,
+     Step3VisionEncoderConfig,
+@@ -62,6 +63,7 @@ __all__ = [
+     "KimiK25Config",
+     "LagunaConfig",
+     "Qwen3NextConfig",
++    "Rwkv7Config",
+     "Qwen3_5Config",
+     "Qwen3_5MoeConfig",
+     "InternS2PreviewConfig",
+diff --git a/python/sglang/srt/configs/mamba_utils.py b/python/sglang/srt/configs/mamba_utils.py
+index 702fabd..1c080f0 100644
+--- a/python/sglang/srt/configs/mamba_utils.py
++++ b/python/sglang/srt/configs/mamba_utils.py
+@@ -273,3 +273,46 @@ class KimiLinearCacheParams(BaseLinearStateParams):
+     @property
+     def is_kda(self) -> bool:
+         return True
++
++@dataclass(kw_only=True, frozen=True)
++class Rwkv7StateShape:
++    """State shape for RWKV-7 (Goose).
++
++    RWKV-7 has two width-2 (prev-token) token-shifts per layer: one for the
++    time-mix (attn) block, one for the channel-mix (ffn) block. Each is stored as
++    a `(hidden_size, conv_kernel-1=1)` conv state. The recurrent WKV state S is
++    `(num_heads, head_dim, head_dim)` and is kept fp32 by the kernels.
++    """
++
++    conv: List[tuple[int, int]]
++    temporal: tuple[int, int, int]
++
++    hidden_size: int
++    num_heads: int
++    head_dim: int
++
++    @staticmethod
++    def create(
++        *,
++        tp_world_size: int,
++        hidden_size: int,
++        num_heads: int,
++        head_dim: int,
++    ) -> "Rwkv7StateShape":
++        # Token-shift conv state: store the previous token's (post-norm) hidden
++        # vector. conv_kernel=2 => last dim = conv_kernel - 1 = 1.
++        conv_state_shape = (divide(hidden_size, tp_world_size), 1)
++        temporal_state_shape = (divide(num_heads, tp_world_size), head_dim, head_dim)
++        return Rwkv7StateShape(
++            # two token-shifts: conv[0] = attn (time-mix), conv[1] = ffn (channel-mix)
++            conv=[conv_state_shape, conv_state_shape],
++            temporal=temporal_state_shape,
++            hidden_size=hidden_size,
++            num_heads=num_heads,
++            head_dim=head_dim,
++        )
++
++
++@dataclass(kw_only=True, frozen=True)
++class Rwkv7CacheParams(BaseLinearStateParams):
++    shape: Rwkv7StateShape
+diff --git a/python/sglang/srt/layers/attention/attention_registry.py b/python/sglang/srt/layers/attention/attention_registry.py
+index 45b1038..4ecc0b3 100644
+--- a/python/sglang/srt/layers/attention/attention_registry.py
++++ b/python/sglang/srt/layers/attention/attention_registry.py
+@@ -264,6 +264,7 @@ def attn_backend_wrapper(runner: "ModelRunner", full_attn_backend: "AttentionBac
+         from sglang.srt.layers.attention.linear.lightning_backend import (
+             LightningAttentionBackend,
+         )
++        from sglang.srt.layers.attention.linear.rwkv7_backend import Rwkv7AttnBackend
+         from sglang.srt.layers.attention.linear.utils import (
+             initialize_linear_attn_config,
+         )
+@@ -308,6 +309,9 @@ def attn_backend_wrapper(runner: "ModelRunner", full_attn_backend: "AttentionBac
+             linear_attn_backend = KDAAttnBackend(runner)
+         elif runner.hybrid_lightning_config is not None:
+             linear_attn_backend = LightningAttentionBackend(runner)
++        elif runner.rwkv7_config is not None:
++            logger.info("Using hybrid linear attention backend for RWKV-7 models.")
++            linear_attn_backend = Rwkv7AttnBackend(runner)
+         else:
+             spec_result = get_linear_attn_config(runner.model_config.hf_config)
+             if spec_result is not None:
+diff --git a/python/sglang/srt/model_executor/model_runner.py b/python/sglang/srt/model_executor/model_runner.py
+index 86eaf61..7a00150 100644
+--- a/python/sglang/srt/model_executor/model_runner.py
++++ b/python/sglang/srt/model_executor/model_runner.py
+@@ -48,6 +48,7 @@ from sglang.srt.configs import (
+     NemotronHConfig,
+     Qwen3_5Config,
+     Qwen3_5MoeConfig,
++    Rwkv7Config,
+     Qwen3NextConfig,
+     ZayaConfig,
+ )
+@@ -2367,6 +2368,13 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+             return config
+         return None
+ 
++    @property
++    def rwkv7_config(self):
++        config = self.model_config.hf_config
++        if isinstance(config, Rwkv7Config):
++            return config
++        return None
++
+     def _get_linear_attn_registry_result(self):
+         if self._linear_attn_registry_cache is _UNSET:
+             self._linear_attn_registry_cache = get_linear_attn_config(
+@@ -2386,6 +2394,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+             or self.hybrid_gdn_config
+             or self.kimi_linear_config
+             or self.hybrid_lightning_config
++            or self.rwkv7_config
+         )
+         if existing:
+             return existing
+@@ -2527,7 +2536,17 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+         if backend_str not in ATTENTION_BACKENDS:
+             raise ValueError(f"Invalid attention backend: {backend_str}")
+         self.init_new_workspace = init_new_workspace
+-        full_attention_backend = ATTENTION_BACKENDS[backend_str](self)
++        if self.rwkv7_config is not None:
++            # RWKV-7 is all-linear (zero full-attention layers). Do not construct a
++            # real full-attn backend (they probe the empty full KV pool or reject
++            # fp32); HybridLinearAttnBackend only needs a no-op stub here.
++            from sglang.srt.layers.attention.linear.rwkv7_backend import (
++                Rwkv7NoOpFullAttnBackend,
++            )
++
++            full_attention_backend = Rwkv7NoOpFullAttnBackend(self)
++        else:
++            full_attention_backend = ATTENTION_BACKENDS[backend_str](self)
+         return attn_backend_wrapper(self, full_attention_backend)
+ 
+     def maybe_init_ngram_embedding(self):
+diff --git a/python/sglang/srt/model_executor/pool_configurator.py b/python/sglang/srt/model_executor/pool_configurator.py
+index 50c3733..1ab18a4 100644
+--- a/python/sglang/srt/model_executor/pool_configurator.py
++++ b/python/sglang/srt/model_executor/pool_configurator.py
+@@ -135,6 +135,19 @@ class DefaultPoolConfigurator(MemoryPoolConfigurator):
+             num_layers = mr.num_effective_layers
+ 
+         self._cell_size = self._compute_cell_size(mr, num_layers)
++        # All-linear models (e.g. RWKV-7) have zero full-attention layers ->
++        # cell_size == 0. Token capacity is then not bounded by full-attn KV
++        # memory but by the mamba/linear-state pool concurrency: bound it by
++        # max_mamba_cache_size * context_len, clamped to keep the token
++        # allocator index tensor reasonable.
++        self._all_linear_token_cap = (
++            min(
++                mr.server_args.max_mamba_cache_size * mr.model_config.context_len,
++                1 << 20,
++            )
++            if self._cell_size == 0
++            else None
++        )
+ 
+         # EAGLE/STANDALONE: scale cell_size to account for draft model KV cache.
+         # Assumes draft and target share the same per-layer KV size (head_dim,
+@@ -270,7 +283,10 @@ class DefaultPoolConfigurator(MemoryPoolConfigurator):
+     def calculate_pool_sizes(
+         self, available_bytes: int, page_size: int
+     ) -> MemoryPoolConfig:
+-        max_total_num_tokens = available_bytes // self._cell_size
++        if self._cell_size == 0:
++            max_total_num_tokens = self._all_linear_token_cap
++        else:
++            max_total_num_tokens = available_bytes // self._cell_size
+         max_total_num_tokens = max_total_num_tokens // page_size * page_size
+         return MemoryPoolConfig(max_total_num_tokens=max_total_num_tokens)
+ 
+diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
+index e6bc493..50f36c9 100644
+--- a/python/sglang/srt/server_args.py
++++ b/python/sglang/srt/server_args.py
+@@ -4325,6 +4325,15 @@ class ServerArgs:
+             self._handle_mamba_radix_cache(model_arch=model_arch)
+         elif model_arch in ["BailingMoeV2_5ForCausalLM"]:
+             self._handle_mamba_radix_cache(model_arch=model_arch)
++        elif model_arch in ["RWKV7ForCausalLM", "Rwkv7ForCausalLM"]:
++            # RWKV-7: pure-recurrent; per-request WKV state is NOT prefix-cacheable,
++            # so the token radix cache corrupts shared-prefix batches. Force it off
++            # until a state-aware MambaRadixCache is wired. (ADR-0004/F0008)
++            if not self.disable_radix_cache:
++                logger.info(
++                    "Disabling radix cache for RWKV-7 (recurrent state is not prefix-cacheable)."
++                )
++                self.disable_radix_cache = True
+         elif model_arch in ["NemotronHForCausalLM", "NemotronHPuzzleForCausalLM"]:
+             from sglang.srt.arg_groups.nemotron_h_hook import (
+                 apply_nemotron_h_defaults,
+diff --git a/python/sglang/srt/utils/hf_transformers/common.py b/python/sglang/srt/utils/hf_transformers/common.py
+index eef80dc..fe59858 100644
+--- a/python/sglang/srt/utils/hf_transformers/common.py
++++ b/python/sglang/srt/utils/hf_transformers/common.py
+@@ -1,3 +1,4 @@
++from sglang.srt.configs import Rwkv7Config
+ # Copyright 2023-2024 SGLang Team
+ # Licensed under the Apache License, Version 2.0 (the "License");
+ # you may not use this file except in compliance with the License.
+@@ -77,6 +78,7 @@ from transformers import PretrainedConfig
+ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
+     cls.model_type: cls
+     for cls in [
++        Rwkv7Config,
+         AfmoeConfig,
+         BailingHybridConfig,
+         ChatGLMConfig,
