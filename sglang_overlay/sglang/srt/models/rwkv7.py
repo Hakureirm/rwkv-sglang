@@ -25,6 +25,16 @@ row-parallel with a single allreduce each). The token-shift mix vectors and the
 conv (prev-token) state stay full-width — they act on the replicated hidden
 before the column-parallel projections. tp=1 keeps the exact original path.
 
+Pipeline parallelism partitions the layer stack into contiguous per-rank slices
+(llama-style make_layers + PPMissingLayer): the first rank owns the embeddings
+(+ ln0 inside layer 0), the last rank owns the final norm + lm_head, and stages
+hand off {hidden_states, v_first} as PPProxyTensors — v_first (layer 0's value
+projection, under tp>1 the LOCAL head slice) must ride along because every later
+layer's v-residual mix consumes it. Backend state stays indexed by GLOBAL
+layer_id; the mamba/linear-state pool allocates only this rank's layer slice
+(the runner filters by model.start_layer/end_layer). pp=1 keeps the exact
+original path.
+
 Per-layer time-mix (att):
   shifted = prev_token(x);  x* = x + x_*·(shifted - x)
   r = r_proj(xr); k = k_proj(xk); v = v_proj(xv)
@@ -38,7 +48,7 @@ Per-layer time-mix (att):
 Channel-mix (ffn): shifted=prev(x); xk = x + x_k·(shifted-x); out = value(relu(key(xk))**2)
 """
 
-from typing import Iterable, Optional, Set, Tuple
+from typing import Iterable, Optional, Set, Tuple, Union
 
 import torch
 from torch import nn
@@ -64,11 +74,12 @@ from sglang.srt.layers.linear import (
 )
 from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
+from sglang.srt.layers.utils import PPMissingLayer, get_layer_id
 from sglang.srt.layers.vocab_parallel_embedding import (
     ParallelLMHead,
     VocabParallelEmbedding,
 )
-from sglang.srt.model_executor.forward_batch_info import ForwardBatch
+from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
 from sglang.srt.model_loader.weight_utils import default_weight_loader
 from sglang.srt.utils import add_prefix, make_layers
 
@@ -684,21 +695,34 @@ class Rwkv7Model(nn.Module):
     ):
         super().__init__()
         self.config = config
-        self.embeddings = VocabParallelEmbedding(
-            config.vocab_size,
-            config.hidden_size,
-            org_num_embeddings=config.vocab_size,
-        )
-        self.layers = make_layers(
+        self.pp_group = get_pp_group()
+        # PP: the first rank owns the embeddings (ln0 lives inside layer 0, which
+        # make_layers also puts on the first rank), the last rank owns the final
+        # norm; every other position is a PPMissingLayer placeholder. pp=1 (all
+        # ranks first AND last) constructs exactly the original module tree.
+        if self.pp_group.is_first_rank:
+            self.embeddings = VocabParallelEmbedding(
+                config.vocab_size,
+                config.hidden_size,
+                org_num_embeddings=config.vocab_size,
+            )
+        else:
+            self.embeddings = PPMissingLayer()
+        self.layers, self.start_layer, self.end_layer = make_layers(
             config.num_hidden_layers,
             lambda idx, prefix: Rwkv7DecoderLayer(
                 config, idx, quant_config=quant_config, prefix=prefix
             ),
+            pp_rank=self.pp_group.rank_in_group,
+            pp_size=self.pp_group.world_size,
             prefix=add_prefix("layers", prefix),
         )
-        self.norm = nn.LayerNorm(
-            config.hidden_size, eps=config.norm_eps, bias=config.norm_bias
-        )
+        if self.pp_group.is_last_rank:
+            self.norm = nn.LayerNorm(
+                config.hidden_size, eps=config.norm_eps, bias=config.norm_bias
+            )
+        else:
+            self.norm = PPMissingLayer()
 
     def forward(
         self,
@@ -706,19 +730,38 @@ class Rwkv7Model(nn.Module):
         positions: torch.Tensor,
         forward_batch: ForwardBatch,
         inputs_embeds: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        if inputs_embeds is not None:
-            x = inputs_embeds
+        pp_proxy_tensors: Optional[PPProxyTensors] = None,
+    ) -> Union[torch.Tensor, PPProxyTensors]:
+        if self.pp_group.is_first_rank:
+            if inputs_embeds is not None:
+                x = inputs_embeds
+            else:
+                x = self.embeddings(input_ids)
+
+            if x.shape[0] > 0:
+                # ln0 on the embeddings (once), then the recurrent stack.
+                x = self.layers[0].pre_norm(x)
+            v_first = None
         else:
-            x = self.embeddings(input_ids)
+            assert pp_proxy_tensors is not None
+            x = pp_proxy_tensors["hidden_states"]
+            v_first = pp_proxy_tensors["v_first"]
 
-        if x.shape[0] > 0:
-            # ln0 on the embeddings (once), then the recurrent stack.
-            x = self.layers[0].pre_norm(x)
+        for i in range(self.start_layer, self.end_layer):
+            x, v_first = self.layers[i](forward_batch, x, v_first)
 
-        v_first = None
-        for layer in self.layers:
-            x, v_first = layer(forward_batch, x, v_first)
+        if not self.pp_group.is_last_rank:
+            # v_first (layer 0's value projection — under tp>1 the LOCAL head
+            # slice, same layout on the matching tp rank of the next stage) rides
+            # along with the hidden state: every later layer's v-residual mix
+            # consumes it. It is None only for empty batches (T==0 skips every
+            # layer); send a same-width empty placeholder so the p2p tensor dict
+            # stays uniform.
+            if v_first is None:
+                v_first = x.new_zeros(
+                    x.shape[0], self.layers[self.start_layer].attn.local_hidden_size
+                )
+            return PPProxyTensors({"hidden_states": x, "v_first": v_first})
 
         x = self.norm(x)
         return x
@@ -754,11 +797,9 @@ class Rwkv7ForCausalLM(nn.Module):
         self.config = config
         self.quant_config = quant_config
         self.pp_group = get_pp_group()
-        # M1: no pipeline parallelism / no speculative decoding.
-        assert self.pp_group.is_first_rank and self.pp_group.is_last_rank, (
-            "RWKV-7 (M1) does not support pipeline parallelism."
-        )
         self.model = Rwkv7Model(config, quant_config, prefix=add_prefix("model", prefix))
+        # lm_head exists on every pp rank (llama pattern; only the last rank uses
+        # it — the logits_processor runs there).
         self.lm_head = ParallelLMHead(
             config.vocab_size,
             config.hidden_size,
@@ -775,15 +816,37 @@ class Rwkv7ForCausalLM(nn.Module):
         positions: torch.Tensor,
         forward_batch: ForwardBatch,
         inputs_embeds: Optional[torch.Tensor] = None,
+        pp_proxy_tensors: Optional[PPProxyTensors] = None,
         **kwargs,
     ):
-        hidden_states = self.model(input_ids, positions, forward_batch, inputs_embeds)
-        return self.logits_processor(
-            input_ids, hidden_states, self.lm_head, forward_batch
+        hidden_states = self.model(
+            input_ids,
+            positions,
+            forward_batch,
+            inputs_embeds,
+            pp_proxy_tensors=pp_proxy_tensors,
         )
+        if self.pp_group.is_last_rank:
+            return self.logits_processor(
+                input_ids, hidden_states, self.lm_head, forward_batch
+            )
+        # Non-last pp rank: hand the PPProxyTensors (hidden_states + v_first) to
+        # the next stage; logits only exist on the last rank.
+        return hidden_states
 
     def get_embed_and_head(self):
         return self.model.embeddings.weight, self.lm_head.weight
+
+    # The runner reads model.start_layer/end_layer (llama pattern) to size the
+    # per-rank mamba/linear-state pool: under pp>1 only this rank's layer slice
+    # is allocated and mamba2_layer_cache maps the GLOBAL layer_id to it.
+    @property
+    def start_layer(self):
+        return self.model.start_layer
+
+    @property
+    def end_layer(self):
+        return self.model.end_layer
 
     def load_weights(
         self, weights: Iterable[Tuple[str, torch.Tensor]]
@@ -799,8 +862,17 @@ class Rwkv7ForCausalLM(nn.Module):
         # before the plain copy. Parallel linears shard via their own weight_loader.
         _head_sharded = (".k_k", ".k_a", ".r_k", ".g_norm.weight", ".g_norm.bias")
         loaded_params: Set[str] = set()
+        pp_skipped = 0
         for name, loaded_weight in weights:
             if name not in params_dict:
+                # pp>1: keys for another stage's slice (layers outside
+                # [start_layer, end_layer), the embeddings off the first rank,
+                # the final norm off the last rank) are PPMissingLayer here —
+                # skip them. Anything else is still a hard error, and at pp=1
+                # every miss raises exactly as before.
+                if self.pp_group.world_size > 1 and self._on_other_pp_rank(name):
+                    pp_skipped += 1
+                    continue
                 raise KeyError(
                     f"[rwkv7.load_weights] unexpected checkpoint key: {name}"
                 )
@@ -812,6 +884,13 @@ class Rwkv7ForCausalLM(nn.Module):
             weight_loader(param, loaded_weight)
             loaded_params.add(name)
 
+        if pp_skipped:
+            import sys
+            print(
+                f"[rwkv7.load_weights] pp rank {self.pp_group.rank_in_group}: "
+                f"skipped {pp_skipped} checkpoint keys owned by other pp ranks",
+                file=sys.stderr, flush=True)
+
         # Assert every model parameter was loaded (catches naming mismatches).
         missing = set(params_dict.keys()) - loaded_params
         if missing:
@@ -820,6 +899,18 @@ class Rwkv7ForCausalLM(nn.Module):
                 f"{sorted(missing)[:8]}"
             )
         return loaded_params
+
+    def _on_other_pp_rank(self, name: str) -> bool:
+        """True iff this checkpoint key belongs to a module another pp rank owns
+        (so this rank holds a PPMissingLayer for it and must skip the key)."""
+        layer_id = get_layer_id(name)
+        if layer_id is not None:
+            return not (self.model.start_layer <= layer_id < self.model.end_layer)
+        if name.startswith("model.embeddings."):
+            return not self.pp_group.is_first_rank
+        if name.startswith("model.norm."):
+            return not self.pp_group.is_last_rank
+        return False
 
 
 # config.json architectures = ["RWKV7ForCausalLM"]; the registry keys by class
