@@ -1,0 +1,22 @@
+[rwkv7_fast_v3a] loading CUDA extensions v3a_ops + fast_ops + wkv=fp16
+[rwkv7_fast_v3a] CUDA extensions loaded in 0.711s
+[rwkv7_fast_v3a] loading weights from /home/user/rwkv_models/rwkv7-g1/rwkv7-g1d-0.1b-20260129-ctx8192.pth
+[rwkv7_fast_v3a] weights mmap loaded in 0.081s tensors=402
+[rwkv7_fast_v3a] detected model C=768 H=12 N=64 V=65536
+[rwkv7_fast_v3a] cmix no-fc path: rows<=19 row20_t<=5
+[rwkv7_fast_v3a] moving and preprocessing weights to CUDA emb=cpu
+[rwkv7_fast_v3a] model ready in 0.769s L=12 C=768 H=12 N=64 V=65536
+[rwkv7_fast_v3a] gpu_mem used=0.61GiB allocated=0.28GiB reserved=0.31GiB total=23.56GiB
+{
+  "engine": "albatross",
+  "wkv_state": "fp16",
+  "pth": "/home/user/rwkv_models/rwkv7-g1/rwkv7-g1d-0.1b-20260129-ctx8192.pth",
+  "n": 24,
+  "n_match": 24,
+  "exact": true,
+  "first_divergence_index": null
+}
+GOT      [37138, 45, 44312, 47, 20996, 304, 25740, 109, 37480, 4600, 332, 39990, 4596, 37138, 45, 44312, 45, 32227, 22748, 37924, 4596, 3491, 709, 47]
+EXPECTED [37138, 45, 44312, 47, 20996, 304, 25740, 109, 37480, 4600, 332, 39990, 4596, 37138, 45, 44312, 45, 32227, 22748, 37924, 4596, 3491, 709, 47]
+WKV_STATE fp16  MATCH 24/24  EXACT True  FIRST_DIVERGENCE None
+wrote /home/user/rwkv-vllm/bench/results/clean/albatross_acc_0.1B_fp16.json

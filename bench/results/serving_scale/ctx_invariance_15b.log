@@ -1,0 +1,20 @@
+Warning: User-specified context_length (131072) is greater than the derived context_length (8192). This may lead to incorrect model outputs or CUDA errors. Note that the derived context_length may differ from max_position_embeddings in the model's config.
+Disabling Radix Cache for RWKV7ForCausalLM as it is not yet supported.
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00,  1.17it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00,  1.17it/s]
+  0%|          | 0/4 [00:00<?, ?it/s]Capturing batches (bs=8 avail_mem=11.92 GB):   0%|          | 0/4 [00:00<?, ?it/s]Capturing batches (bs=8 avail_mem=11.92 GB):  25%|██▌       | 1/4 [00:02<00:06,  2.20s/it]Capturing batches (bs=4 avail_mem=11.88 GB):  25%|██▌       | 1/4 [00:02<00:06,  2.20s/it]Capturing batches (bs=4 avail_mem=11.88 GB):  50%|█████     | 2/4 [00:02<00:02,  1.05s/it]Capturing batches (bs=2 avail_mem=11.87 GB):  50%|█████     | 2/4 [00:02<00:02,  1.05s/it]Capturing batches (bs=2 avail_mem=11.87 GB):  75%|███████▌  | 3/4 [00:02<00:00,  1.48it/s]Capturing batches (bs=1 avail_mem=11.86 GB):  75%|███████▌  | 3/4 [00:02<00:00,  1.48it/s]Capturing batches (bs=1 avail_mem=11.86 GB): 100%|██████████| 4/4 [00:02<00:00,  1.96it/s]Capturing batches (bs=1 avail_mem=11.86 GB): 100%|██████████| 4/4 [00:02<00:00,  1.36it/s]
+==================================================================================
+SERVING-SCALE  model=ctx-invariance-1.5b  dtype=bfloat16  mode=context  cuda_graph=ON  radix=OFF
+  decode=64tok steady-state (prefill-subtracted)  mem_fraction=0.85  baseline=1 MiB
+----------------------------------------------------------------------------------
+ context |  bsz |  decode tok/s |   ms/step |    TTFT ms | peak VRAM MiB
+----------------------------------------------------------------------------------
+    1024 |    8 |        1034.3 |      7.73 |      581.1 |         12364
+    4096 |    8 |        1017.0 |      7.87 |     2471.4 |         12364
+    8192 |    8 |         900.1 |      8.89 |     5105.3 |         12364
+   16384 |    8 |         748.2 |     10.69 |    10797.3 |         12364
+   32768 |    8 |         764.3 |     10.47 |    23048.5 |         12366
+   65536 |    8 |        1080.3 |      7.41 |    47061.7 |         12368
+==================================================================================

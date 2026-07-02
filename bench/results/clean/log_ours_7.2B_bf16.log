@@ -1,0 +1,173 @@
+Disabling Radix Cache for RWKV7ForCausalLM as it is not yet supported.
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:09<00:00,  9.05s/it]Multi-thread loading shards: 100% Completed | 1/1 [00:09<00:00,  9.05s/it]
+  0%|          | 0/8 [00:00<?, ?it/s]Capturing batches (bs=32 avail_mem=6.75 GB):   0%|          | 0/8 [00:00<?, ?it/s]Capturing batches (bs=32 avail_mem=6.75 GB):  12%|█▎        | 1/8 [00:02<00:16,  2.34s/it]Capturing batches (bs=24 avail_mem=6.61 GB):  12%|█▎        | 1/8 [00:02<00:16,  2.34s/it]Capturing batches (bs=24 avail_mem=6.61 GB):  25%|██▌       | 2/8 [00:02<00:07,  1.19s/it]Capturing batches (bs=16 avail_mem=6.60 GB):  25%|██▌       | 2/8 [00:02<00:07,  1.19s/it]Capturing batches (bs=16 avail_mem=6.60 GB):  38%|███▊      | 3/8 [00:03<00:04,  1.19it/s]Capturing batches (bs=12 avail_mem=6.58 GB):  38%|███▊      | 3/8 [00:03<00:04,  1.19it/s]Capturing batches (bs=12 avail_mem=6.58 GB):  50%|█████     | 4/8 [00:03<00:02,  1.55it/s]Capturing batches (bs=8 avail_mem=6.56 GB):  50%|█████     | 4/8 [00:03<00:02,  1.55it/s] Capturing batches (bs=8 avail_mem=6.56 GB):  62%|██████▎   | 5/8 [00:03<00:01,  1.87it/s]Capturing batches (bs=4 avail_mem=6.54 GB):  62%|██████▎   | 5/8 [00:03<00:01,  1.87it/s]Capturing batches (bs=4 avail_mem=6.54 GB):  75%|███████▌  | 6/8 [00:04<00:00,  2.14it/s]Capturing batches (bs=2 avail_mem=6.52 GB):  75%|███████▌  | 6/8 [00:04<00:00,  2.14it/s]Capturing batches (bs=2 avail_mem=6.52 GB):  88%|████████▊ | 7/8 [00:04<00:00,  2.36it/s]Capturing batches (bs=1 avail_mem=6.51 GB):  88%|████████▊ | 7/8 [00:04<00:00,  2.36it/s]Capturing batches (bs=1 avail_mem=6.51 GB): 100%|██████████| 8/8 [00:04<00:00,  2.47it/s]Capturing batches (bs=1 avail_mem=6.51 GB): 100%|██████████| 8/8 [00:04<00:00,  1.64it/s]
+wrote bench/results/clean/ours_7.2B_bf16.json
+{
+  "engine": "ours",
+  "size": "7.2B",
+  "dtype": "bf16",
+  "model_path": "/home/user/rwkv_models/rwkv7-7.2b-fla",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "baseline_vram_mib": 1,
+  "weight_bytes": 14398283776,
+  "weight_mib": 13731.3,
+  "repeats": 7,
+  "decode_tokens": 128,
+  "prefill_len": 1024,
+  "config": "cuda_graph=ON radix_cache=OFF dtype=bf16 mem_fraction=0.85",
+  "rows": [
+    {
+      "bsz": 1,
+      "decode_tok_s": {
+        "median": 45.71985393827188,
+        "p10": 45.113773245818756,
+        "p90": 45.94846577202843,
+        "n": 7,
+        "runs": [
+          45.946,
+          45.953,
+          45.856,
+          45.72,
+          45.346,
+          44.969,
+          45.21
+        ]
+      },
+      "prefill_tok_s": {
+        "median": 3132.1550066979694,
+        "p10": 2914.1181813333124,
+        "p90": 3156.5715083514924,
+        "n": 7,
+        "runs": [
+          3166.601,
+          3149.885,
+          3145.14,
+          3132.155,
+          3110.257,
+          2925.207,
+          2897.485
+        ]
+      },
+      "ttft_ms": {
+        "median": 326.9314570352435,
+        "p10": 324.4047798216343,
+        "p90": 351.4003965770826,
+        "n": 7,
+        "runs": [
+          323.375,
+          325.091,
+          325.582,
+          326.931,
+          329.233,
+          350.061,
+          353.41
+        ]
+      },
+      "peak_vram_mib": 17808,
+      "footprint_mib": 17807
+    },
+    {
+      "bsz": 8,
+      "decode_tok_s": {
+        "median": 308.4703115745146,
+        "p10": 304.7448566974409,
+        "p90": 316.0040760727984,
+        "n": 7,
+        "runs": [
+          315.953,
+          316.081,
+          313.932,
+          305.812,
+          308.47,
+          306.582,
+          303.144
+        ]
+      },
+      "prefill_tok_s": {
+        "median": 3070.4919577668425,
+        "p10": 2979.1297137856814,
+        "p90": 3156.323171712078,
+        "n": 7,
+        "runs": [
+          3216.619,
+          3116.126,
+          3081.458,
+          3070.492,
+          3005.008,
+          2991.07,
+          2961.22
+        ]
+      },
+      "ttft_ms": {
+        "median": 2667.9763740394264,
+        "p10": 2596.052577998489,
+        "p90": 2749.8627347406,
+        "n": 7,
+        "runs": [
+          2546.773,
+          2628.906,
+          2658.481,
+          2667.976,
+          2726.116,
+          2738.82,
+          2766.427
+        ]
+      },
+      "peak_vram_mib": 18062,
+      "footprint_mib": 18061
+    },
+    {
+      "bsz": 32,
+      "decode_tok_s": {
+        "median": 903.1772435351868,
+        "p10": 899.2118611623671,
+        "p90": 909.380361508147,
+        "n": 7,
+        "runs": [
+          917.628,
+          903.882,
+          901.946,
+          899.47,
+          898.824,
+          903.177,
+          903.216
+        ]
+      },
+      "prefill_tok_s": {
+        "median": 3005.4061085191984,
+        "p10": 2980.995773314241,
+        "p90": 3026.736049670393,
+        "n": 7,
+        "runs": [
+          2981.837,
+          3002.886,
+          3038.724,
+          3018.744,
+          3005.406,
+          2979.733,
+          3015.716
+        ]
+      },
+      "ttft_ms": {
+        "median": 10903.019031975418,
+        "p10": 10826.296617789194,
+        "p90": 10992.30136864353,
+        "n": 7,
+        "runs": [
+          10989.197,
+          10912.17,
+          10783.473,
+          10854.846,
+          10903.019,
+          10996.957,
+          10865.745
+        ]
+      },
+      "peak_vram_mib": 18062,
+      "footprint_mib": 18061
+    }
+  ]
+}

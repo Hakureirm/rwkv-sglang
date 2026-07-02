@@ -1,0 +1,20 @@
+[transformers] You are using a model of type `rwkv7` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+  200/2000 acc=0.2400
+  400/2000 acc=0.2400
+  600/2000 acc=0.2467
+  800/2000 acc=0.2475
+  1000/2000 acc=0.2510
+  1200/2000 acc=0.2517
+  1400/2000 acc=0.2507
+  1600/2000 acc=0.2519
+  1800/2000 acc=0.2506
+  2000/2000 acc=0.2455
+wrote bench/results/clean/acc_ours_1.5B_fp16_mmlu.json
+{
+  "task": "mmlu",
+  "backend": "server",
+  "n": 2000,
+  "acc": 0.2455,
+  "model": "/home/user/rwkv_models/rwkv7-1.5b-fla",
+  "dtype": "fp16"
+}

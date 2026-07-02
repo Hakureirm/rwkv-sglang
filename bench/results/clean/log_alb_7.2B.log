@@ -1,0 +1,96 @@
+wrote bench/results/clean/albatross_7.2B.json
+{
+  "engine": "albatross",
+  "size": "7.2B",
+  "dtype": "fp16",
+  "model_path": "/home/user/rwkv_models/rwkv7-g1/rwkv7-g1g-7.2b-20260523-ctx8192.pth",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "baseline_vram_mib": 1,
+  "repeats": 3,
+  "iters_internal": 30,
+  "prefill_len": 1024,
+  "config": "fp16 weights + fp16 WKV, emb=cpu, whole-forward CUDAGraph, p50 over 30 internal iters; median of 3 subprocess runs",
+  "rows": [
+    {
+      "bsz": 1,
+      "decode_tok_s": {
+        "median": 79.59,
+        "p10": 79.566,
+        "p90": 79.75,
+        "n": 3,
+        "runs": [
+          79.79,
+          79.56,
+          79.59
+        ]
+      },
+      "prefill_tok_s": {
+        "median": 4072.05,
+        "p10": 4026.586,
+        "p90": 4083.9539999999997,
+        "n": 3,
+        "runs": [
+          4086.93,
+          4072.05,
+          4015.22
+        ]
+      },
+      "peak_vram_mib": 14588,
+      "footprint_mib": 14587
+    },
+    {
+      "bsz": 8,
+      "decode_tok_s": {
+        "median": 407.65,
+        "p10": 407.602,
+        "p90": 407.818,
+        "n": 3,
+        "runs": [
+          407.65,
+          407.86,
+          407.59
+        ]
+      },
+      "prefill_tok_s": {
+        "median": 3595.85,
+        "p10": 3561.034,
+        "p90": 3759.682,
+        "n": 3,
+        "runs": [
+          3800.64,
+          3552.33,
+          3595.85
+        ]
+      },
+      "peak_vram_mib": 17710,
+      "footprint_mib": 17709
+    },
+    {
+      "bsz": 32,
+      "decode_tok_s": {
+        "median": 1495.26,
+        "p10": 1493.396,
+        "p90": 1497.172,
+        "n": 3,
+        "runs": [
+          1492.93,
+          1495.26,
+          1497.65
+        ]
+      },
+      "prefill_tok_s": {
+        "median": 4018.55,
+        "p10": 3996.294,
+        "p90": 4022.19,
+        "n": 3,
+        "runs": [
+          4018.55,
+          4023.1,
+          3990.73
+        ]
+      },
+      "peak_vram_mib": 24000,
+      "footprint_mib": 23999
+    }
+  ]
+}

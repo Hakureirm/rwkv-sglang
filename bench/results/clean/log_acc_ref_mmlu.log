@@ -1,0 +1,21 @@
+ninja: no work to do.
+
+### RWKV-7 "Goose" enabled ###
+
+ninja: no work to do.
+[ref] loading /home/user/rwkv_models/rwkv7-g1/rwkv7-g1g-1.5b-20260526-ctx8192 strategy='cuda fp16' cuda_on=1
+Loading /home/user/rwkv_models/rwkv7-g1/rwkv7-g1g-1.5b-20260526-ctx8192 (cuda fp16)
+
+  500/2000 acc=0.4500
+  1000/2000 acc=0.5260
+  1500/2000 acc=0.5260
+  2000/2000 acc=0.5110
+wrote bench/results/clean/acc_ref_1.5B_mmlu.json
+{
+  "task": "mmlu",
+  "backend": "rwkv",
+  "n": 2000,
+  "acc": 0.511,
+  "pth": "/home/user/rwkv_models/rwkv7-g1/rwkv7-g1g-1.5b-20260526-ctx8192.pth",
+  "strategy": "cuda fp16"
+}

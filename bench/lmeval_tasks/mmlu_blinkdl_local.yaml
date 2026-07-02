@@ -1,0 +1,23 @@
+# MMLU via BlinkDL's rwkv_mmlu_eval methodology, as an lm-eval multiple_choice task, on
+# the LOCAL 2000-example seed-42 sample (same questions the rwkv-pip reference scored).
+# multiple_choice loglikelihood uses lm-eval's WORKING local-completions path (the direct
+# sglang /generate token_ids_logprob feature is buggy for RWKV in this version). Template +
+# single-token choices " A"/" B"/" C"/" D" match the reference (BlinkDL prepends a leading
+# token 0 which our tokenizer's add_bos_token=false omits - a minor difference; acc lands
+# within ~1-2 pts of the reference, and the fp16/bf16/int8 comparison is internally exact).
+task: mmlu_blinkdl_local
+dataset_path: parquet
+dataset_kwargs:
+  data_files:
+    test: ${FIXTURES}/mmlu_sample2000.parquet
+test_split: test
+output_type: multiple_choice
+doc_to_text: "User: You are a very talented expert in {{subject.replace('_',' ')}}. Answer this question:\n{{question}}\nA. {{A}}\nB. {{B}}\nC. {{C}}\nD. {{D}}\n\nAssistant: The answer is"
+doc_to_choice: [" A", " B", " C", " D"]
+doc_to_target: "{{answer}}"
+metric_list:
+  - metric: acc
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0

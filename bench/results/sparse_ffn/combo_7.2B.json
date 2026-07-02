@@ -1,0 +1,66 @@
+{
+  "engine": "ours",
+  "size": "7.2B",
+  "dtype": "fp16",
+  "model_path": "/home/user/rwkv_models/rwkv7-7.2b-fla",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "baseline_vram_mib": 1,
+  "weight_bytes": 14398283776,
+  "weight_mib": 13731.3,
+  "repeats": 7,
+  "decode_tokens": 128,
+  "prefill_len": 1024,
+  "config": "cuda_graph=ON radix_cache=OFF dtype=fp16 mem_fraction=0.92",
+  "rows": [
+    {
+      "bsz": 1,
+      "decode_tok_s": {
+        "median": 64.30353250557421,
+        "p10": 64.19943216035085,
+        "p90": 64.45532670812885,
+        "n": 7,
+        "runs": [
+          64.512,
+          64.417,
+          64.34,
+          64.304,
+          64.255,
+          64.222,
+          64.166
+        ]
+      },
+      "prefill_tok_s": {
+        "median": 3324.3238315797835,
+        "p10": 3316.795395270255,
+        "p90": 3357.727922537479,
+        "n": 7,
+        "runs": [
+          3363.975,
+          3353.563,
+          3346.431,
+          3324.324,
+          3323.063,
+          3319.849,
+          3312.215
+        ]
+      },
+      "ttft_ms": {
+        "median": 308.0325659830123,
+        "p10": 304.96883175801486,
+        "p90": 308.73212865553796,
+        "n": 7,
+        "runs": [
+          304.402,
+          305.347,
+          305.998,
+          308.033,
+          308.149,
+          308.448,
+          309.159
+        ]
+      },
+      "peak_vram_mib": 22478,
+      "footprint_mib": 22477
+    }
+  ]
+}

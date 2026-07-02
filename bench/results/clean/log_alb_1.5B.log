@@ -1,0 +1,96 @@
+wrote bench/results/clean/albatross_1.5B.json
+{
+  "engine": "albatross",
+  "size": "1.5B",
+  "dtype": "fp16",
+  "model_path": "/home/user/rwkv_models/rwkv7-g1/rwkv7-g1g-1.5b-20260526-ctx8192.pth",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "baseline_vram_mib": 1,
+  "repeats": 3,
+  "iters_internal": 30,
+  "prefill_len": 1024,
+  "config": "fp16 weights + fp16 WKV, emb=cpu, whole-forward CUDAGraph, p50 over 30 internal iters; median of 3 subprocess runs",
+  "rows": [
+    {
+      "bsz": 1,
+      "decode_tok_s": {
+        "median": 309.23,
+        "p10": 309.118,
+        "p90": 309.23,
+        "n": 3,
+        "runs": [
+          309.09,
+          309.23,
+          309.23
+        ]
+      },
+      "prefill_tok_s": {
+        "median": 15133.53,
+        "p10": 14902.842,
+        "p90": 15227.538,
+        "n": 3,
+        "runs": [
+          14845.17,
+          15133.53,
+          15251.04
+        ]
+      },
+      "peak_vram_mib": 3408,
+      "footprint_mib": 3407
+    },
+    {
+      "bsz": 8,
+      "decode_tok_s": {
+        "median": 1227.03,
+        "p10": 1224.878,
+        "p90": 1293.2859999999998,
+        "n": 3,
+        "runs": [
+          1309.85,
+          1227.03,
+          1224.34
+        ]
+      },
+      "prefill_tok_s": {
+        "median": 19405.77,
+        "p10": 19379.361999999997,
+        "p90": 20026.69,
+        "n": 3,
+        "runs": [
+          20181.92,
+          19405.77,
+          19372.76
+        ]
+      },
+      "peak_vram_mib": 5010,
+      "footprint_mib": 5009
+    },
+    {
+      "bsz": 32,
+      "decode_tok_s": {
+        "median": 5308.31,
+        "p10": 5307.581999999999,
+        "p90": 5309.47,
+        "n": 3,
+        "runs": [
+          5308.31,
+          5307.4,
+          5309.76
+        ]
+      },
+      "prefill_tok_s": {
+        "median": 17276.66,
+        "p10": 17133.62,
+        "p90": 17507.572,
+        "n": 3,
+        "runs": [
+          17276.66,
+          17097.86,
+          17565.3
+        ]
+      },
+      "peak_vram_mib": 10328,
+      "footprint_mib": 10327
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+===== STANDALONE (rebuild w/o fast-math) =====
+  K=  768 N=  768  kernel_vs_fp32 rel=2.45e-04  torch16_vs_fp32 rel=2.45e-04  [OK]
+  K= 2048 N= 2048  kernel_vs_fp32 rel=3.12e-04  torch16_vs_fp32 rel=3.12e-04  [OK]
+  K= 4096 N= 4096  kernel_vs_fp32 rel=4.13e-04  torch16_vs_fp32 rel=4.13e-04  [OK]
+  K= 4096 N=16384  kernel_vs_fp32 rel=3.45e-04  torch16_vs_fp32 rel=3.77e-04  [OK]
+  K=16384 N= 4096  kernel_vs_fp32 rel=3.73e-04  torch16_vs_fp32 rel=6.01e-04  [OK]
+     shape (K x N) |  kernel us |  cublas us | speedup
+      0.1B r/k/v/o |      21.02 |      31.88 |  1.52x  (768x768)
+      1.5B r/k/v/o |      21.35 |      32.98 |  1.54x  (2048x2048)
+      7.2B r/k/v/o |      40.96 |      47.03 |  1.15x  (4096x4096)
+      7.2B ffn key |     153.35 |     172.87 |  1.13x  (4096x16384)
+    7.2B ffn value |     157.62 |     171.69 |  1.09x  (16384x4096)
+RESULT: gemv=PASS
+===== 0.1b greedy-EXACT (fast, cuda-graph ON) =====
+[rwkv7] M6 fused fp16 GEMV projection path ENABLED (bsz1 decode, fp16)
+EXACT_MATCH True  MATCH 24/24  FIRST_DIVERGENCE_INDEX None
+===== 0.1b verify_batch (fast) =====
+OVERALL: PASS (all batches exact)
+===== 0.1b re-bench base vs fast (fp16 decode) =====
+===== 1.5b greedy-EXACT (fast, cuda-graph ON) =====
+[rwkv7] M6 fused fp16 GEMV projection path ENABLED (bsz1 decode, fp16)
+EXACT_MATCH True  MATCH 24/24  FIRST_DIVERGENCE_INDEX None
+===== 1.5b verify_batch (fast) =====
+OVERALL: PASS (all batches exact)
+===== 1.5b re-bench base vs fast (fp16 decode) =====
+===== 7.2b greedy-EXACT (fast, cuda-graph ON) =====
+[rwkv7] M6 fused fp16 GEMV projection path ENABLED (bsz1 decode, fp16)
+EXACT_MATCH True  MATCH 8/8  FIRST_DIVERGENCE_INDEX None
+===== 7.2b re-bench base vs fast (fp16 decode) =====
+REVERIFY_DONE

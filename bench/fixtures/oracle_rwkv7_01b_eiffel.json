@@ -1,0 +1,11 @@
+{
+  "_comment": "M1d correctness-gate fixture. RWKV-7 0.1B (rwkv7-g1d-0.1b-20260129-ctx8192) greedy reference from bench/oracle_numpy.py (pure-numpy RWKV-7, BlinkDL .pth). sglang impl MUST reproduce greedy_tokens exactly.",
+  "model": "RWKV/rwkv7-g1 :: rwkv7-g1d-0.1b-20260129-ctx8192.pth",
+  "arch": {"n_layer": 12, "n_embd": 768, "n_head": 12, "head_size": 64, "vocab": 65536},
+  "tokenizer": "rwkv_vocab_v20230424 (World trie, via rwkv pip)",
+  "prompt": "\nThe Eiffel Tower is located in the city of",
+  "prompt_tokens": [93, 111, 6699, 304, 25740, 109, 37480, 4600, 52151, 4596, 22590, 30449, 4706],
+  "greedy_tokens": [37138, 45, 44312, 47, 20996, 304, 25740, 109, 37480, 4600, 332, 39990, 4596, 37138, 45, 44312, 45, 32227, 22748, 37924, 4596, 3491, 709, 47],
+  "greedy_text": " Paris, France. The Eiffel Tower is a tower in Paris, France, that was built in 1889.",
+  "prompt_final_logits_npy": "gpu-box:/home/user/rwkv_models/oracle_eiffel_logits.npy"
+}

@@ -1,0 +1,15 @@
+refs/
+*.pyc
+__pycache__/
+*.pth
+*.bin
+*.safetensors
+.venv/
+scratch/
+scratchpad/
+.rwkv_secrets.sh
+*secrets*
+
+# macOS
+.DS_Store
+**/.DS_Store

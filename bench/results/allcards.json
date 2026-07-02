@@ -1,0 +1,1109 @@
+[
+  {
+    "label": "T4",
+    "device": "Tesla T4",
+    "sm": "7.5",
+    "total_vram_mib": 14913,
+    "wall_s": 542.0,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 125.72138740300001,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 24,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 112.86890412900001,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 65.1,
+            "prefill_tok_s": 4908.7,
+            "ttft_ms": 208.6,
+            "peak_vram_mib": 5597,
+            "vram_minus_base_mib": 5594
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 446.5,
+            "prefill_tok_s": 5589.7,
+            "ttft_ms": 1465.5,
+            "peak_vram_mib": 5753,
+            "vram_minus_base_mib": 5750
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 592.3,
+            "prefill_tok_s": 5561.9,
+            "ttft_ms": 5891.5,
+            "peak_vram_mib": 5753,
+            "vram_minus_base_mib": 5750
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-int8",
+        "rc": -9,
+        "wall_s": 52.377960703000014,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": null,
+        "match": null,
+        "n": null
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-int8",
+        "rc": -9,
+        "wall_s": 55.538834809000036,
+        "dtype": "bfloat16",
+        "rows": []
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-w4",
+        "rc": 1,
+        "wall_s": 106.25750742599996,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 14,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-w4",
+        "rc": 0,
+        "wall_s": 88.92265998700003,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 114.9,
+            "prefill_tok_s": 4496.6,
+            "ttft_ms": 227.7,
+            "peak_vram_mib": 4661,
+            "vram_minus_base_mib": 4658
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 196.0,
+            "prefill_tok_s": 5100.6,
+            "ttft_ms": 1606.1,
+            "peak_vram_mib": 4785,
+            "vram_minus_base_mib": 4782
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 614.3,
+            "prefill_tok_s": 5156.8,
+            "ttft_ms": 6354.3,
+            "peak_vram_mib": 4785,
+            "vram_minus_base_mib": 4782
+          }
+        ]
+      },
+      {
+        "kind": "ABORTED",
+        "reason": "approaching 600s timeout"
+      }
+    ]
+  },
+  {
+    "label": "L4",
+    "device": "NVIDIA L4",
+    "sm": "8.9",
+    "total_vram_mib": 22563,
+    "wall_s": 365.5,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 67.39511291299999,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 24,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 59.096667865000015,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 75.5,
+            "prefill_tok_s": 8996.2,
+            "ttft_ms": 113.8,
+            "peak_vram_mib": 7545,
+            "vram_minus_base_mib": 7542
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 520.8,
+            "prefill_tok_s": 11197.0,
+            "ttft_ms": 731.6,
+            "peak_vram_mib": 7701,
+            "vram_minus_base_mib": 7698
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 737.0,
+            "prefill_tok_s": 11326.1,
+            "ttft_ms": 2893.1,
+            "peak_vram_mib": 7701,
+            "vram_minus_base_mib": 7698
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-int8",
+        "rc": 1,
+        "wall_s": 42.04351587899998,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 12,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-int8",
+        "rc": 0,
+        "wall_s": 60.53875167799998,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 106.2,
+            "prefill_tok_s": 11996.2,
+            "ttft_ms": 85.4,
+            "peak_vram_mib": 6827,
+            "vram_minus_base_mib": 6824
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 792.4,
+            "prefill_tok_s": 13982.3,
+            "ttft_ms": 585.9,
+            "peak_vram_mib": 6983,
+            "vram_minus_base_mib": 6980
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 505.0,
+            "prefill_tok_s": 14134.0,
+            "ttft_ms": 2318.4,
+            "peak_vram_mib": 6983,
+            "vram_minus_base_mib": 6980
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-w4",
+        "rc": 1,
+        "wall_s": 75.09117286700004,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 14,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-w4",
+        "rc": 0,
+        "wall_s": 61.001125116000026,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 154.8,
+            "prefill_tok_s": 8517.7,
+            "ttft_ms": 120.2,
+            "peak_vram_mib": 6597,
+            "vram_minus_base_mib": 6594
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 371.1,
+            "prefill_tok_s": 10201.2,
+            "ttft_ms": 803.0,
+            "peak_vram_mib": 6721,
+            "vram_minus_base_mib": 6718
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 751.9,
+            "prefill_tok_s": 10286.2,
+            "ttft_ms": 3185.6,
+            "peak_vram_mib": 6721,
+            "vram_minus_base_mib": 6718
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "A10G",
+    "device": "NVIDIA A10",
+    "sm": "8.6",
+    "total_vram_mib": 22588,
+    "wall_s": 251.9,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 47.524521996000004,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 24,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 40.032286885000005,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 105.4,
+            "prefill_tok_s": 10885.6,
+            "ttft_ms": 94.1,
+            "peak_vram_mib": 7595,
+            "vram_minus_base_mib": 7592
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 767.2,
+            "prefill_tok_s": 13090.6,
+            "ttft_ms": 625.8,
+            "peak_vram_mib": 7751,
+            "vram_minus_base_mib": 7748
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 985.5,
+            "prefill_tok_s": 13258.4,
+            "ttft_ms": 2471.5,
+            "peak_vram_mib": 7751,
+            "vram_minus_base_mib": 7748
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-int8",
+        "rc": 1,
+        "wall_s": 27.356642843999992,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 12,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-int8",
+        "rc": 0,
+        "wall_s": 44.36259025199999,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 142.3,
+            "prefill_tok_s": 10822.3,
+            "ttft_ms": 94.6,
+            "peak_vram_mib": 6865,
+            "vram_minus_base_mib": 6862
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1084.6,
+            "prefill_tok_s": 15304.7,
+            "ttft_ms": 535.3,
+            "peak_vram_mib": 7021,
+            "vram_minus_base_mib": 7018
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 620.1,
+            "prefill_tok_s": 15343.9,
+            "ttft_ms": 2135.6,
+            "peak_vram_mib": 7021,
+            "vram_minus_base_mib": 7018
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-w4",
+        "rc": 1,
+        "wall_s": 50.288211284,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 14,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-w4",
+        "rc": 0,
+        "wall_s": 42.05293446100001,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 198.2,
+            "prefill_tok_s": 9750.1,
+            "ttft_ms": 105.0,
+            "peak_vram_mib": 6649,
+            "vram_minus_base_mib": 6646
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 384.0,
+            "prefill_tok_s": 11831.7,
+            "ttft_ms": 692.4,
+            "peak_vram_mib": 6773,
+            "vram_minus_base_mib": 6770
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 921.5,
+            "prefill_tok_s": 12039.3,
+            "ttft_ms": 2721.7,
+            "peak_vram_mib": 6773,
+            "vram_minus_base_mib": 6770
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "A100-40GB",
+    "device": "NVIDIA A100-SXM4-40GB",
+    "sm": "8.0",
+    "total_vram_mib": 40441,
+    "wall_s": 285.3,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 57.964285411,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 24,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 43.83644328999999,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 161.6,
+            "prefill_tok_s": 13591.0,
+            "ttft_ms": 75.3,
+            "peak_vram_mib": 12030,
+            "vram_minus_base_mib": 12026
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1223.1,
+            "prefill_tok_s": 32918.7,
+            "ttft_ms": 248.9,
+            "peak_vram_mib": 12422,
+            "vram_minus_base_mib": 12418
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 4369.6,
+            "prefill_tok_s": 34327.8,
+            "ttft_ms": 954.6,
+            "peak_vram_mib": 12422,
+            "vram_minus_base_mib": 12418
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-int8",
+        "rc": 1,
+        "wall_s": 36.361554309,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 12,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-int8",
+        "rc": 0,
+        "wall_s": 42.470795108999994,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 173.7,
+            "prefill_tok_s": 13517.6,
+            "ttft_ms": 75.8,
+            "peak_vram_mib": 11288,
+            "vram_minus_base_mib": 11284
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1341.8,
+            "prefill_tok_s": 37582.4,
+            "ttft_ms": 218.0,
+            "peak_vram_mib": 11696,
+            "vram_minus_base_mib": 11692
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 4535.4,
+            "prefill_tok_s": 38914.0,
+            "ttft_ms": 842.1,
+            "peak_vram_mib": 11696,
+            "vram_minus_base_mib": 11692
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-w4",
+        "rc": 1,
+        "wall_s": 62.712216713000004,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 14,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-w4",
+        "rc": 0,
+        "wall_s": 41.73462465699998,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 204.9,
+            "prefill_tok_s": 12470.9,
+            "ttft_ms": 82.1,
+            "peak_vram_mib": 11084,
+            "vram_minus_base_mib": 11080
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 627.6,
+            "prefill_tok_s": 30580.3,
+            "ttft_ms": 267.9,
+            "peak_vram_mib": 11460,
+            "vram_minus_base_mib": 11456
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 2383.2,
+            "prefill_tok_s": 32041.8,
+            "ttft_ms": 1022.7,
+            "peak_vram_mib": 11460,
+            "vram_minus_base_mib": 11456
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "A100-80GB",
+    "device": "NVIDIA A100-SXM4-80GB",
+    "sm": "8.0",
+    "total_vram_mib": 81153,
+    "wall_s": 470.4,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 93.371341085,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 24,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 101.17658057000001,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 166.3,
+            "prefill_tok_s": 9085.6,
+            "ttft_ms": 112.7,
+            "peak_vram_mib": 22074,
+            "vram_minus_base_mib": 22070
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1340.8,
+            "prefill_tok_s": 34435.6,
+            "ttft_ms": 237.9,
+            "peak_vram_mib": 23058,
+            "vram_minus_base_mib": 23054
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 4416.9,
+            "prefill_tok_s": 37055.7,
+            "ttft_ms": 884.3,
+            "peak_vram_mib": 23078,
+            "vram_minus_base_mib": 23074
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-int8",
+        "rc": 1,
+        "wall_s": 62.954508747000006,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 12,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-int8",
+        "rc": 0,
+        "wall_s": 68.38105416999997,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 178.4,
+            "prefill_tok_s": 9172.7,
+            "ttft_ms": 111.6,
+            "peak_vram_mib": 21404,
+            "vram_minus_base_mib": 21400
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1393.8,
+            "prefill_tok_s": 39900.2,
+            "ttft_ms": 205.3,
+            "peak_vram_mib": 22388,
+            "vram_minus_base_mib": 22384
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 4732.6,
+            "prefill_tok_s": 41914.1,
+            "ttft_ms": 781.8,
+            "peak_vram_mib": 22408,
+            "vram_minus_base_mib": 22404
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-w4",
+        "rc": 1,
+        "wall_s": 84.77950358300001,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 14,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-w4",
+        "rc": 0,
+        "wall_s": 59.70032774800001,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 204.9,
+            "prefill_tok_s": 12211.2,
+            "ttft_ms": 83.9,
+            "peak_vram_mib": 21108,
+            "vram_minus_base_mib": 21104
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 638.0,
+            "prefill_tok_s": 33331.2,
+            "ttft_ms": 245.8,
+            "peak_vram_mib": 21996,
+            "vram_minus_base_mib": 21992
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 2421.0,
+            "prefill_tok_s": 35389.6,
+            "ttft_ms": 925.9,
+            "peak_vram_mib": 22016,
+            "vram_minus_base_mib": 22012
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "L40S",
+    "device": "NVIDIA L40S",
+    "sm": "8.9",
+    "total_vram_mib": 45458,
+    "wall_s": 210.1,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 45.757670333,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 24,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 32.71128757300001,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 171.3,
+            "prefill_tok_s": 23364.1,
+            "ttft_ms": 43.8,
+            "peak_vram_mib": 13219,
+            "vram_minus_base_mib": 13216
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1090.1,
+            "prefill_tok_s": 39156.5,
+            "ttft_ms": 209.2,
+            "peak_vram_mib": 13611,
+            "vram_minus_base_mib": 13608
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 4150.0,
+            "prefill_tok_s": 40806.2,
+            "ttft_ms": 803.0,
+            "peak_vram_mib": 13611,
+            "vram_minus_base_mib": 13608
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-int8",
+        "rc": 1,
+        "wall_s": 26.638700659999998,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 12,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-int8",
+        "rc": 0,
+        "wall_s": 30.676838031000003,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 200.6,
+            "prefill_tok_s": 26308.1,
+            "ttft_ms": 38.9,
+            "peak_vram_mib": 12479,
+            "vram_minus_base_mib": 12476
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1511.3,
+            "prefill_tok_s": 46750.7,
+            "ttft_ms": 175.2,
+            "peak_vram_mib": 12887,
+            "vram_minus_base_mib": 12884
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 5069.0,
+            "prefill_tok_s": 48068.1,
+            "ttft_ms": 681.7,
+            "peak_vram_mib": 12887,
+            "vram_minus_base_mib": 12884
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-w4",
+        "rc": 1,
+        "wall_s": 44.36980698299999,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 14,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-w4",
+        "rc": 0,
+        "wall_s": 29.92603308300002,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 287.9,
+            "prefill_tok_s": 21725.3,
+            "ttft_ms": 47.1,
+            "peak_vram_mib": 12265,
+            "vram_minus_base_mib": 12262
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 762.8,
+            "prefill_tok_s": 36196.3,
+            "ttft_ms": 226.3,
+            "peak_vram_mib": 12641,
+            "vram_minus_base_mib": 12638
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 2943.5,
+            "prefill_tok_s": 37836.1,
+            "ttft_ms": 866.1,
+            "peak_vram_mib": 12641,
+            "vram_minus_base_mib": 12638
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "H100",
+    "device": "NVIDIA H100 80GB HBM3",
+    "sm": "9.0",
+    "total_vram_mib": 81079,
+    "wall_s": 293.0,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 66.029514156,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 24,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 42.44040090199999,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 229.7,
+            "prefill_tok_s": 23874.5,
+            "ttft_ms": 42.9,
+            "peak_vram_mib": 22030,
+            "vram_minus_base_mib": 22026
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1788.1,
+            "prefill_tok_s": 71689.7,
+            "ttft_ms": 114.3,
+            "peak_vram_mib": 23014,
+            "vram_minus_base_mib": 23010
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 6569.2,
+            "prefill_tok_s": 74109.0,
+            "ttft_ms": 442.2,
+            "peak_vram_mib": 23034,
+            "vram_minus_base_mib": 23030
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-int8",
+        "rc": 1,
+        "wall_s": 37.201202661999986,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 4,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-int8",
+        "rc": 0,
+        "wall_s": 39.77969532499998,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 217.7,
+            "prefill_tok_s": 18575.3,
+            "ttft_ms": 55.1,
+            "peak_vram_mib": 21350,
+            "vram_minus_base_mib": 21346
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1688.4,
+            "prefill_tok_s": 72974.1,
+            "ttft_ms": 112.3,
+            "peak_vram_mib": 22334,
+            "vram_minus_base_mib": 22330
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 6266.5,
+            "prefill_tok_s": 77428.9,
+            "ttft_ms": 423.2,
+            "peak_vram_mib": 22354,
+            "vram_minus_base_mib": 22350
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-w4",
+        "rc": 1,
+        "wall_s": 61.653876930999985,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 14,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-w4",
+        "rc": 0,
+        "wall_s": 45.681582682,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 261.2,
+            "prefill_tok_s": 23091.3,
+            "ttft_ms": 44.3,
+            "peak_vram_mib": 21042,
+            "vram_minus_base_mib": 21038
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 847.6,
+            "prefill_tok_s": 68392.1,
+            "ttft_ms": 119.8,
+            "peak_vram_mib": 21962,
+            "vram_minus_base_mib": 21958
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 3282.6,
+            "prefill_tok_s": 70992.7,
+            "ttft_ms": 461.6,
+            "peak_vram_mib": 21982,
+            "vram_minus_base_mib": 21978
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "H200",
+    "device": "NVIDIA H200",
+    "sm": "9.0",
+    "total_vram_mib": 143156,
+    "wall_s": 233.9,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 49.135610811,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 24,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 32.640659345,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 241.6,
+            "prefill_tok_s": 24829.8,
+            "ttft_ms": 41.2,
+            "peak_vram_mib": 36766,
+            "vram_minus_base_mib": 36762
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1875.4,
+            "prefill_tok_s": 74318.7,
+            "ttft_ms": 110.2,
+            "peak_vram_mib": 37750,
+            "vram_minus_base_mib": 37746
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 6937.6,
+            "prefill_tok_s": 78268.5,
+            "ttft_ms": 418.7,
+            "peak_vram_mib": 37770,
+            "vram_minus_base_mib": 37766
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-int8",
+        "rc": 1,
+        "wall_s": 30.047606158000008,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 4,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-int8",
+        "rc": 0,
+        "wall_s": 34.529713012000016,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 225.0,
+            "prefill_tok_s": 21549.2,
+            "ttft_ms": 47.5,
+            "peak_vram_mib": 36092,
+            "vram_minus_base_mib": 36088
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1739.1,
+            "prefill_tok_s": 77775.7,
+            "ttft_ms": 105.3,
+            "peak_vram_mib": 37076,
+            "vram_minus_base_mib": 37072
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 6475.4,
+            "prefill_tok_s": 82553.1,
+            "ttft_ms": 396.9,
+            "peak_vram_mib": 37096,
+            "vram_minus_base_mib": 37092
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-w4",
+        "rc": 1,
+        "wall_s": 52.804653656,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 14,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-w4",
+        "rc": 0,
+        "wall_s": 34.76153037399999,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 262.7,
+            "prefill_tok_s": 24472.0,
+            "ttft_ms": 41.8,
+            "peak_vram_mib": 35782,
+            "vram_minus_base_mib": 35778
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 911.7,
+            "prefill_tok_s": 69176.3,
+            "ttft_ms": 118.4,
+            "peak_vram_mib": 36702,
+            "vram_minus_base_mib": 36698
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 3536.8,
+            "prefill_tok_s": 75111.8,
+            "ttft_ms": 436.3,
+            "peak_vram_mib": 36722,
+            "vram_minus_base_mib": 36718
+          }
+        ]
+      }
+    ]
+  }
+]

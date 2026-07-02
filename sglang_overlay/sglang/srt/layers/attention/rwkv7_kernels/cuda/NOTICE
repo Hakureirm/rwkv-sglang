@@ -1,0 +1,42 @@
+RWKV-7 x sglang — vendored CUDA kernels in this directory
+=========================================================
+
+Both .cu files here contain code derived from BlinkDL / Albatross
+(https://github.com/BlinkDL/Albatross), Copyright (c) BlinkDL / Bo Peng, licensed
+under the Apache License, Version 2.0 (see ALBATROSS_LICENSE). Per Apache-2.0 §4(b),
+the derivation + modifications for each file are recorded below.
+
+
+1. rwkv7_fast.cu — fused fp16 decode GEMV
+-----------------------------------------
+Derived from: faster3a_2605/cuda/rwkv7_v3a_ops.{cu,cpp}
+  (`linear_orig_row1_exact4_f16_kernel`).
+Modifications:
+  * Extracted ONLY the row-1 exact GEMV (`gemv_m1`) into a standalone extension with
+    no cublasLt / WMMA dependency. It replaces the r/k/v/o + ffn projection GEMVs on
+    the M==1 (bsz1) decode path, opt-in via RWKV_FAST_LINEAR=1 (default off). No LoRA
+    kernel is vendored (the LoRA down/up projections use sglang's own ReplicatedLinear).
+  * fp32-accumulate; built WITHOUT --use_fast_math (IEEE arithmetic, no FTZ / approx
+    transcendentals). Deterministic per-block reduction (no cross-block atomic).
+
+
+2. rwkv7_sparse_cmix.cu — sparse sqrelu FFN value-projection
+-----------------------------------------------------------
+Derived from: faster3b_2606/cuda/rwkv7_mega_ops_260602.cu
+  (`cmix_sparse_down_relu_one_vtile_hfma2_split2_kernel`).
+Modifications:
+  * Kept albatross's per-tile ballot/popc compaction of the nonzero relu(k)^2 rows
+    (which skips ~9/10 of the value-weight reads); wired opt-in via RWKV_SPARSE_FFN=1
+    (default off) for the M==1 (bsz1) decode path.
+  * Replaced albatross's half2 hfma2 accumulation with fp32 register accumulation +
+    an fp32 output buffer; the kernel takes the RAW key preactivation and applies
+    relu()^2 itself (fusing the square into the load).
+  * Accuracy: skipping exact-zero rows is bit-exact; the cross-inter-tile combine uses
+    a float atomicAdd (order-nondeterministic to ~1 ULP, cuBLAS split-K class — not a
+    run-to-run bit guarantee). Passes the greedy-EXACT + verify_batch gates.
+
+
+Verification of both: bench/verify_{m1d,batch,fast_linear,sparse_cmix}.py
+(0.1B/1.5B/7.2B, cuda-graph). Honest gains + design in docs/design/m6-sparse-ffn.md,
+docs/findings/0015. The WKV recurrence itself is our own kernel (wkv_recurrent.py, not
+in this dir) and keeps fp32 state.

@@ -1,0 +1,145 @@
+{
+  "results": {
+    "lambada_openai_local": {
+      "name": "lambada_openai_local",
+      "alias": "lambada_openai_local",
+      "sample_len": 5153,
+      "perplexity,none": 4.750404754167449,
+      "perplexity_stderr,none": 0.10749448347061881,
+      "acc,none": 0.6708713370851931,
+      "acc_stderr,none": 0.006546580975553114
+    }
+  },
+  "group_subtasks": {},
+  "configs": {
+    "lambada_openai_local": {
+      "task": "lambada_openai_local",
+      "dataset_path": "parquet",
+      "dataset_kwargs": {
+        "data_files": {
+          "test": "/home/user/rwkv-vllm/bench/fixtures/lambada_openai/test.parquet"
+        }
+      },
+      "test_split": "test",
+      "doc_to_text": "{{text.split(' ')[:-1]|join(' ')}}",
+      "doc_to_target": "{{' '+text.split(' ')[-1]}}",
+      "unsafe_code": false,
+      "description": "",
+      "target_delimiter": " ",
+      "fewshot_delimiter": "\n\n",
+      "fewshot_config": {
+        "sampler": "default",
+        "split": null,
+        "process_docs": null,
+        "fewshot_indices": null,
+        "samples": null,
+        "doc_to_text": "{{text.split(' ')[:-1]|join(' ')}}",
+        "doc_to_choice": null,
+        "doc_to_target": "{{' '+text.split(' ')[-1]}}",
+        "gen_prefix": null,
+        "fewshot_delimiter": "\n\n",
+        "target_delimiter": " "
+      },
+      "num_fewshot": 0,
+      "metric_list": [
+        {
+          "metric": "perplexity",
+          "aggregation": "perplexity",
+          "higher_is_better": false
+        },
+        {
+          "metric": "acc",
+          "aggregation": "mean",
+          "higher_is_better": true
+        }
+      ],
+      "output_type": "loglikelihood",
+      "repeats": 1,
+      "should_decontaminate": false,
+      "metadata": {
+        "version": 1.0,
+        "model": "rwkv",
+        "base_url": "http://127.0.0.1:30000/v1/completions",
+        "tokenizer": "/home/user/rwkv_models/rwkv7-1.5b-fla",
+        "tokenizer_backend": "huggingface",
+        "tokenized_requests": true,
+        "trust_remote_code": true,
+        "num_concurrent": 16,
+        "max_retries": 3,
+        "config_source": "bench/lmeval_tasks/lambada_openai_local.yaml"
+      }
+    }
+  },
+  "versions": {
+    "lambada_openai_local": 1.0
+  },
+  "n-shot": {
+    "lambada_openai_local": 0
+  },
+  "higher_is_better": {
+    "lambada_openai_local": {
+      "perplexity": false,
+      "acc": true
+    }
+  },
+  "n-samples": {
+    "lambada_openai_local": {
+      "original": 5153,
+      "effective": 5153
+    }
+  },
+  "config": {
+    "model": "local-completions",
+    "model_args": {
+      "model": "rwkv",
+      "base_url": "http://127.0.0.1:30000/v1/completions",
+      "tokenizer": "/home/user/rwkv_models/rwkv7-1.5b-fla",
+      "tokenizer_backend": "huggingface",
+      "tokenized_requests": true,
+      "trust_remote_code": true,
+      "num_concurrent": 16,
+      "max_retries": 3
+    },
+    "batch_size": 1,
+    "batch_sizes": [],
+    "device": "cuda:0",
+    "use_cache": null,
+    "limit": null,
+    "bootstrap_iters": 100000,
+    "gen_kwargs": {},
+    "random_seed": 0,
+    "numpy_seed": 1234,
+    "torch_seed": 1234,
+    "fewshot_seed": 1234
+  },
+  "git_hash": null,
+  "date": 1782878841.2245505,
+  "pretty_env_info": "PyTorch version: 2.12.1+cu130\nIs debug build: False\nCUDA used to build PyTorch: 13.0\nROCM used to build PyTorch: N/A\n\nOS: Ubuntu 22.04.3 LTS (x86_64)\nGCC version: (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0\nClang version: Could not collect\nCMake version: Could not collect\nLibc version: glibc-2.35\n\nPython version: 3.10.12 (main, Mar  3 2026, 11:56:32) [GCC 11.4.0] (64-bit runtime)\nPython platform: Linux-5.15.0-177-generic-x86_64-with-glibc2.35\nIs CUDA available: False\nCUDA runtime version: 12.9.41\nCUDA_MODULE_LOADING set to: N/A\nGPU models and configuration: GPU 0: NVIDIA GeForce RTX 3090\nNvidia driver version: 575.51.03\ncuDNN version: Could not collect\nIs XPU available: False\nHIP runtime version: N/A\nMIOpen runtime version: N/A\nIs XNNPACK available: True\nCaching allocator config: N/A\n\nCPU:\nArchitecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           46 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  40\nOn-line CPU(s) list:                     0-39\nVendor ID:                               GenuineIntel\nModel name:                              Intel(R) Xeon(R) CPU E5-2673 v4 @ 2.30GHz\nCPU family:                              6\nModel:                                   79\nThread(s) per core:                      2\nCore(s) per socket:                      20\nSocket(s):                               1\nStepping:                                1\nBogoMIPS:                                4599.99\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq vmx ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault invpcid_single pti ssbd ibrs ibpb stibp tpr_shadow vnmi flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm rdseed adx smap xsaveopt arat umip md_clear arch_capabilities\nVirtualization:                          VT-x\nHypervisor vendor:                       KVM\nVirtualization type:                     full\nL1d cache:                               640 KiB (20 instances)\nL1i cache:                               640 KiB (20 instances)\nL2 cache:                                5 MiB (20 instances)\nL3 cache:                                50 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-39\nVulnerability Gather data sampling:      Not affected\nVulnerability Indirect target selection: Mitigation; Aligned branch/return thunks\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Mitigation; PTE Inversion; VMX flush not necessary, SMT vulnerable\nVulnerability Mds:                       Mitigation; Clear CPU buffers; SMT Host state unknown\nVulnerability Meltdown:                  Mitigation; PTI\nVulnerability Mmio stale data:           Vulnerable: Clear CPU buffers attempted, no microcode; SMT Host state unknown\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Not affected\nVulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl and seccomp\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Retpolines; IBPB conditional; IBRS_FW; STIBP conditional; RSB filling; PBRSB-eIBRS Not affected; BHI Retpoline\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Not affected\nVulnerability Tsx async abort:           Mitigation; Clear CPU buffers; SMT Host state unknown\nVulnerability Vmscape:                   Not affected\n\nVersions of relevant libraries:\n[pip3] Could not collect\n[conda] Could not collect",
+  "transformers_version": "5.12.1",
+  "lm_eval_version": "0.4.12",
+  "upper_git_hash": null,
+  "tokenizer_pad_token": [
+    "<|rwkv_tokenizer_end_of_text|>",
+    "0"
+  ],
+  "tokenizer_eos_token": [
+    "<|rwkv_tokenizer_end_of_text|>",
+    "0"
+  ],
+  "tokenizer_bos_token": [
+    "<|rwkv_tokenizer_end_of_text|>",
+    "0"
+  ],
+  "eot_token_id": 0,
+  "max_length": 2047,
+  "task_hashes": {},
+  "model_source": "local-completions",
+  "model_name": "rwkv",
+  "model_name_sanitized": "rwkv",
+  "system_instruction": null,
+  "system_instruction_sha": null,
+  "fewshot_as_multiturn": null,
+  "chat_template": null,
+  "chat_template_sha": null,
+  "total_evaluation_time_seconds": "171.0440259600291"
+}

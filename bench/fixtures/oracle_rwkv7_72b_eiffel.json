@@ -1,0 +1,38 @@
+{
+  "_comment": "Correctness-gate fixture from bench/oracle_numpy.py (pure-numpy RWKV-7, fp32). sglang impl MUST reproduce greedy_tokens exactly.",
+  "model": "rwkv7-g1g-7.2b-20260523-ctx8192.pth",
+  "arch": {
+    "n_layer": 32,
+    "n_embd": 4096,
+    "n_head": 64,
+    "head_size": 64,
+    "vocab": 65536
+  },
+  "tokenizer": "rwkv_vocab_v20230424 (World trie, via rwkv pip)",
+  "prompt": "\nThe Eiffel Tower is located in the city of",
+  "prompt_tokens": [
+    11,
+    6699,
+    304,
+    25740,
+    109,
+    37480,
+    4600,
+    52151,
+    4596,
+    22590,
+    30449,
+    4706
+  ],
+  "greedy_tokens": [
+    37138,
+    45,
+    44312,
+    47,
+    11,
+    6699,
+    304,
+    25740
+  ],
+  "greedy_text": " Paris, France.\nThe Eiffe"
+}

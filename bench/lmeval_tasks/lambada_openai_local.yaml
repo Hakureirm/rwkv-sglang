@@ -1,0 +1,24 @@
+# lm-eval lambada_openai, but reading the dataset from a LOCAL parquet (the box is
+# air-gapped: no HF hub, and datasets>=5.0 offline hub-cache resolution is broken).
+# Identical task/metric definition to the built-in lambada_openai; only the data
+# source changes. Parquet staged by the setup at bench/fixtures/lambada_openai/test.parquet
+# (downloaded on the Mac from EleutherAI/lambada_openai and rsync'd to the box).
+task: lambada_openai_local
+dataset_path: parquet
+dataset_kwargs:
+  data_files:
+    test: ${FIXTURES}/lambada_openai/test.parquet
+output_type: loglikelihood
+test_split: test
+doc_to_text: "{{text.split(' ')[:-1]|join(' ')}}"
+doc_to_target: "{{' '+text.split(' ')[-1]}}"
+should_decontaminate: false
+metric_list:
+  - metric: perplexity
+    aggregation: perplexity
+    higher_is_better: false
+  - metric: acc
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0

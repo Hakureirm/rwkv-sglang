@@ -1,0 +1,8 @@
+===== 0.1b verify_batch (sparse on) =====
+OVERALL: PASS (all batches exact)
+===== 1.5b verify_batch (sparse on) =====
+OVERALL: PASS (all batches exact)
+=== decode bsz1 base vs sparse (fp16, cuda-graph ON) ===
+1.5B: base 159.9  sparse 188.0  gain +17.6%
+7.2B: base 45.9  sparse 59.1  gain +28.8%
+SPARSE_BENCH_DONE

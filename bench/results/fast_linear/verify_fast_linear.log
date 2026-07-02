@@ -1,0 +1,30 @@
+torch 2.9.1+cu128  gpu NVIDIA GeForce RTX 3090
+building rwkv7_fast extension (JIT)...
+build OK
+
+== gemv_m1 correctness (y[1,N] = x[1,K] @ W[N,K]^T) ==
+  K=  768 N=  768  kernel_vs_fp32 rel=2.45e-04  torch16_vs_fp32 rel=2.45e-04  [OK]
+  K= 2048 N= 2048  kernel_vs_fp32 rel=3.12e-04  torch16_vs_fp32 rel=3.12e-04  [OK]
+  K= 4096 N= 4096  kernel_vs_fp32 rel=4.13e-04  torch16_vs_fp32 rel=4.13e-04  [OK]
+  K= 4096 N=16384  kernel_vs_fp32 rel=3.45e-04  torch16_vs_fp32 rel=3.77e-04  [OK]
+  K=16384 N= 4096  kernel_vs_fp32 rel=3.73e-04  torch16_vs_fp32 rel=6.01e-04  [OK]
+
+== lora_down / lora_up correctness (4-group: w,a,g,v) ==
+  down g0 R=  64  rel=2.70e-04 [OK]
+  down g1 R=  64  rel=2.83e-04 [OK]
+  down g2 R= 128  rel=2.26e-04 [OK]
+  down g3 R=  32  rel=2.21e-04 [OK]
+  up   g0 rel=3.51e-04 [OK]
+  up   g1 rel=3.59e-04 [OK]
+  up   g2 rel=3.85e-04 [OK]
+  up   g3 rel=4.31e-04 [OK]
+
+== micro-bench: gemv_m1 vs torch F.linear at M=1 (decode bsz1 ceiling) ==
+     shape (K x N) |  kernel us |  cublas us | speedup
+      0.1B r/k/v/o |      24.01 |      37.36 |  1.56x  (768x768)
+      1.5B r/k/v/o |      23.72 |      38.24 |  1.61x  (2048x2048)
+      7.2B r/k/v/o |      40.86 |      46.73 |  1.14x  (4096x4096)
+      7.2B ffn key |     153.37 |     172.19 |  1.12x  (4096x16384)
+    7.2B ffn value |     157.87 |     171.46 |  1.09x  (16384x4096)
+
+RESULT: gemv=PASS  lora=PASS

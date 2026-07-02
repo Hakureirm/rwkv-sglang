@@ -1,0 +1,42 @@
+RWKV-7 (Goose) × sglang  (rwkv-sglang)
+Copyright 2026 The rwkv-sglang contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+================================================================================
+This product includes software from, or derived from, the following projects.
+================================================================================
+
+1. sglang  (https://github.com/sgl-project/sglang)
+   Copyright 2023-2026 SGLang Team
+   Licensed under the Apache License, Version 2.0.
+   The deliverable in sglang_overlay/ is a set of new and edited sglang source
+   files that are deployed into an installed sglang; the edited files retain
+   sglang's copyright header and are extended for the RWKV-7 model.
+
+2. RWKV-LM / RWKV-7 reference math  (https://github.com/BlinkDL/RWKV-LM)
+   Copyright (c) BlinkDL / Bo Peng
+   Licensed under the Apache License, Version 2.0.
+   The pure-numpy correctness oracle (bench/oracle_numpy.py) is a clean-room
+   NumPy transcription of the RWKV-7 recurrence (following BlinkDL's upstream
+   rwkv_v7_numpy.py), cross-checked against the BlinkDL `rwkv` pip package. The
+   BlinkDL World tokenizer vocabulary is used for serving.
+   The single-file NumPy formulation also follows Johan Wind's public RWKV
+   write-ups / minimal reference implementations.
+
+3. BlinkDL / Albatross  (https://github.com/BlinkDL/Albatross)
+   Copyright (c) BlinkDL / Bo Peng
+   Licensed under the Apache License, Version 2.0.
+   Two vendored CUDA kernels are derived from Albatross:
+     - rwkv7_kernels/cuda/rwkv7_fast.cu — a fused fp16 decode GEMV (gemv_m1),
+       derived from faster3a_2605 CUDA ops;
+     - rwkv7_kernels/cuda/rwkv7_sparse_cmix.cu — a sparse sqrelu FFN value-proj,
+       derived from faster3b_2606 CUDA ops.
+   See that directory's ALBATROSS_LICENSE + NOTICE for the full per-file attribution
+   and modifications (per Apache-2.0 §4(b)). Albatross is used only as a speed/VRAM
+   baseline and as the source of these two re-attributed kernels; the deliverable
+   does NOT depend on flash-linear-attention (see docs/adr/0004).
+
+================================================================================
+Trademarks: RWKV is a project by Bo Peng (BlinkDL). This is an independent
+integration and is not an official RWKV or sglang release.

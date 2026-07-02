@@ -1,0 +1,18 @@
+torch 2.9.1+cu128  gpu NVIDIA GeForce RTX 3090
+build OK
+
+== sparse_cmix correctness (out[H] = Wt @ relu(k)^2) ==
+  H=  768 inter=  3072 sparsity=0.49  sparse_vs_fp32=2.42e-04  dense16_vs_fp32=2.42e-04  [OK]
+  H= 2048 inter=  8192 sparsity=0.50  sparse_vs_fp32=2.87e-04  dense16_vs_fp32=3.84e-04  [OK]
+  H= 4096 inter= 16384 sparsity=0.50  sparse_vs_fp32=3.82e-04  dense16_vs_fp32=6.35e-04  [OK]
+
+== micro-bench: sparse_cmix vs dense F.linear (value proj, bsz1) ==
+       H x inter | sparsity | sparse us |  dense us | speedup
+    768x3072    |     0.50 |     58.56 |     43.55 |  0.74x
+    768x3072    |     0.97 |     57.86 |     42.99 |  0.74x
+   2048x8192    |     0.50 |     60.39 |     48.45 |  0.80x
+   2048x8192    |     0.97 |     57.65 |     48.00 |  0.83x
+   4096x16384   |     0.50 |     86.38 |    171.15 |  1.98x
+   4096x16384   |     0.96 |     59.99 |    170.90 |  2.85x
+
+RESULT: sparse_cmix=PASS
