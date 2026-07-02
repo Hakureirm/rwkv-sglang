@@ -154,9 +154,10 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
   pool refs; port artifacts + apply guide in `sglang_main_port/`). **Head-parallel TP landed**
   (r/k/v/LoRA-up column-parallel no-gather, o/ffn.value row-parallel allreduce, per-channel
   params/g_norm/WKV state on the local head slice, conv token-shift state full-width;
-  W4/W8 gated tp=1): tp=1 regression 3/3 EXACT; tp=2 gate on 2×GPU = in flight.
-- 🔄 **remaining**: w4/w8 M=64 long-K tiling (cp.async pipeline in flight) · tp=2 runtime gate
-  (2×GPU box, in flight) · PP (implementation in flight) · per-arch small-M cutover (T4) ·
+  W4/W8 gated tp=1): tp=1 regression 3/3 EXACT; **tp=2 AND pp=2 greedy 24/24 EXACT on real
+  2×L4** [[F0019]]. PP: llama-pattern layer partition + v_first in PPProxyTensors; state pool
+  already PP-aware upstream (local-layer alloc + global-id remap) — no backend change.
+- 🔄 **remaining**: w4/w8 M=64 long-K tiling (cp.async pipeline in flight) · tp2/pp2 throughput-tuned numbers + tp4/pp4 + 7.2B multi-GPU · W4/W8 × tp>1 · per-arch small-M cutover (T4) ·
   7.2B GPTQ streamed calibration · fp8 · upstream PR (main port DONE — unblocked).
 
 > Dev model: `sglang_overlay/` (new+edited files) → `scripts/deploy.sh` rsyncs into the
@@ -203,6 +204,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 | F0014 | Clean same-precision standing — raw speed loses, accuracy TIES, VRAM/int8/serving win; CUDA endgame chosen | info | open |
 | F0015 | CUDA endgame result — fused fp16 GEMV greedy-EXACT, +5-9% bsz1 decode @1.5B/7.2B; cuda-graph amortizes the eager win; mega-kernel to match albatross DECLINED | info | open |
 | F0016 | Serving-scale measured — ~50× concurrency throughput at flat VRAM; context-invariant memory (O(1)-state wedge) | info | open |
+| F0019 | TP (head-parallel) + PP (layer partition, v_first proxy plumbing) — both greedy-EXACT 24/24 on real 2×L4; tp=1/pp=1 zero regression | info | open |
 | F0018 | Hand-written weight-only int8 (w8a16) — greedy-EXACT 24/24; ≥fp16 at every bsz≤32 (1.02–1.37×); runs on every arch (JIT; vs cutlass w8a8 sm80–90 only) | info | open |
 | F0017 | Hand-written weight-only int4 — faster than fp16 at every bsz≤8 (1.04–1.56×); 7.2B: 102.8 tok/s bsz1 (1.29× albatross-fp16), fixture-EXACT, lambada −2.64pt, 9.8GB total; GPTQ 1.5B −3.34pt; M>8 dequant ~0.5× (fused GEMM = endgame) | info | open |
 
