@@ -1,0 +1,9 @@
+[prefill] waiting for lm_eval to finish...
+===== 0.1b fp16 prefill (best config: sparse+fast on) =====
+===== 1.5b fp16 prefill (best config: sparse+fast on) =====
+===== 7.2b fp16 prefill (best config: sparse+fast on) =====
+THROUGHPUT  model=prefill-7.2b  dtype=float16  cuda_graph=ON  radix_cache=OFF
+   1 |          66.9 |         3381.0 |     302.9 |         21826 |      21825
+   8 |         364.0 |         3609.1 |    2269.8 |         22080 |      22079
+  32 |        1186.7 |         3421.7 |    9576.4 |         22080 |      22079
+[prefill] DONE

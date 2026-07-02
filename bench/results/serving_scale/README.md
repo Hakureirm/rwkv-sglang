@@ -109,6 +109,18 @@ representative figure. At `inf` all 500 requests arrive at once → TTFT is queu
 rate-limited to 16 req/s, median TTFT drops to **273 ms** (interactive). These two numbers answer
 different questions than §1/§2 and are reported alongside them, not in place of them.
 
+**Second environment — H100** (same `bench_serving` methodology, 300 prompts, in-container server;
+raw: [`h100_sharegpt.json`](h100_sharegpt.json)):
+
+| request rate | req/s | output tok/s | total tok/s | median TTFT | P99 TTFT | median TPOT |
+|---|---|---|---|---|---|---|
+| `inf` (peak) | 26.33 | 5,590 | **14,245** | 1,425 ms | 1,962 ms | 14.4 ms |
+| 16 req/s | 13.36 | 2,837 | 7,228 | **69 ms** | 220 ms | 8.8 ms |
+
+The same serving stack lifts ~4× from the 3090 to an H100 (total tok/s 3.4k → 14.2k) with
+interactive-grade TTFT (median 69 ms @16 req/s). (Prompt count differs — 300 vs the 3090's 500 —
+noted for exactness; rates and dataset are identical.)
+
 ## Reproduce
 ```bash
 source ~/rwkv_env.sh

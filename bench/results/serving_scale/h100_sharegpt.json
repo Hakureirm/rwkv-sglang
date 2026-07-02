@@ -1,0 +1,41 @@
+{
+  "label": "H100-serving3",
+  "device": "NVIDIA H100 80GB HBM3",
+  "sm": "9.0",
+  "total_vram_mib": 81079,
+  "wall_s": 181.3,
+  "results": [
+    {
+      "kind": "serving",
+      "tag": "1.5b-sharegpt-inf",
+      "rc": 0,
+      "wall_s": 35.00186898300001,
+      "metrics": {
+        "Successful requests": 300.0,
+        "Request throughput": 26.33,
+        "Output token throughput": 5590.16,
+        "Total token throughput": 14245.03,
+        "Median TTFT": 1424.7,
+        "P99 TTFT": 1961.8,
+        "Median TPOT": 14.43,
+        "Median ITL": 5.5
+      }
+    },
+    {
+      "kind": "serving",
+      "tag": "1.5b-sharegpt-r16",
+      "rc": 0,
+      "wall_s": 42.27576463699998,
+      "metrics": {
+        "Successful requests": 300.0,
+        "Request throughput": 13.36,
+        "Output token throughput": 2836.5,
+        "Total token throughput": 7228.05,
+        "Median TTFT": 69.45,
+        "P99 TTFT": 219.67,
+        "Median TPOT": 8.76,
+        "Median ITL": 4.88
+      }
+    }
+  ]
+}

@@ -12,10 +12,12 @@ related: [F0011, F0014, F0015, F0016]
 # Finding F0017: weight-only int4
 
 Goal: 8-bit AND 4-bit quant where VRAM drops and speed is not worse than
-16-bit. The landscape survey ([[project-rwkv-competitive-landscape]]) found **no known RWKV-7
-serving implementation has any working 4-bit** (vllm-rwkv/vkwr: none; hf-adapter: bnb loads but
-decode is slower than fp16 → fails the speed clause). This is the widest-open gap. We built a
-hand-written int4 path — no bitsandbytes, no FLA.
+16-bit. The landscape survey ([[project-rwkv-competitive-landscape]]) found **none of the
+vLLM/sglang/HF framework adaptations had a working 4-bit that meets the speed clause**
+(vllm-rwkv/vkwr: no quant at all; hf-adapter: bnb-4bit loads but decodes slower than fp16).
+4-bit artifacts do exist in other lanes (llama.cpp GGUF Q4_K_M; standalone servers with
+HQQ4/NF4 — speeds unpublished). We built a hand-written int4 path — no bitsandbytes, no FLA —
+targeting the unmet bar: **4-bit that is faster than 16-bit in a serving engine**.
 
 ## What was built
 - **`rwkv7_w4.cu::gemv_w4_m1`** — weight-only group-wise (GROUP=64) symmetric int4 decode GEMV
@@ -87,7 +89,9 @@ input dim is 16384 → 1 GB/layer × 32 layers won't fit 24 GB; needs streamed/C
   functionally-important outlier weights; exactly why AWQ/GPTQ are activation-aware). **GPTQ**
   (activation-aware error feedback; Hessians captured via the `RWKV_CALIB` hook on wikitext,
   `bench/{calib_run,gptq_w4}.py`) recovers **+1.6pt** over RTN → within ~1.2pt of int8, and
-  produces the SAME `.qweight`/`.scale` format (kernel/model unchanged). Further push (act-order
+  produces the SAME `.qweight`/`.scale` format (kernel/model unchanged). **MMLU (2000-sample)**:
+  fp16 0.5235, int8 0.5145 (−0.9), **GPTQ 0.4815 (−4.2)**, RTN 0.4495 (−7.4) — GPTQ +3.2pt over
+  RTN on MMLU too. Further push (act-order
   GPTQ) would need per-column `g_idx` in the kernel (breaks contiguous groups) — deferred.
 
 ## Honest limitations & the endgame
@@ -105,7 +109,11 @@ input dim is 16384 → 1 GB/layer × 32 layers won't fit 24 GB; needs streamed/C
   contiguous-group assumption) or more calibration; deferred as diminishing returns.
 
 ## Net
-The only working, greedy-consistent 4-bit among RWKV-7 serving implementations: faster-than-fp16 at bsz1,
-a real weight-VRAM cut, and GPTQ accuracy within ~1.2pt of int8 — a distinctive 4-bit capability.
+Precisely scoped (2026-07-02 recon): among the **vLLM/sglang/HF framework adaptations** this is the
+only working 4-bit; other RWKV-7 4-bit implementations exist in other lanes (llama.cpp GGUF
+Q4_K_M — CPU/edge; RWKV-Infer HQQ4 and ai00_server NF4 — standalone servers, speeds unpublished,
+and hf-adapter's bnb-4bit is self-reported slower than fp16). As far as measured anywhere, ours is
+the only RWKV-7 4-bit that is **faster than 16-bit at serving batch sizes** (1.03–1.56× through
+bsz 32), via hand-written kernels, with GPTQ accuracy within ~1.2pt of int8.
 Remaining lever: a fused int4 GEMM for M>1 throughput (currently ~0.5× fp16, batch is
 compute-bound), documented honestly.

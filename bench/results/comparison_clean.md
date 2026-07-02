@@ -164,3 +164,29 @@ bf16 = ours default; int8 = `w8a8_int8` (a feature albatross lacks). Ratios vs a
   2. **int8 (a feature albatross lacks)** - as a BONUS (not same-precision), ours-int8 **matches/beats** albatross-fp16 at 7.2B: decode 0.90/1.21/0.88x, prefill 1.21/1.70/1.18x (bsz 1/8/32), with −46% weight bytes (−19% reserved pool) and greedy-exact at 7.2B.
 - **VRAM caveat**: the reserved-pool column reflects `mem_fraction_static` (a tunable budget sglang pre-allocates), not a hard requirement - the deterministic weight table is the real per-dtype floor; albatross's number is its actual allocation.
 
+
+---
+
+## Same-precision prefill vs albatross-fp16 (added 2026-07-02)
+
+Same methodology as the decode table (exclusive RTX 3090, fp16-vs-fp16, 1024-token prompts,
+identical `B*1024/TTFT` definition on both sides; albatross values from `albatross_3090.md` §5,
+ours = best config with the opt-in kernels; raw: `clean/seq_rerun.log`, `clean/prefill_session.log`):
+
+| model | bsz | ours prefill tok/s | albatross prefill tok/s | ours/albatross |
+|---|---|---|---|---|
+| 0.1B | 1 | 17,722 | 63,735 | 0.28× |
+| 0.1B | 8 | 38,096 | 190,733 | 0.20× |
+| 0.1B | 32 | 38,499 | 235,657 | 0.16× |
+| 1.5B | 1 | 9,654 | 15,200 | 0.64× |
+| 1.5B | 8 | 14,246 | 21,500 | 0.66× |
+| 1.5B | 32 | 12,368 | 20,721 | 0.60× |
+| 7.2B | 1 | 3,381 | 4,072 | **0.83×** |
+| 7.2B | 8 | 3,609 | 4,290 | **0.84×** |
+| 7.2B | 32 | 3,422 | 4,017 | **0.85×** |
+
+**Honest reading:** albatross leads prefill at every size — its prefill path is hand-tuned
+tensor-core WMMA GEMM + fused ops, ours is cuBLAS + the triton chunked WKV. The gap follows the
+same pattern as decode: it closes with model size (7.2B **0.83–0.85×**, i.e. within ~15–17%)
+and is widest on the launch-bound 0.1B. Serving-side context: albatross prefills a static batch
+only; our prefill runs inside dynamic batching + chunked prefill (48/48-exact gate).

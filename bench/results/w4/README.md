@@ -73,16 +73,18 @@ model serves on a 16 GB Turing card with more than half the VRAM to spare.
 
 7.2B GPTQ deferred (ffn.value Hessian = 16384² × fp32 = 1 GB/layer × 32 — needs streamed accumulation).
 
-## Accuracy (lambada_openai, full 5153, lm-eval local-completions)
-| model | acc | Δ vs bf16 |
-|---|---|---|
-| bf16 baseline | 0.6724 | — |
-| int8 (w8a8) | 0.6509 | −2.15 |
-| **w4 GPTQ g64** (calibrated) | **0.6390** | **−3.34** |
-| w4 RTN sym g64 (calibration-free best) | 0.6229 | −4.95 |
-| w4 RTN g128 | 0.6158 | −5.66 |
-| w4 MSE-clip g64 | 0.6113 | −6.11 |
-| w4 MSE-clip g128 | 0.5880 | −8.44 |
+## Accuracy (1.5B; lambada full 5153 + MMLU 2000-sample; lm-eval local-completions)
+| model | lambada acc | Δ | MMLU acc | Δ |
+|---|---|---|---|---|
+| fp16/bf16 baseline | 0.6724 | — | 0.5235 | — |
+| int8 (w8a8) | 0.6509 | −2.15 | 0.5145 | −0.9 |
+| **w4 GPTQ g64** (calibrated) | **0.6390** | **−3.34** | **0.4815** | **−4.2** |
+| w4 RTN sym g64 (calibration-free best) | 0.6229 | −4.95 | 0.4495 | −7.4 |
+| w4 RTN g128 | 0.6158 | −5.66 | — | |
+| w4 MSE-clip g64 | 0.6113 | −6.11 | — | |
+| w4 MSE-clip g128 | 0.5880 | −8.44 | — | |
+
+GPTQ recovers **+1.6pt lambada / +3.2pt MMLU** over RTN. (MMLU raw: `../clean/seq_rerun.log`.)
 
 **GPTQ** (activation-aware error feedback; Hessians from wikitext calibration via the `RWKV_CALIB`
 hook, `bench/{calib_run,gptq_w4}.py`) recovers **+1.6pt** over RTN → within ~1.2pt of int8, same
