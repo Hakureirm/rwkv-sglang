@@ -139,6 +139,12 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
   fp16) · 7.2B int4 measured (102.8 tok/s bsz1, EXACT 8/8, lambada 0.7161, 9.8 GB — and verified
   live on a real 16 GB T4) · T4-int8 diagnosed (cutlass int8 needs sm80+, "Error Internal" @sm75)
   · T4 fp16 baseline (24/24 EXACT; fp16≈bf16 speed on T4) · CONTRIBUTING.md.
+- ✅ **M8 weight-only int8 (w8a16)** [[F0018]] (2026-07-02): `rwkv7_w8.cu` mirrors the w4 family
+  (gemv_m1 + gemm_small bit-identical rows + dequant); **greedy 24/24 EXACT** (lossless in
+  practice, matrix err 5.9e-3); e2e 1.5B **1.37/1.31/1.27/1.06× fp16 at bsz 1/2/4/8** (227/392/
+  732/1181 tok/s), bsz32 0.65× (dequant fallback — w8 TC tile = follow-up); VRAM 8502 vs 9152;
+  checkpoint 1.8 vs 2.9 GB; runs on EVERY arch (JIT), unlike cutlass w8a8 (sm80–90). `RWKV_W8=1`,
+  quantizer `bench/quant_w4.py --bits 8`.
 - 🔄 **remaining**: v0.1.0 tag + release notes (drafted, `scratchpad/release_notes_v0.1.0.md`) ·
   int4 fused tensor-core GEMM for M>8 · per-arch small-M cutover (T4 crossover earlier than 3090) ·
   fp8 · (stretch) time-mix mega-fusion · TP/PP · upstream PR.
@@ -187,6 +193,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 | F0014 | Clean same-precision standing — raw speed loses, accuracy TIES, VRAM/int8/serving win; CUDA endgame chosen | info | open |
 | F0015 | CUDA endgame result — fused fp16 GEMV greedy-EXACT, +5-9% bsz1 decode @1.5B/7.2B; cuda-graph amortizes the eager win; mega-kernel to match albatross DECLINED | info | open |
 | F0016 | Serving-scale measured — ~50× concurrency throughput at flat VRAM; context-invariant memory (O(1)-state wedge) | info | open |
+| F0018 | Hand-written weight-only int8 (w8a16) — greedy-EXACT 24/24; 1.06–1.37× fp16 @bsz≤8 e2e; runs on every arch (JIT; vs cutlass w8a8 sm80–90 only) | info | open |
 | F0017 | Hand-written weight-only int4 — faster than fp16 at every bsz≤8 (1.04–1.56×); 7.2B: 102.8 tok/s bsz1 (1.29× albatross-fp16), fixture-EXACT, lambada −2.64pt, 9.8GB total; GPTQ 1.5B −3.34pt; M>8 dequant ~0.5× (fused GEMM = endgame) | info | open |
 
 ## Environment (single source of truth)

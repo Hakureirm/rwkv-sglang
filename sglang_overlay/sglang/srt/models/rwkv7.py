@@ -94,6 +94,12 @@ _SPARSE_FFN = os.environ.get("RWKV_SPARSE_FFN", "0") == "1"
 # produced by bench/quant_w4.py (carries .qweight/.scale instead of .weight). Default OFF.
 _W4 = os.environ.get("RWKV_W4", "0") == "1"
 
+# M8: weight-only int8 (w8a16) — same hand-written kernel family as w4 but 8-bit:
+# near-lossless (per-group int8 RTN), faster than fp16 at small M (1/2 the weight
+# bytes), and — unlike the cutlass w8a8 path (sm80–90 only) — JIT-builds and runs on
+# EVERY arch (Turing→Blackwell). Checkpoint from `bench/quant_w4.py --bits 8`.
+_W8 = os.environ.get("RWKV_W8", "0") == "1"
+
 # M7 calibration: capture per-projection input Hessians (X^T X) for GPTQ. Env-gated,
 # zero cost when off. Run the fp16 model (RWKV_W4 off) through calibration prompts with
 # RWKV_CALIB=1 + RWKV_CALIB_OUT=<dir>; Hessians dump to disk (dual trigger: token-count
@@ -183,11 +189,47 @@ class W4Linear(nn.Module):
         return torch.nn.functional.linear(x, w)
 
 
+class W8Linear(nn.Module):
+    """Weight-only group-wise symmetric int8 (w8a16) bias-free projection — the 8-bit
+    sibling of W4Linear (same dispatch shape: M==1 GEMV / 2<=M<=8 small-GEMM /
+    M>8 dequant->cuBLAS). Near-lossless; runs on every arch (JIT, no cutlass)."""
+
+    def __init__(self, in_features: int, out_features: int, group: int = w4_linear.GROUP):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.group = group
+        self.register_buffer(
+            "qweight", torch.empty(out_features, in_features, dtype=torch.int8),
+            persistent=True)
+        self.register_buffer(
+            "scale", torch.empty(out_features, in_features // group, dtype=torch.float16),
+            persistent=True)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        M = x.shape[0]
+        if (
+            x.dtype == torch.float16
+            and (x.shape[-1] % self.group) == 0
+            and w4_linear.w8_available()
+        ):
+            if M == 1:
+                return w4_linear.gemv_w8_m1(x, self.qweight, self.scale)
+            if 2 <= M <= 8 and (self.out_features % 2) == 0:
+                return w4_linear.gemm_w8_small(x, self.qweight, self.scale)
+        w = w4_linear.dequant_w8(self.qweight, self.scale, self.group).to(x.dtype)
+        return torch.nn.functional.linear(x, w)
+
+
 def _make_proj(in_f: int, out_f: int, quant_config, prefix: str):
-    """A bias-free projection: W4Linear when RWKV_W4 is on, else the quant-aware
-    ReplicatedLinear (unquantized / int8)."""
-    m = W4Linear(in_f, out_f) if _W4 else ReplicatedLinear(
-        in_f, out_f, bias=False, quant_config=quant_config, prefix=prefix)
+    """A bias-free projection: W4Linear under RWKV_W4, W8Linear under RWKV_W8, else the
+    quant-aware ReplicatedLinear (unquantized / w8a8-int8)."""
+    if _W4:
+        m = W4Linear(in_f, out_f)
+    elif _W8:
+        m = W8Linear(in_f, out_f)
+    else:
+        m = ReplicatedLinear(in_f, out_f, bias=False, quant_config=quant_config, prefix=prefix)
     m._qname = prefix  # for GPTQ calibration keying (see _calib_accumulate)
     return m
 
@@ -201,7 +243,7 @@ def _proj_gemv(layer, x: torch.Tensor, fast: bool) -> torch.Tensor:
     fast + M==1 + fp16 activation + fp16 contiguous weight + K%4==0 + N even."""
     if _CALIB and getattr(layer, "_qname", None):
         _calib_accumulate(layer._qname, x)
-    if isinstance(layer, W4Linear):
+    if isinstance(layer, (W4Linear, W8Linear)):
         return layer(x)
     if (
         fast
@@ -464,7 +506,7 @@ class Rwkv7FeedForward(nn.Module):
         self._fast = _FAST_LINEAR and (quant_config is None) and fast_linear.available()
         # M6 sparse value-proj: eligible only unquantized (not int8, not W4Linear); the
         # tiled weight is built lazily on the first (eager warmup) forward, once loaded.
-        self._sparse = _SPARSE_FFN and (quant_config is None) and not _W4
+        self._sparse = _SPARSE_FFN and (quant_config is None) and not (_W4 or _W8)
         self._value_tiled = None
 
     def forward(self, forward_batch: ForwardBatch, x: torch.Tensor) -> torch.Tensor:

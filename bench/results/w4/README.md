@@ -1,3 +1,14 @@
+# w4/w8 — hand-written weight-only quantization kernels
+
+## w8 (weight-only int8, w8a16) — greedy-EXACT + faster than fp16 + every arch
+`rwkv7_w8.cu` (gemv_w8_m1 / gemm_w8_small / dequant_w8; `RWKV_W8=1`; quantizer
+`bench/quant_w4.py --bits 8`). 1.5B, RTX 3090: **greedy 24/24 EXACT**; e2e decode vs fp16 =
+**1.37×/1.31×/1.27×/1.06×** at bsz 1/2/4/8 (227.4/391.7/731.9/1180.5 vs 166.5/299.5/574.1/1112.9
+tok/s), bsz32 0.65× (dequant fallback); VRAM 8,502 vs 9,152 MiB; checkpoint 1.8 vs 2.9 GB.
+Standalone kernels 1.17–2.29× vs fp16 cuBLAS at every M∈{1,2,4,8}; rows bit-identical to M=1;
+quant error 5.9e-3 (18× smaller than int4). Unlike cutlass w8a8 (sm80–90 only), JIT-builds on
+every arch. Full write-up: `docs/findings/0018-w8-weight-only.md`; test `bench/verify_w8.py`.
+
 # w4 — hand-written weight-only int4 (4-bit quantization)
 
 Group-wise (GROUP=64) symmetric int4 for the big r/k/v/o + ffn key/value projections, via the

@@ -98,6 +98,73 @@ def gemm_w4_tc(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> t
     return torch.ops.rwkv7_w4.gemm_w4_tc(x.contiguous(), qweight, scale)
 
 
+# ---- weight-only int8 family (rwkv7_w8.cu) — same skeleton, near-lossless accuracy,
+# ---- runs on every arch (no cutlass; JIT per-arch). qweight int8[N,K] + scale[N,K/64].
+_W8_LOADED = False
+_W8_FAILED = False
+
+
+def _ensure_w8_loaded():
+    global _W8_LOADED, _W8_FAILED
+    if _W8_LOADED:
+        return True
+    if _W8_FAILED:
+        return False
+    try:
+        from torch.utils.cpp_extension import load
+
+        cuda_dir = Path(__file__).parent / "cuda"
+        load(
+            name="rwkv7_w8",
+            sources=[str(cuda_dir / "rwkv7_w8.cu")],
+            is_python_module=False,
+            verbose=False,
+            extra_cflags=["-O3"],
+            extra_cuda_cflags=["-O3", "-Xptxas", "-O3"],
+        )
+        try:
+            @torch.library.register_fake("rwkv7_w8::gemv_w8_m1")
+            def _gemv_w8_m1_fake(x, qweight, scale):
+                return x.new_empty((1, qweight.shape[0]))
+
+            @torch.library.register_fake("rwkv7_w8::gemm_w8_small")
+            def _gemm_w8_small_fake(x, qweight, scale):
+                return x.new_empty((x.shape[0], qweight.shape[0]))
+
+            @torch.library.register_fake("rwkv7_w8::dequant_w8")
+            def _dequant_w8_fake(qweight, scale):
+                return scale.new_empty((qweight.shape[0], qweight.shape[1]))
+        except Exception:
+            pass
+        _W8_LOADED = True
+        return True
+    except Exception as e:  # pragma: no cover
+        print(f"[rwkv7_w8] JIT load failed, falling back to torch dequant: {e}")
+        _W8_FAILED = True
+        return False
+
+
+def w8_available() -> bool:
+    return _ensure_w8_loaded()
+
+
+def gemv_w8_m1(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    return torch.ops.rwkv7_w8.gemv_w8_m1(x.contiguous().view(1, -1), qweight, scale)
+
+
+def gemm_w8_small(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    return torch.ops.rwkv7_w8.gemm_w8_small(x.contiguous(), qweight, scale)
+
+
+def dequant_w8(qweight: torch.Tensor, scale: torch.Tensor, group: int = GROUP) -> torch.Tensor:
+    if _ensure_w8_loaded():
+        return torch.ops.rwkv7_w8.dequant_w8(qweight, scale)
+    N, K = qweight.shape
+    NG = K // group
+    w = qweight.view(N, NG, group).to(scale.dtype) * scale[:, :, None]
+    return w.view(N, K)
+
+
 def dequant(qweight: torch.Tensor, scale: torch.Tensor, group: int = GROUP) -> torch.Tensor:
     """Unpack group-wise symmetric int4 -> fp16 weight [N, K] for the M>1 (prefill/
     batched) path -> cuBLAS. Uses the CUDA dequant kernel when built (memory-bound,
