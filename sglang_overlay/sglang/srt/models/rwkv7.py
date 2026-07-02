@@ -174,7 +174,11 @@ class W4Linear(nn.Module):
             # is bit-identical to the M==1 kernel (batch-invariant by construction).
             if 2 <= M <= 8 and (self.out_features % 2) == 0:
                 return w4_linear.gemm_w4_small(x, self.qweight, self.scale)
-        # M>8 / prefill: dequant -> cuBLAS (compute-bound regime; weight read amortized)
+            # medium batched decode: tensor-core GEMM with in-smem int4 dequant
+            # (weight HBM traffic = 1/4 of cuBLAS fp16; wmma fp32 accumulate).
+            if 8 < M <= 64 and (self.out_features % 64) == 0:
+                return w4_linear.gemm_w4_tc(x, self.qweight, self.scale)
+        # M>64 / prefill: dequant -> cuBLAS (compute-bound regime; weight read amortized)
         w = w4_linear.dequant(self.qweight, self.scale, self.group).to(x.dtype)
         return torch.nn.functional.linear(x, w)
 

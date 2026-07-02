@@ -114,9 +114,11 @@ v0.1.0 tag, optional fp8/TP.
   **`gemm_w4_small` (2≤M≤8, one weight read feeds all M rows; every row BIT-identical to the M=1
   kernel, torch.equal-verified)** + `dequant_w4` for M>8; GROUP=64 sym, fp32 accum, cuda-graph
   safe, FakeTensor regs. Offline RTN (`bench/quant_w4.py`) **and GPTQ** (`bench/{calib_run,
-  gptq_w4}.py`, RWKV_CALIB Hessian hook, wikitext). **1.5B: faster than fp16 at EVERY bsz≤8**
-  (bsz1 259 vs 166 = 1.56×, bsz2 1.45×, bsz4 1.35×, bsz8 1153 vs 1113 = 1.04×; bsz32 0.52×
-  dequant fallback — fused tensor-core GEMM = endgame, measured scalar-FMA crossover at M≈8);
+  gptq_w4}.py`, RWKV_CALIB Hessian hook, wikitext). **1.5B: faster than (or ties) fp16 at EVERY
+  bsz≤32** (1.56×/1.45×/1.35×/1.04×/1.17×/**1.03×** at bsz 1/2/4/8/16/32; bsz64 0.77× — M=64
+  long-K ffn shapes, tiling work remains) via 3-kernel dispatch: gemv_w4_m1 + gemm_w4_small
+  (2≤M≤8, rows bit-identical to M=1) + **gemm_w4_tc (8<M≤64: wmma tensor cores, in-smem int4
+  dequant, one weight-dequant per block, deterministic split-K — no atomics)**;
   checkpoint 2.9→1.2 GB, serve VRAM −950 MiB; lambada **GPTQ −3.34pt** (RTN −4.95; int8 −2.15).
   **7.2B (RTN)**: bsz1 **102.8 tok/s = 1.29× albatross-fp16 (79.6, cross-precision), 1.56× ours-fp16
   best (65.7)**; fixture greedy **EXACT 8/8**; lambada **0.7161 vs 0.7425 bf16 (−2.64pt)**;

@@ -29,6 +29,8 @@
 #include <c10/cuda/CUDAException.h>
 #include <torch/library.h>
 #include <cuda_fp16.h>
+#include <mma.h>
+#include <algorithm>
 #include <cstdint>
 
 using dtype = at::Half;
@@ -247,11 +249,201 @@ at::Tensor gemm_w4_small(at::Tensor x, at::Tensor qweight, at::Tensor scale) {
 }
 
 // ---------------------------------------------------------------------------
+// gemm_w4_tc: y[M,N] for 8<M<=64 via TENSOR CORES (wmma m16n16k16, fp32 accum),
+// dequantizing the int4 weight tile to fp16 in shared memory per K-step — no fp16
+// weight copy ever touches HBM, so weight traffic is 1/4 of a cuBLAS fp16 GEMM.
+// K_TILE == GROUP == 64, so each (n, k-tile) has EXACTLY one quant scale (clean).
+// Numerics: fp16 inputs, fp32 accumulators; deterministic per-row reduction order
+// (fixed k-loop + mma structure), independent of batch composition.
+// Layout: y = X[M,K] @ W[N,K]^T. B(k,n) = W[n,k] -> the dequanted smem tile
+// (row-major [N_TILE][K_TILE+pad]) is read as a col_major wmma fragment.
+// ---------------------------------------------------------------------------
+constexpr int TC_M = 16;    // rows per block tile (wmma m)
+constexpr int TC_N = 64;    // output cols per block tile (4 warps x 16)
+constexpr int TC_K = 64;    // k-step == GROUP
+constexpr int TC_KPAD = 8;  // smem padding halfs to dodge bank conflicts
+
+// MT = number of 16-row m-subtiles held in registers (block covers MT*16 rows).
+// The weight tile is dequantized ONCE per block regardless of M — weight HBM traffic
+// stays 1/4 of fp16 for the whole batch (this is where the int4 win comes from).
+template <int MT, bool WritePartial>
+__global__ __launch_bounds__(128, 1) void gemm_w4_tc_kernel(
+    int M, int K, int N, int NG, int k_chunk,
+    const __half* __restrict__ x,       // [M, K]
+    const uint32_t* __restrict__ qw,    // [N, K/8]
+    const __half* __restrict__ scale,   // [N, NG]
+    __half* __restrict__ y,             // [M, N]        (WritePartial=false)
+    float* __restrict__ ws) {           // [Z, M, N] f32 (WritePartial=true; split-K partials)
+#if __CUDA_ARCH__ >= 700
+  using namespace nvcuda;
+  const int n0 = blockIdx.x * TC_N;
+  const int kb = blockIdx.z * k_chunk;                 // this split's K range
+  const int ke = (kb + k_chunk < K) ? kb + k_chunk : K;
+  const int KW = K >> 3;
+  const int lane = threadIdx.x;        // 0..127
+  const int warp = lane >> 5;          // 0..3 -> n-subtile [n0+warp*16, +16)
+
+  __shared__ __half smem_a[MT * TC_M][TC_K + TC_KPAD];
+  __shared__ __half smem_w[TC_N][TC_K + TC_KPAD];
+  __shared__ float smem_c[TC_M][TC_N + TC_KPAD];
+
+  wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc[MT];
+#pragma unroll
+  for (int mt = 0; mt < MT; ++mt) wmma::fill_fragment(acc[mt], 0.0f);
+
+  for (int k0 = kb; k0 < ke; k0 += TC_K) {
+    // ---- stage A tile (MT*16 x 64), zero-padded for m >= M rows ----
+    // 128 threads x 8 halfs x MT rounds = MT*16*64
+#pragma unroll
+    for (int r = 0; r < MT; ++r) {
+      const int elt = (lane + r * 128) * 8;
+      const int am = elt / TC_K;                   // 0..MT*16-1
+      const int ak = elt % TC_K;
+      if (am < M) {
+        const __half* src = x + static_cast<int64_t>(am) * K + k0 + ak;
+#pragma unroll
+        for (int i = 0; i < 8; ++i) smem_a[am][ak + i] = src[i];
+      } else {
+#pragma unroll
+        for (int i = 0; i < 8; ++i) smem_a[am][ak + i] = __float2half(0.0f);
+      }
+    }
+    // ---- stage + dequant W tile (64 x 64) ONCE: 64 rows x 8 words; 512 words ----
+    {
+      const int g = k0 / TC_K;                     // group index for this k-tile
+#pragma unroll
+      for (int r = 0; r < 4; ++r) {
+        const int t = lane + r * 128;              // 0..511
+        const int wn = t >> 3;                     // 0..63
+        const int wk = t & 7;                      // word within row
+        const uint32_t p = qw[static_cast<int64_t>(n0 + wn) * KW + (k0 >> 3) + wk];
+        const float s = __half2float(scale[static_cast<int64_t>(n0 + wn) * NG + g]);
+        __half* dst = &smem_w[wn][wk << 3];
+#pragma unroll
+        for (int i = 0; i < 8; ++i) {
+          int q = (int)((p >> (4 * i)) & 0xF);
+          q -= (q & 8) << 1;
+          dst[i] = __float2half_rn((float)q * s);
+        }
+      }
+    }
+    __syncthreads();
+    // ---- tensor-core MACs: per kk, load b once, drive all MT m-subtiles ----
+#pragma unroll
+    for (int kk = 0; kk < TC_K; kk += 16) {
+      wmma::fragment<wmma::matrix_b, 16, 16, 16, __half, wmma::col_major> b_frag;
+      // B(k,n) = smem_w[n][k]: col_major with ld = row stride of smem_w
+      wmma::load_matrix_sync(b_frag, &smem_w[warp * 16][kk], TC_K + TC_KPAD);
+#pragma unroll
+      for (int mt = 0; mt < MT; ++mt) {
+        wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> a_frag;
+        wmma::load_matrix_sync(a_frag, &smem_a[mt * TC_M][kk], TC_K + TC_KPAD);
+        wmma::mma_sync(acc[mt], a_frag, b_frag, acc[mt]);
+      }
+    }
+    __syncthreads();
+  }
+
+  // ---- epilogue: per m-subtile, acc -> smem (f32) -> global ----
+#pragma unroll
+  for (int mt = 0; mt < MT; ++mt) {
+    wmma::store_matrix_sync(&smem_c[0][warp * 16], acc[mt], TC_N + TC_KPAD, wmma::mem_row_major);
+    __syncthreads();
+    const int elt = lane * 8;
+    const int cm = elt / TC_N;
+    const int cn = elt % TC_N;
+    const int gm = mt * TC_M + cm;
+    if (gm < M) {
+      if (WritePartial) {
+        float* dst = ws + (static_cast<int64_t>(blockIdx.z) * M + gm) * N + n0 + cn;
+#pragma unroll
+        for (int i = 0; i < 8; ++i) dst[i] = smem_c[cm][cn + i];
+      } else {
+        __half* dst = y + static_cast<int64_t>(gm) * N + n0 + cn;
+#pragma unroll
+        for (int i = 0; i < 8; ++i) dst[i] = __float2half_rn(smem_c[cm][cn + i]);
+      }
+    }
+    __syncthreads();
+  }
+#endif
+}
+
+// deterministic split-K reduce: y[i] = sum_z ws[z][i] in fixed z order.
+__global__ void splitk_reduce_kernel(int64_t MN, int Z,
+                                     const float* __restrict__ ws,
+                                     __half* __restrict__ y) {
+  const int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i >= MN) return;
+  float acc = 0.0f;
+  for (int z = 0; z < Z; ++z) acc += ws[static_cast<int64_t>(z) * MN + i];
+  y[i] = __float2half_rn(acc);
+}
+
+// x: [M,K] fp16 (8<M<=64);  qweight: uint8 [N,K/2];  scale: fp16 [N,K/GROUP]. N%64==0, K%64==0.
+at::Tensor gemm_w4_tc(at::Tensor x, at::Tensor qweight, at::Tensor scale) {
+  const int64_t M = x.size(0);
+  const int64_t K = x.size(1);
+  const int64_t N = qweight.size(0);
+  const int64_t NG = K / GROUP;
+  TORCH_CHECK(M >= 1 && M <= 64, "gemm_w4_tc requires 1<=M<=64");
+  TORCH_CHECK((K % TC_K) == 0, "gemm_w4_tc requires K%64==0");
+  TORCH_CHECK((N % TC_N) == 0, "gemm_w4_tc requires N%64==0");
+  TORCH_CHECK(qweight.size(1) == K / 2, "gemm_w4_tc qweight [N,K/2] mismatch");
+  TORCH_CHECK(scale.size(0) == N && scale.size(1) == NG, "gemm_w4_tc scale [N,K/64] mismatch");
+  auto y = at::empty({M, N}, x.options());
+  if (K == 0 || N == 0) return y;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  // split-K: one block covers all M (weight dequant once per block), so grid = N/64
+  // blocks — too few to fill the GPU for small N. Split K until ~256 blocks are in
+  // flight. Deterministic: each split writes an f32 partial; a second kernel reduces
+  // in fixed z order (no atomics).
+  const int64_t nb = N / TC_N;
+  const int splits = static_cast<int>(std::min<int64_t>(
+      std::min<int64_t>((K + TC_K - 1) / TC_K, 8),
+      std::max<int64_t>(1, (256 + nb - 1) / nb)));
+  const auto* xp = reinterpret_cast<const __half*>(x.data_ptr<dtype>());
+  const auto* qp = reinterpret_cast<const uint32_t*>(qweight.data_ptr<uint8_t>());
+  const auto* sp = reinterpret_cast<const __half*>(scale.data_ptr<dtype>());
+  auto* yp = reinterpret_cast<__half*>(y.data_ptr<dtype>());
+  const int mt = static_cast<int>((M + TC_M - 1) / TC_M);  // 1..4 m-subtiles, one block covers all M
+  if (splits == 1) {
+    dim3 grid(N / TC_N, 1, 1);
+    const int kc = static_cast<int>(K);
+    switch (mt) {
+      case 1: gemm_w4_tc_kernel<1, false><<<grid, 128, 0, stream>>>(M, K, N, NG, kc, xp, qp, sp, yp, nullptr); break;
+      case 2: gemm_w4_tc_kernel<2, false><<<grid, 128, 0, stream>>>(M, K, N, NG, kc, xp, qp, sp, yp, nullptr); break;
+      case 3: gemm_w4_tc_kernel<3, false><<<grid, 128, 0, stream>>>(M, K, N, NG, kc, xp, qp, sp, yp, nullptr); break;
+      default: gemm_w4_tc_kernel<4, false><<<grid, 128, 0, stream>>>(M, K, N, NG, kc, xp, qp, sp, yp, nullptr); break;
+    }
+  } else {
+    // k_chunk: multiple of TC_K covering K in `splits` pieces
+    int64_t k_chunk = ((K + splits - 1) / splits + TC_K - 1) / TC_K * TC_K;
+    auto ws = at::empty({splits, M, N}, x.options().dtype(at::kFloat));
+    float* wp = ws.data_ptr<float>();
+    dim3 grid(N / TC_N, 1, splits);
+    const int kc = static_cast<int>(k_chunk);
+    switch (mt) {
+      case 1: gemm_w4_tc_kernel<1, true><<<grid, 128, 0, stream>>>(M, K, N, NG, kc, xp, qp, sp, nullptr, wp); break;
+      case 2: gemm_w4_tc_kernel<2, true><<<grid, 128, 0, stream>>>(M, K, N, NG, kc, xp, qp, sp, nullptr, wp); break;
+      case 3: gemm_w4_tc_kernel<3, true><<<grid, 128, 0, stream>>>(M, K, N, NG, kc, xp, qp, sp, nullptr, wp); break;
+      default: gemm_w4_tc_kernel<4, true><<<grid, 128, 0, stream>>>(M, K, N, NG, kc, xp, qp, sp, nullptr, wp); break;
+    }
+    const int64_t MN = M * N;
+    const int threads = 256;
+    const int64_t blocks = (MN + threads - 1) / threads;
+    splitk_reduce_kernel<<<static_cast<int>(blocks), threads, 0, stream>>>(
+        MN, splits, ws.data_ptr<float>(), yp);
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return y;
+}
+
+// ---------------------------------------------------------------------------
 // dequant_w4: int4 (qweight,scale) -> fp16 weight [N, K]. Memory-bound; used by the
-// M>8 (prefill / large-batch) path which then calls cuBLAS. At large M the GEMM is
-// compute-bound and the weight read is amortized across the batch, so w4 cannot beat
-// fp16 there — the goal is only to MATCH it (req#5 "not slower than 16-bit") while
-// keeping the int4 checkpoint. One fp16 word per thread-iteration; coalesced.
+// M>64 (prefill) path which then calls cuBLAS. At prefill the GEMM is compute-bound
+// and the weight read is amortized across many tokens, so w4 only needs to MATCH
+// fp16 there while keeping the int4 checkpoint. One fp16 word per thread-iteration.
 // ---------------------------------------------------------------------------
 __global__ void dequant_w4_kernel(
     int K, int NG,
@@ -294,10 +486,12 @@ at::Tensor dequant_w4(at::Tensor qweight, at::Tensor scale) {
 TORCH_LIBRARY(rwkv7_w4, m) {
   m.def("gemv_w4_m1(Tensor x, Tensor qweight, Tensor scale) -> Tensor");
   m.def("gemm_w4_small(Tensor x, Tensor qweight, Tensor scale) -> Tensor");
+  m.def("gemm_w4_tc(Tensor x, Tensor qweight, Tensor scale) -> Tensor");
   m.def("dequant_w4(Tensor qweight, Tensor scale) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(rwkv7_w4, CUDA, m) {
   m.impl("gemv_w4_m1", &gemv_w4_m1);
   m.impl("gemm_w4_small", &gemm_w4_small);
+  m.impl("gemm_w4_tc", &gemm_w4_tc);
   m.impl("dequant_w4", &dequant_w4);
 }

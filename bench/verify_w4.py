@@ -153,6 +153,51 @@ def main():
     print("-" * 104)
     print("SMALL-M OK" if small_ok else "SMALL-M FAILED")
 
+    # ---- tensor-core kernel (gemm_w4_tc, 8<M<=64): numerics vs the dequant reference
+    # (wmma fp16-in/fp32-accum) + speed vs fp16 cuBLAS and the dequant+cuBLAS path.
+    print()
+    print(f"{'M':>3} {'K':>6} {'N':>6} | {'vs dequant ref (rel)':>21} | "
+          f"{'fp16 us':>8} {'dq+blas us':>10} {'tc us':>7} {'vs fp16':>8}")
+    print("-" * 104)
+    tc_ok = True
+    for M in (16, 32, 64):
+        for K, N in [(2048, 2048), (4096, 4096), (2048, 8192)]:
+            W = (torch.randn(N, K, device=dev) * 0.02).to(torch.float16)
+            X = (torch.randn(M, K, device=dev)).to(torch.float16)
+            qweight, scale, q_int = quantize_w4(W)
+            qweight = qweight.to(dev); scale = scale.to(dev); q_int = q_int.to(dev)
+
+            y_tc = torch.ops.rwkv7_w4.gemm_w4_tc(X, qweight, scale).float()
+            y_ref = (X.float() @ dequant_ref(q_int, scale).t())
+            rel = ((y_tc - y_ref).norm() / (y_ref.norm() + 1e-9)).item()
+            ok = rel < 2e-3
+            tc_ok &= ok
+
+            Wt = W.t().contiguous()
+            def dq_blas():
+                wq = torch.ops.rwkv7_w4.dequant_w4(qweight, scale)
+                return X @ wq.t()
+            for _ in range(20):
+                _ = X @ Wt; _ = dq_blas()
+                _ = torch.ops.rwkv7_w4.gemm_w4_tc(X, qweight, scale)
+            torch.cuda.synchronize()
+            it = 200
+            t0 = time.perf_counter()
+            for _ in range(it): _ = X @ Wt
+            torch.cuda.synchronize(); fp16_us = (time.perf_counter() - t0) / it * 1e6
+            t0 = time.perf_counter()
+            for _ in range(it): _ = dq_blas()
+            torch.cuda.synchronize(); dq_us = (time.perf_counter() - t0) / it * 1e6
+            t0 = time.perf_counter()
+            for _ in range(it): _ = torch.ops.rwkv7_w4.gemm_w4_tc(X, qweight, scale)
+            torch.cuda.synchronize(); tc_us = (time.perf_counter() - t0) / it * 1e6
+
+            flag = "OK " if ok else "BAD"
+            print(f"{M:>3} {K:>6} {N:>6} | {rel:>17.2e} {flag} | "
+                  f"{fp16_us:>8.1f} {dq_us:>10.1f} {tc_us:>7.1f} {fp16_us / tc_us:>7.2f}x")
+    print("-" * 104)
+    print("TC OK" if tc_ok else "TC FAILED")
+
 
 if __name__ == "__main__":
     main()

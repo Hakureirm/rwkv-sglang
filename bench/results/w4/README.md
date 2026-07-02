@@ -22,8 +22,20 @@ M=1 kernel — `torch.equal`-verified):**
 | 4 | 4096×4096 | BIT-EXACT | **1.79×** | 6.0× |
 | 8 | 4096×4096 | BIT-EXACT | **1.07×** | 3.6× |
 
-M>8 deliberately stays on dequant→cuBLAS: the scalar-FMA kernel scales linearly with M while
-cuBLAS uses tensor cores — measured crossover ≈ M=8.
+**`gemm_w4_tc` (8<M≤64, tensor cores):** wmma m16n16k16 with fp32 accumulators; the int4 weight
+tile is dequantized to fp16 **in shared memory** each K-step (K_TILE == GROUP == 64 → exactly one
+scale per (n, k-tile)), so weight HBM traffic stays 1/4 of a cuBLAS fp16 GEMM; one block covers
+all M rows (weight dequanted once per block) and **deterministic split-K** (f32 partials + a
+fixed-order reduce, no atomics) restores GPU-filling parallelism. Numerics vs the dequant
+reference: rel-err ~2.7e-4 at every shape. Standalone vs fp16 cuBLAS (RTX 3090):
+
+| M | 2048×2048 | 4096×4096 | 2048×8192 |
+|---|---|---|---|
+| 16 | **1.20×** | **1.16×** | **1.23×** |
+| 32 | **1.17×** | 0.81× | 0.86× |
+| 64 | **1.17×** | 0.56× | 0.55× |
+
+M>64 (prefill) stays on dequant→cuBLAS (compute-bound; weight read amortized over many tokens).
 
 ## End-to-end (1.5B, sglang, cuda-graph ON, fp16)
 | bsz | fp16 tok/s | w4 tok/s | w4/fp16 | path |
@@ -32,9 +44,13 @@ cuBLAS uses tensor cores — measured crossover ≈ M=8.
 |   2 |      299.5 | **434.9** | **1.45×** | gemm_w4_small |
 |   4 |      574.1 | **773.2** | **1.35×** | gemm_w4_small |
 |   8 |     1112.9 | **1153.0** | **1.04×** | gemm_w4_small |
-|  32 |     3872.6 |   1997.2 | 0.52× | dequant→cuBLAS (fused GEMM = endgame) |
+|  16 |     2243.3 | **2619.8** | **1.17×** | gemm_w4_tc |
+|  32 |     3872.6 | **3978.2** | **1.03×** | gemm_w4_tc |
+|  64 |     6574.4 |   5064.6 | 0.77× | gemm_w4_tc (M=64 ffn shapes drag — see kernel table) |
 
-**int4 is faster than fp16 at every batch size through 8.**
+**int4 is faster than (or ties) fp16 at every batch size through 32** (1.03–1.56×); bsz64 is
+0.77× (honest — the M=64 long-K ffn shapes lose to tensor-core cuBLAS; further tiling work).
+w4 prefill ≈ 0.95× fp16 (13.3–13.8k vs 14.0–14.4k tok/s).
 
 - Checkpoint: **1.2 GB vs 2.9 GB** fp16 (2.4× at 1.5B; grows with model size — emb/lm_head stay bf16).
 - Serve VRAM (bsz1): **8202 vs 9152 MiB** (−950 MiB at 1.5B).

@@ -67,11 +67,14 @@ transformer's memory grows with batch × context and OOMs long before. Decode st
 **0.88–1.21× albatross-fp16** (decode, bsz 1/8/32 — i.e. a *cross-precision* matchup: our int8
 vs its fp16) while cutting weight bytes **−46%**. A quant path albatross lacks.
 
-**3b. Hand-written int4 beats fp16 at every bsz ≤ 8** — 1.5B decode 1.56×/1.45×/1.35×/**1.04×**
-faster than fp16 at bsz 1/2/4/8 (259/435/773/1153 vs 166/300/574/1113 tok/s). At **7.2B**: bsz1
-**102.8 tok/s = 1.29× albatross-fp16** (79.6; cross-precision), fixture-greedy **EXACT 8/8**,
-lambada 0.7161 vs 0.7425 bf16 (−2.64pt, RTN) — and **verified live on a real 16 GB T4**:
-greedy 8/8 exact, 32.9 tok/s bsz1, peak VRAM **6.7 GB**. Details: [`bench/results/w4/`](bench/results/w4/).
+**3b. Hand-written int4 beats (or ties) fp16 at every bsz ≤ 32** — 1.5B decode
+1.56×/1.45×/1.35×/1.04×/**1.17×/1.03×** vs fp16 at bsz 1/2/4/8/16/32 (259/435/773/1153/2620/3978
+vs 166/300/574/1113/2243/3873 tok/s; bsz64 0.77×, honest), via three kernels: `gemv_w4_m1`,
+`gemm_w4_small` (bit-identical rows), and tensor-core `gemm_w4_tc` (in-smem int4 dequant +
+deterministic split-K). At **7.2B**: bsz1 **102.8 tok/s = 1.29× albatross-fp16** (79.6;
+cross-precision), fixture-greedy **EXACT 8/8**, lambada 0.7161 vs 0.7425 bf16 (−2.64pt, RTN) —
+and **verified live on a real 16 GB T4**: greedy 8/8 exact, 32.9 tok/s bsz1, peak VRAM
+**6.7 GB**. Details: [`bench/results/w4/`](bench/results/w4/).
 
 **4. Accuracy is EXACT** — greedy token-for-token match to the rwkv-lm numpy oracle at
 0.1B / 1.5B / 7.2B (fp16 + bf16, cuda-graph); lm-eval **ties** rwkv-lm (1.5B lambada 0.673 vs

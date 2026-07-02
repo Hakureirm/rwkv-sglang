@@ -62,6 +62,10 @@ def _register_fakes():
         def _gemm_w4_small_fake(x, qweight, scale):
             return x.new_empty((x.shape[0], qweight.shape[0]))
 
+        @torch.library.register_fake("rwkv7_w4::gemm_w4_tc")
+        def _gemm_w4_tc_fake(x, qweight, scale):
+            return x.new_empty((x.shape[0], qweight.shape[0]))
+
         @torch.library.register_fake("rwkv7_w4::dequant_w4")
         def _dequant_w4_fake(qweight, scale):
             return scale.new_empty((qweight.shape[0], qweight.shape[1] * 2))
@@ -84,6 +88,14 @@ def gemm_w4_small(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -
     rows; each row is bit-identical to the M==1 kernel (same accumulation order) ->
     batch-invariant. Caller guards fp16 + 2<=M<=8 + K%64==0 + N even."""
     return torch.ops.rwkv7_w4.gemm_w4_small(x.contiguous(), qweight, scale)
+
+
+def gemm_w4_tc(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    """y[M,N] for 8<M<=64 (batched decode) via tensor cores (wmma, fp32 accum): the int4
+    weight tile is dequantized to fp16 in shared memory per K-step, so weight HBM traffic
+    is 1/4 of a cuBLAS fp16 GEMM. Deterministic per-row reduction order (fixed k-loop),
+    independent of batch composition. Caller guards fp16 + M<=64 + K%64==0 + N%64==0."""
+    return torch.ops.rwkv7_w4.gemm_w4_tc(x.contiguous(), qweight, scale)
 
 
 def dequant(qweight: torch.Tensor, scale: torch.Tensor, group: int = GROUP) -> torch.Tensor:
