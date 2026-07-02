@@ -42,6 +42,13 @@ unsupported — RWKV-7 is ahead here.)
 | tp=1 / pp=1 regression (0.1B + 1.5B bf16 + 1.5B w8 fp16) | RTX 3090 | **EXACT 24/24 ×3** | unchanged |
 | **tp=2** (1.5B bf16) | **2× L4 (real)** | **EXACT 24/24** | 20.6 / 161.9 / 644.4 |
 | **pp=2** (1.5B bf16) | **2× L4 (real)** | **EXACT 24/24** | 17.3 / 133.1 / 525.1 |
+| **tp=4** | **4× L4 (real)** | **EXACT 24/24** | 14.5 / 111.3 / 452.4 |
+| **pp=4** | **4× L4 (real)** | **EXACT 24/24** | 15.1 / 117.7 / 446.5 |
+| tp=2×pp=2 (mixed) | 4× L4 (real) | ⚠️ **12/24, first_div=12 — open bug** | 15.0 / 118.0 / 465.1 |
+| **tp=8** (4 heads/rank) | **8× L4 (real)** | **EXACT 24/24** | 15.1 / 115.9 / 454.4 |
+| **pp=8** (3 layers/stage) | **8× L4 (real)** | **EXACT 24/24** | 11.9 / 92.2 / 358.8 |
+
+Full table incl. per-GPU memory: `bench/results/parallel/README.md`.
 
 Notes: 2-GPU runs use the correctness-gate config (cuda-graph OFF, bf16) — these
 are functional-verification numbers, not perf numbers; single-L4 WITH graph does
@@ -52,6 +59,11 @@ token-for-token (bf16, 24 tokens — knife-edge argmax drift remains possible on
 other prompts; lm-eval parity is the right long-form gate if it ever appears).
 
 ## Known limits / follow-ups
+- **Mixed tp×pp diverges** (tp2pp2: 12/24 @token 12; pure tp 2/4/8 and pure pp
+  2/4/8 all EXACT). Since a pp cut doesn't change arithmetic and a 2-rank
+  allreduce is order-invariant, the tp↔pp interaction (likely v_first or state
+  addressing under the combined process groups) is a real bug — mixed mode is
+  NOT supported until fixed.
 - W4/W8 × tp>1 (shard qweight rows/scale columns — group=64 divides cleanly).
 - tp2/pp2 throughput-tuned numbers (cuda-graph ON) + tp4/pp4 + 7.2B multi-GPU.
 - dp-attention (get_attention_tp_size vs TP world size) untested — unsupported.
