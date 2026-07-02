@@ -59,7 +59,9 @@ bsz 256  ████████████████████░  8,187 
 
 每条 RWKV-7 状态是固定 162 万元素的常量（**无 KV cache**），所以 256 条并发——在*任意*上下文长度下——
 显存开销与一条几乎相同。KV-cache Transformer 的显存随 batch × 上下文增长，早就 OOM 了。解码保持
-**O(1)/token**（无论上下文多长都是个位数 ms/step；TTFT 是 O(T)，任何模型都如此）。
+**O(1)/token**（无论上下文多长都是个位数 ms/step；TTFT 是 O(T)，任何模型都如此）。**7.2B 同样成立**：
+上下文 1K→32K 峰值显存 **+0 MiB**；并发 bsz 1→64 解码 46.6→1,802.7 tok/s（38.7×）、仅 +308 MiB——
+单张 24G 卡承载 64 路并发 7.2B（[`serving_scale/`](bench/results/serving_scale/)）。
 
 **3. int8 (w8a8) 基本追平 albatross-fp16**——7.2B 上，我们的 int8 落在
 **albatross-fp16 的 0.88–1.21×**（解码，bsz 1/8/32；即*跨精度*对比：我们的 int8 vs 它的 fp16），

@@ -63,6 +63,32 @@ wobble. The robust signals here are (a) **peak VRAM**, which is measured absolut
 guarantee (decode reads only the fixed-size state, never the context). We do not read a context
 *speedup* into the 65K number; we read *no context penalty*.
 
+## 2b. Flagship size: the same properties hold at 7.2B
+
+Same sweeps on **7.2B** (bf16, cuda-graph ON, radix off; raw: [`ctx_72b.log`](ctx_72b.log),
+[`conc_72b.log`](conc_72b.log)):
+
+**Context invariance (bsz 4, `--max-context 65536`):**
+| context | decode ms/step | peak VRAM (MiB) |
+|--------:|---------------:|----------------:|
+|   1,024 |          22.46 |          17,866 |
+|   8,192 |          30.60 |          17,866 |
+|  32,768 |          31.53 |          17,866 |
+
+Peak VRAM moves **+0 MiB across a 32× context increase** — at 7.2B the weights dominate and the
+recurrent state stays a constant, so context costs literally nothing in memory.
+
+**Concurrency (512-tok context):**
+| bsz | decode tok/s | peak VRAM (MiB) |
+|----:|-------------:|----------------:|
+|   1 |         46.6 |          17,742 |
+|  16 |        648.6 |          18,050 |
+|  64 |      1,802.7 |          18,050 |
+
+Decode scales **38.7×** (46.6 → 1,802.7 tok/s) from bsz 1 → 64 at **+308 MiB** — 64 concurrent
+7.2B sequences on one 24 GB card. (46.6 is the default config, consistent with
+`comparison_clean.md`'s 45.9; the opt-in kernels lift bsz1 to 65.7.)
+
 ## 3. ShareGPT — realistic mixed prefill+decode serving (standard `bench_serving`)
 
 The two sweeps above are synthetic (fixed-length) to isolate the O(1)-state properties. For an

@@ -1,0 +1,17 @@
+Warning: User-specified context_length (65536) is greater than the derived context_length (8192). This may lead to incorrect model outputs or CUDA errors. Note that the derived context_length may differ from max_position_embeddings in the model's config.
+Disabling Radix Cache for RWKV7ForCausalLM as it is not yet supported.
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:12<00:00, 12.33s/it]Multi-thread loading shards: 100% Completed | 1/1 [00:12<00:00, 12.33s/it]
+  0%|          | 0/3 [00:00<?, ?it/s]Capturing batches (bs=4 avail_mem=6.74 GB):   0%|          | 0/3 [00:00<?, ?it/s]Capturing batches (bs=4 avail_mem=6.74 GB):  33%|███▎      | 1/3 [00:02<00:05,  2.65s/it]Capturing batches (bs=2 avail_mem=6.70 GB):  33%|███▎      | 1/3 [00:02<00:05,  2.65s/it]Capturing batches (bs=2 avail_mem=6.70 GB):  67%|██████▋   | 2/3 [00:02<00:01,  1.29s/it]Capturing batches (bs=1 avail_mem=6.68 GB):  67%|██████▋   | 2/3 [00:02<00:01,  1.29s/it]Capturing batches (bs=1 avail_mem=6.68 GB): 100%|██████████| 3/3 [00:03<00:00,  1.13it/s]Capturing batches (bs=1 avail_mem=6.68 GB): 100%|██████████| 3/3 [00:03<00:00,  1.13s/it]
+==================================================================================
+SERVING-SCALE  model=ctx-72b  dtype=bfloat16  mode=context  cuda_graph=ON  radix=OFF
+  decode=32tok steady-state (prefill-subtracted)  mem_fraction=0.85  baseline=1 MiB
+----------------------------------------------------------------------------------
+ context |  bsz |  decode tok/s |   ms/step |    TTFT ms | peak VRAM MiB
+----------------------------------------------------------------------------------
+    1024 |    4 |         178.1 |     22.46 |     1100.5 |         17866
+    8192 |    4 |         130.7 |     30.60 |     9126.2 |         17866
+   32768 |    4 |         126.9 |     31.53 |    43206.1 |         17866
+==================================================================================

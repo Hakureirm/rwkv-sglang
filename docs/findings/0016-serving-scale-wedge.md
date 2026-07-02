@@ -50,6 +50,11 @@ quality beyond the trained window is not claimed).
 stays O(1)/token (single-digit ms/step, no growth trend). TTFT grows linearly with context
 (581 ms → 47 s) — expected, prefill is O(T) for any model; the wins are decode + memory.
 
+## Flagship confirmation (7.2B, added 2026-07-02)
+Same sweeps at 7.2B (bf16, `bench/results/serving_scale/{ctx,conc}_72b.log`): context 1K→32K =
+**+0 MiB** peak VRAM (17,866 flat) at 22–32 ms/step; concurrency bsz 1→64 = 46.6→**1,802.7 tok/s
+(38.7×)** at **+308 MiB**. The O(1)-state properties hold unchanged at the flagship size.
+
 ## Honesty caveats
 - **VRAM appears "flat" partly because sglang pre-allocates a static state pool** from
   `mem_fraction_static`. The load-bearing claim is not "the pool is fixed" (that is config) but

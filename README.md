@@ -61,7 +61,10 @@ bsz 256  ████████████████████░  8,187 
 Each RWKV-7 state is a fixed 1.62 M-element constant (**no KV cache**), so 256 concurrent
 sequences — at *any* context length — cost essentially the same VRAM as one. A KV-cache
 transformer's memory grows with batch × context and OOMs long before. Decode stays **O(1)/token**
-(single-digit ms/step regardless of context; TTFT is O(T), as for any model).
+(single-digit ms/step regardless of context; TTFT is O(T), as for any model). **The same holds at
+7.2B**: context 1K→32K = **+0 MiB** peak VRAM; concurrency bsz 1→64 = 46.6→1,802.7 tok/s (38.7×)
+at +308 MiB — 64 concurrent 7.2B streams on one 24 GB card
+([`serving_scale/`](bench/results/serving_scale/)).
 
 **3. int8 (w8a8) roughly ties albatross-fp16** — at 7.2B, ours-int8 lands at
 **0.88–1.21× albatross-fp16** (decode, bsz 1/8/32 — i.e. a *cross-precision* matchup: our int8
