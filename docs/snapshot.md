@@ -4,7 +4,7 @@ project: rwkv-sglang
 title: "RWKV-7 × sglang adaptation — canonical state"
 date: 2026-07-02
 status: active
-last_verified_commit: 1e8f87c
+last_verified_commit: 13eef84
 schema_invariant: |
   - Every ADR referenced anywhere MUST appear once in §"ADR roster".
   - Every finding referenced anywhere MUST appear once in §"Findings ledger".
