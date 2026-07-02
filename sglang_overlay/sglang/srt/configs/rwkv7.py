@@ -97,6 +97,13 @@ class Rwkv7Config(PretrainedConfig):
     def mamba2_cache_params(self) -> Rwkv7CacheParams:
         from sglang.srt.layers.dp_attention import get_attention_tp_size
 
+        import os
+        if os.environ.get("RWKV_PAR_DEBUG") == "1":
+            import sys
+            from sglang.srt.distributed import get_tensor_model_parallel_world_size
+            print(f"[par-debug] cache-params: attention_tp_size={get_attention_tp_size()} "
+                  f"tp_world_size={get_tensor_model_parallel_world_size()}",
+                  file=sys.stderr, flush=True)
         shape = Rwkv7StateShape.create(
             tp_world_size=get_attention_tp_size(),
             hidden_size=self.hidden_size,

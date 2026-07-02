@@ -44,9 +44,9 @@ End-to-end decode:
 | 2 | 299.5 | **391.7** | **1.31×** |
 | 4 | 574.1 | **731.9** | **1.27×** |
 | 8 | 1112.9 | **1180.5** | **1.06×** |
-| 16 | 2243.3 | **2512.7** | **1.12×** (gemm_w8_tc) |
-| 32 | 3872.6 | **3935.9** | **1.02×** (gemm_w8_tc) |
-| 64 | 6574.4 | 4895.7 | 0.74× (TC loses on the M=64 long-K ffn shapes — same as int4's 0.77×; honest) |
+| 16 | 2243.3 | **2522.9** | **1.13×** (gemm_w8_tc, cp.async pipelined) |
+| 32 | 3872.6 | **3961.6** | **1.02×** (gemm_w8_tc, cp.async pipelined) |
+| 64 | 6574.4 | 5045.0 | 0.77× (was 0.74× pre-pipeline; M=64 long-K ffn shapes — same crossover as int4's 0.80×; honest) |
 
 VRAM: peak serve 8,502 vs 9,152 MiB (bsz1); checkpoint 1.8 GB vs 2.9 GB fp16.
 

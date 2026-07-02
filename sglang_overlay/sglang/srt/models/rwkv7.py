@@ -424,6 +424,13 @@ class Rwkv7Attention(nn.Module):
         )
         self.local_num_heads = self.num_heads // tp_size
         self.local_hidden_size = self.local_num_heads * self.head_dim
+        import os
+        if os.environ.get("RWKV_PAR_DEBUG") == "1" and layer_id in (0, 1):
+            import sys
+            from sglang.srt.distributed import get_tensor_model_parallel_rank
+            print(f"[par-debug] attn L{layer_id}: tp_size={tp_size} "
+                  f"tp_rank={get_tensor_model_parallel_rank()} nh_local={self.local_num_heads}",
+                  file=sys.stderr, flush=True)
 
         H = self.hidden_size
         Hl = self.local_hidden_size
@@ -746,6 +753,28 @@ class Rwkv7Model(nn.Module):
             assert pp_proxy_tensors is not None
             x = pp_proxy_tensors["hidden_states"]
             v_first = pp_proxy_tensors["v_first"]
+            # v_first crosses the stage boundary FULL-WIDTH (see the send side:
+            # sglang's pp tensor-dict transfer chunk-sends over the tp group and
+            # all-gathers on receive, which is only lossless for tp-replicated
+            # tensors) — slice back to this rank's head slice.
+            tp_size = get_tensor_model_parallel_world_size()
+            if tp_size > 1 and v_first.shape[0] > 0:
+                if os.environ.get("RWKV_PAR_DEBUG") == "1":
+                    import sys
+                    print(f"[par-debug] recv-pre-slice {tuple(v_first.shape)} x={tuple(x.shape)}",
+                          file=sys.stderr, flush=True)
+                Hl = v_first.shape[-1] // tp_size
+                r = get_tensor_model_parallel_rank()
+                v_first = v_first[:, r * Hl:(r + 1) * Hl].contiguous()
+            if os.environ.get("RWKV_PAR_DEBUG") == "1" and x.shape[0] > 0:
+                import sys
+                _c = getattr(self, "_dbg_recv", 0)
+                if _c < 4:
+                    self._dbg_recv = _c + 1
+                    print(f"[par-debug] recv tp{get_tensor_model_parallel_rank()} "
+                          f"call{_c} T={x.shape[0]} xsum={x.float().sum().item():.6f} "
+                          f"vfsum={v_first.float().sum().item():.6f}",
+                          file=sys.stderr, flush=True)
 
         for i in range(self.start_layer, self.end_layer):
             x, v_first = self.layers[i](forward_batch, x, v_first)
@@ -761,6 +790,30 @@ class Rwkv7Model(nn.Module):
                 v_first = x.new_zeros(
                     x.shape[0], self.layers[self.start_layer].attn.local_hidden_size
                 )
+            if os.environ.get("RWKV_PAR_DEBUG") == "1" and x.shape[0] > 0:
+                import sys
+                _c = getattr(self, "_dbg_send", 0)
+                if _c < 4:
+                    self._dbg_send = _c + 1
+                    print(f"[par-debug] send tp{get_tensor_model_parallel_rank()} "
+                          f"call{_c} T={x.shape[0]} xsum={x.float().sum().item():.6f} "
+                          f"vfsum={v_first.float().sum().item():.6f}",
+                          file=sys.stderr, flush=True)
+            # sglang's pp transfer chunk-sends each tensor across the tp group and
+            # reassembles rank-by-rank on receive — lossless ONLY for tp-replicated
+            # tensors. v_first is the LOCAL head slice under tp>1, so gather it to
+            # full width here (the receiver slices its head range back out).
+            if get_tensor_model_parallel_world_size() > 1 and v_first.shape[0] > 0:
+                from sglang.srt.distributed.communication_op import (
+                    tensor_model_parallel_all_gather,
+                )
+
+                pre = tuple(v_first.shape)
+                v_first = tensor_model_parallel_all_gather(v_first.contiguous())
+                if os.environ.get("RWKV_PAR_DEBUG") == "1":
+                    import sys
+                    print(f"[par-debug] send-gather {pre} -> {tuple(v_first.shape)}",
+                          file=sys.stderr, flush=True)
             return PPProxyTensors({"hidden_states": x, "v_first": v_first})
 
         x = self.norm(x)

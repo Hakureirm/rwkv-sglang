@@ -44,7 +44,7 @@ unsupported — RWKV-7 is ahead here.)
 | **pp=2** (1.5B bf16) | **2× L4 (real)** | **EXACT 24/24** | 17.3 / 133.1 / 525.1 |
 | **tp=4** | **4× L4 (real)** | **EXACT 24/24** | 14.5 / 111.3 / 452.4 |
 | **pp=4** | **4× L4 (real)** | **EXACT 24/24** | 15.1 / 117.7 / 446.5 |
-| tp=2×pp=2 (mixed) | 4× L4 (real) | ⚠️ **12/24, first_div=12 — open bug** | 15.0 / 118.0 / 465.1 |
+| **tp=2×pp=2 (mixed)** | **4× L4 (real)** | **EXACT 24/24 (after v_first full-width fix)** | 14.4 / 110.3 / 442.0 |
 | **tp=8** (4 heads/rank) | **8× L4 (real)** | **EXACT 24/24** | 15.1 / 115.9 / 454.4 |
 | **pp=8** (3 layers/stage) | **8× L4 (real)** | **EXACT 24/24** | 11.9 / 92.2 / 358.8 |
 
@@ -59,11 +59,14 @@ token-for-token (bf16, 24 tokens — knife-edge argmax drift remains possible on
 other prompts; lm-eval parity is the right long-form gate if it ever appears).
 
 ## Known limits / follow-ups
-- **Mixed tp×pp diverges** (tp2pp2: 12/24 @token 12; pure tp 2/4/8 and pure pp
-  2/4/8 all EXACT). Since a pp cut doesn't change arithmetic and a 2-rank
-  allreduce is order-invariant, the tp↔pp interaction (likely v_first or state
-  addressing under the combined process groups) is a real bug — mixed mode is
-  NOT supported until fixed.
+- **Mixed tp×pp divergence: FIXED.** Root cause: sglang's PP `send_tensor_dict`
+  chunk-sends every tensor as `reshape(tp,-1)[tp_rank]` and reassembles
+  rank-by-rank on the receiving stage — lossless only for tp-REPLICATED tensors.
+  The tp-sliced `v_first` got reassembled into a franken-tensor (checksums:
+  both receivers identical, ≠ either sender). Fix in `models/rwkv7.py`: gather
+  v_first to full width before the stage boundary, per-rank slice after.
+  Re-verified tp2×pp2 greedy 24/24 EXACT at 0.1B and 1.5B. Upstream note: any
+  model shipping non-replicated PPProxyTensors entries hits this silently.
 - W4/W8 × tp>1 (shard qweight rows/scale columns — group=64 divides cleanly).
 - tp2/pp2 throughput-tuned numbers (cuda-graph ON) + tp4/pp4 + 7.2B multi-GPU.
 - dp-attention (get_attention_tp_size vs TP world size) untested — unsupported.

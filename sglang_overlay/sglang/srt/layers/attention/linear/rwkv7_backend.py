@@ -104,6 +104,12 @@ class Rwkv7AttnBackend(MambaAttnBackendBase):
             model_runner.req_to_token_pool.mamba_pool.mamba_cache.conv[0].shape
         )
         self.scale = 1.0
+        import os
+        if os.environ.get("RWKV_PAR_DEBUG") == "1":
+            import sys
+            mc = model_runner.req_to_token_pool.mamba_pool.mamba_cache
+            print(f"[par-debug] backend: conv0={tuple(mc.conv[0].shape)} "
+                  f"temporal={tuple(mc.temporal.shape)}", file=sys.stderr, flush=True)
 
     # ---- token-shift (width-2 causal shift via the conv state) ----
     def token_shift(

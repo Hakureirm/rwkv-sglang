@@ -4,9 +4,10 @@
 `rwkv7_w8.cu` (gemv_w8_m1 / gemm_w8_small / dequant_w8; `RWKV_W8=1`; quantizer
 `bench/quant_w4.py --bits 8`; TC kernel `gemm_w8_tc` = wmma + in-smem int8→fp16 dequant +
 deterministic split-K). 1.5B, RTX 3090: **greedy 24/24 EXACT**; e2e decode vs fp16 =
-**1.37×/1.31×/1.27×/1.06×/1.12×/1.02×** at bsz 1/2/4/8/16/32 (227.4/391.7/731.9/1180.5/2512.7/
-3935.9 vs 166.5/299.5/574.1/1112.9/2243.3/3872.6 tok/s) — **≥ fp16 at every bsz ≤ 32**; bsz64
-0.74× (M=64 long-K ffn shapes, same crossover as int4's 0.77×); VRAM 8,502 vs 9,152 MiB;
+**1.37×/1.31×/1.27×/1.06×/1.13×/1.02×** at bsz 1/2/4/8/16/32 (227.4/391.7/731.9/1180.5/2522.9/
+3961.6 vs 166.5/299.5/574.1/1112.9/2243.3/3872.6 tok/s) — **≥ fp16 at every bsz ≤ 32**; bsz64
+0.77× (M=64 long-K ffn shapes, same crossover as int4's 0.80×; both use the sm80+ cp.async
+2-stage pipeline, Turing falls back to the synchronous path); VRAM 8,502 vs 9,152 MiB;
 checkpoint 1.8 vs 2.9 GB. Standalone: scalar family 1.13–2.29× at every M∈{1,2,4,8}, rows
 bit-identical to M=1; TC 1.05–1.47× at M=16; quant error 5.9e-3 (18× smaller than int4).
 Unlike cutlass w8a8 (sm80–90 only), JIT-builds on every arch. Full write-up:
@@ -58,12 +59,15 @@ M>64 (prefill) stays on dequant→cuBLAS (compute-bound; weight read amortized o
 |   2 |      299.5 | **434.9** | **1.45×** | gemm_w4_small |
 |   4 |      574.1 | **773.2** | **1.35×** | gemm_w4_small |
 |   8 |     1112.9 | **1153.0** | **1.04×** | gemm_w4_small |
-|  16 |     2243.3 | **2619.8** | **1.17×** | gemm_w4_tc |
-|  32 |     3872.6 | **3978.2** | **1.03×** | gemm_w4_tc |
-|  64 |     6574.4 |   5064.6 | 0.77× | gemm_w4_tc (M=64 ffn shapes drag — see kernel table) |
+|  16 |     2243.3 | **2618.5** | **1.17×** | gemm_w4_tc (cp.async pipelined, sm80+) |
+|  32 |     3872.6 | **4004.4** | **1.03×** | gemm_w4_tc (cp.async pipelined, sm80+) |
+|  64 |     6574.4 |   5283.6 | 0.80× | gemm_w4_tc (was 0.77× pre-pipeline; M=64 long-K ffn shapes still drag) |
 
 **int4 is faster than (or ties) fp16 at every batch size through 32** (1.03–1.56×); bsz64 is
-0.77× (honest — the M=64 long-K ffn shapes lose to tensor-core cuBLAS; further tiling work).
+0.80× (honest — up from 0.77× via a 2-stage cp.async pipeline on sm80+ that double-buffers the
+activation tile and the raw int4 words per K-step; standalone M=64: 2048² 1.17→1.30×, 4096²
+0.56→0.68×, 2048×8192 0.55→0.70×. The rest of the gap needs a 256-thread block rework —
+follow-up. Turing keeps the synchronous path).
 w4 prefill ≈ 0.95× fp16 (13.3–13.8k vs 14.0–14.4k tok/s).
 
 - Checkpoint: **1.2 GB vs 2.9 GB** fp16 (2.4× at 1.5B; grows with model size — emb/lm_head stay bf16).

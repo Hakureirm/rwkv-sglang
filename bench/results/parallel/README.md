@@ -25,16 +25,22 @@ Design + analysis: [`../../../docs/findings/0019-tp-pp-parallel.md`](../../../do
 | pp=2       | 2× L4 | **EXACT 24/24** | 17.3 | 133.1 | 525.1 | (see note) |
 | tp=4       | 4× L4 | **EXACT 24/24** | 14.5 | 111.3 | 452.4 | 7241 ×4 |
 | pp=4       | 4× L4 | **EXACT 24/24** | 15.1 | 117.7 | 446.5 | 3149 / 2879 / 2879 / 2897 |
-| tp=2×pp=2  | 4× L4 | ⚠️ 12/24 (first_div=12) | 15.0 | 118.0 | 465.1 | 4401 / 4401 / 4273 / 4275 |
+| tp=2×pp=2  | 4× L4 | **EXACT 24/24** (fixed) | 14.4 | 110.3 | 442.0 | 4379 / 4379 / 4279 / 4279 |
 | tp=8       | 8× L4 | **EXACT 24/24** | 15.1 | 115.9 | 454.4 | 7103 ×8 |
 | pp=8       | 8× L4 | **EXACT 24/24** | 11.9 | 92.2 | 358.8 | 2143 / 1873 ×6 / 1891 |
 
 - **Pure TP is greedy-EXACT at 2, 4 and 8 ranks; pure PP is greedy-EXACT at 2, 4
   and 8 stages.** 32 heads ÷ tp8 = 4 heads/rank; 24 layers ÷ pp8 = 3 layers/stage.
-- **Mixed tp=2×pp=2 diverges at token 12** — under investigation (pure tp=2 and
-  pure pp=2 are both exact, so the interaction is the suspect; a PP stage cut
-  does not change arithmetic, and a 2-rank allreduce is order-invariant, so this
-  is a real bug, not fp noise). Not a shipped configuration until resolved.
+- **Mixed tp×pp: FIXED** (was 12/24 @token 12, deterministic, dtype-independent —
+  0.1B failed at token 5, fp32 at the same token 12). Root cause: sglang's PP
+  tensor-dict transfer chunk-sends each tensor as `reshape(tp,-1)[tp_rank]` and
+  reassembles rank-by-rank on receive — lossless ONLY for tp-REPLICATED tensors
+  (llama's hidden/residual). Our `v_first` is the LOCAL head slice under tp>1,
+  so the reassembly produced a franken-tensor (half from each rank; measured:
+  both receivers got identical wrong checksums ≠ either sender). Fix: all-gather
+  v_first to full width before the boundary, slice per-rank after (rwkv7.py).
+  Re-verified: 0.1B AND 1.5B tp2×pp2 greedy **24/24 EXACT**. Upstream-relevant:
+  any model shipping non-replicated proxy tensors across PP hits this.
 - Memory shows the expected split: PP divides weights across stages
   (pp8: ~1.9 GB/GPU), TP replicates less than it divides at this size because
   the mem_fraction-static pool dominates (tp: ~7.1 GB/GPU incl. state pool).

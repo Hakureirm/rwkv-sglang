@@ -22,6 +22,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <torch/library.h>
 #include <cuda_fp16.h>
+#include <cuda_pipeline.h>
 #include <mma.h>
 #include <algorithm>
 #include <cstdint>
@@ -239,7 +240,122 @@ __global__ __launch_bounds__(128, 1) void gemm_w8_tc_kernel(
     const __half* __restrict__ scale,   // [N, NG]
     __half* __restrict__ y,             // [M, N]        (WritePartial=false)
     float* __restrict__ ws) {           // [Z, M, N] f32 (WritePartial=true; split-K partials)
-#if __CUDA_ARCH__ >= 700
+#if __CUDA_ARCH__ >= 800
+  // sm80+ 2-stage cp.async pipeline (the w8 sibling of gemm_w4_tc's): tile t+1's
+  // activation rows and RAW int8 words (16 uint32/row/k-tile) stream in while
+  // tile t is dequanted + MMA'd. Same k order + wmma structure as the
+  // synchronous path (identical accumulation order; split-K unchanged).
+  using namespace nvcuda;
+  const int n0 = blockIdx.x * TC_N;
+  const int kb = blockIdx.z * k_chunk;
+  const int ke = (kb + k_chunk < K) ? kb + k_chunk : K;
+  const int KW = K >> 2;
+  const int lane = threadIdx.x;        // 0..127
+  const int warp = lane >> 5;          // 0..3 -> n-subtile [n0+warp*16, +16)
+
+  __shared__ __align__(16) __half smem_a[2][MT * TC_M][TC_K + TC_KPAD];
+  __shared__ __align__(16) uint32_t smem_q[2][TC_N][16];  // raw words: 16/row/k-tile
+  __shared__ __half smem_w[TC_N][TC_K + TC_KPAD];
+  __shared__ float smem_c[TC_M][TC_N + TC_KPAD];
+
+  // rows >= M never change: zero them once in both buffers.
+#pragma unroll
+  for (int r = 0; r < MT; ++r) {
+    const int elt = (lane + r * 128) * 8;
+    const int am = elt / TC_K;
+    const int ak = elt % TC_K;
+    if (am >= M) {
+#pragma unroll
+      for (int i = 0; i < 8; ++i) {
+        smem_a[0][am][ak + i] = __float2half(0.0f);
+        smem_a[1][am][ak + i] = __float2half(0.0f);
+      }
+    }
+  }
+
+  wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc[MT];
+#pragma unroll
+  for (int mt = 0; mt < MT; ++mt) wmma::fill_fragment(acc[mt], 0.0f);
+
+  const int a_chunks = M * 8;  // live A rows, 8 x 16B chunks per row
+  auto stage = [&](int k0s, int buf) {
+    for (int t = lane; t < a_chunks; t += 128) {
+      const int am = t >> 3;
+      const int ak = (t & 7) * 8;
+      __pipeline_memcpy_async(&smem_a[buf][am][ak],
+                              x + static_cast<int64_t>(am) * K + k0s + ak, 16);
+    }
+    for (int t = lane; t < TC_N * 4; t += 128) {  // 16 words = 4 x 16B per row
+      const int wn = t >> 2;
+      const int wc = (t & 3) * 4;
+      __pipeline_memcpy_async(&smem_q[buf][wn][wc],
+                              qw + static_cast<int64_t>(n0 + wn) * KW + (k0s >> 2) + wc,
+                              16);
+    }
+  };
+
+  stage(kb, 0);
+  __pipeline_commit();
+
+  for (int k0 = kb; k0 < ke; k0 += TC_K) {
+    const int cur = ((k0 - kb) >> 6) & 1;
+    if (k0 + TC_K < ke) stage(k0 + TC_K, cur ^ 1);
+    __pipeline_commit();
+    __pipeline_wait_prior(1);  // current tile's copies complete; next stays in flight
+    __syncthreads();
+    {
+      const int g = k0 / TC_K;
+#pragma unroll
+      for (int r = 0; r < 8; ++r) {
+        const int t = lane + r * 128;
+        const int wn = t >> 4;
+        const int wk = t & 15;
+        const uint32_t p = smem_q[cur][wn][wk];
+        const float s = __half2float(scale[static_cast<int64_t>(n0 + wn) * NG + g]);
+        __half* dst = &smem_w[wn][wk << 2];
+        dst[0] = __float2half_rn((float)(int)(int8_t)(p & 0xFF) * s);
+        dst[1] = __float2half_rn((float)(int)(int8_t)((p >> 8) & 0xFF) * s);
+        dst[2] = __float2half_rn((float)(int)(int8_t)((p >> 16) & 0xFF) * s);
+        dst[3] = __float2half_rn((float)(int)(int8_t)((p >> 24) & 0xFF) * s);
+      }
+    }
+    __syncthreads();
+#pragma unroll
+    for (int kk = 0; kk < TC_K; kk += 16) {
+      wmma::fragment<wmma::matrix_b, 16, 16, 16, __half, wmma::col_major> b_frag;
+      wmma::load_matrix_sync(b_frag, &smem_w[warp * 16][kk], TC_K + TC_KPAD);
+#pragma unroll
+      for (int mt = 0; mt < MT; ++mt) {
+        wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> a_frag;
+        wmma::load_matrix_sync(a_frag, &smem_a[cur][mt * TC_M][kk], TC_K + TC_KPAD);
+        wmma::mma_sync(acc[mt], a_frag, b_frag, acc[mt]);
+      }
+    }
+    __syncthreads();
+  }
+
+#pragma unroll
+  for (int mt = 0; mt < MT; ++mt) {
+    wmma::store_matrix_sync(&smem_c[0][warp * 16], acc[mt], TC_N + TC_KPAD, wmma::mem_row_major);
+    __syncthreads();
+    const int elt = lane * 8;
+    const int cm = elt / TC_N;
+    const int cn = elt % TC_N;
+    const int gm = mt * TC_M + cm;
+    if (gm < M) {
+      if (WritePartial) {
+        float* dst = ws + (static_cast<int64_t>(blockIdx.z) * M + gm) * N + n0 + cn;
+#pragma unroll
+        for (int i = 0; i < 8; ++i) dst[i] = smem_c[cm][cn + i];
+      } else {
+        __half* dst = y + static_cast<int64_t>(gm) * N + n0 + cn;
+#pragma unroll
+        for (int i = 0; i < 8; ++i) dst[i] = __float2half_rn(smem_c[cm][cn + i]);
+      }
+    }
+    __syncthreads();
+  }
+#elif __CUDA_ARCH__ >= 700
   using namespace nvcuda;
   const int n0 = blockIdx.x * TC_N;
   const int kb = blockIdx.z * k_chunk;                 // this split's K range

@@ -163,7 +163,7 @@ serving**（动态批——albatross 没有）上**领先**，并用三个手写
 | 2 | 同量化下比 Qwen3.5 快（典型场景） | — **不在本项目范围**（一个 sglang 推理集成）：本交付对标 **albatross**（速度/显存）+ **RWKV-LM**（精度） |
 | 3 | transformers 的 PEFT/RL 训练 | ⬜ 不在本项目范围（一个 sglang 推理集成） |
 | 4 | 动态批 + 分块预填充 + 状态缓存 | ✅ sglang 原生动态批 + 分块预填充 + O(1) 循环状态池；◑ 前缀**复用** radix 暂自动关闭（状态尚不可前缀缓存——已记录为 `MambaRadixCache` 后续项） |
-| 5 | Pascal+/AMD/Intel/国产；PP+TP；zero2/3；autotune | ◑ 10 种 GPU（Turing→Blackwell）贪心精确；**TP 在 2/4/8 卡、PP 在 2/4/8 段均贪心 24/24 精确（真 L4 集群实测）**（tp=1/pp=1 零回归；混合 tp×pp 有已记录的 open bug；W4/W8 暂限 tp=1；完整矩阵含每卡显存：[`bench/results/parallel/`](bench/results/parallel/)、[`docs/findings/0019`](docs/findings/0019-tp-pp-parallel.md)）；⬜ Pascal/AMD/Intel 未测，训练/autotune 不在范围 |
+| 5 | Pascal+/AMD/Intel/国产；PP+TP；zero2/3；autotune | ◑ 10 种 GPU（Turing→Blackwell）贪心精确；**TP 在 2/4/8 卡、PP 在 2/4/8 段均贪心 24/24 精确（真 L4 集群实测）**（tp=1/pp=1 零回归；混合 tp×pp 已修复(v_first 全宽过境)且贪心精确；W4/W8 暂限 tp=1；完整矩阵含每卡显存：[`bench/results/parallel/`](bench/results/parallel/)、[`docs/findings/0019`](docs/findings/0019-tp-pp-parallel.md)）；⬜ Pascal/AMD/Intel 未测，训练/autotune 不在范围 |
 | 6 | w8 + w4，比 w16 快，老卡，Q\*_K_M 精度 | ✅ **w8（w8a8-int8）**——比 bf16 快（1.5B/7.2B 解码 +46–59%）、权重 −46%、7.2B 贪心精确；✅ **w4（手写 int4）**——**bsz≤8 每档都比 fp16 快**（1.5B 1.04–1.56×；7.2B bsz1 102.8 tok/s、样本贪心 8/8 精确、lambada 0.7161 vs 0.7425、总显存 9.8 GB），Turing→Hopper 全卡可跑；◑ Q\*_K_M 直接对表未做（我们的 GPTQ g64 @1.5B −3.34pt 为可比点） |
 | 7 | 初步投机解码（RWKV 做 draft） | ⬜ 未做 |
 
