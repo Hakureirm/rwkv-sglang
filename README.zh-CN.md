@@ -78,10 +78,12 @@ bsz1 32.9 tok/s、峰值显存仅 **6.7 GB**。详见 [`bench/results/w4/`](benc
 **4. 精度逐-token 精确**——对 rwkv-lm 纯 numpy oracle 贪心逐-token 命中，0.1B / 1.5B / 7.2B
 （fp16 + bf16，cuda-graph）；lm-eval 与 rwkv-lm **持平**（1.5B lambada 0.673 vs 0.671，MMLU 0.524 vs 0.511）。
 
-**5. 全 GPU 系列可跑**——在 **8 种架构、Turing → Hopper**（T4 / L4 / A10G / A100-40/80 / L40S /
-H100 / H200）各卡真机实测：bf16 **全 8 卡逐-token 精确**；手写 **int4 全 8 卡可跑且比 fp16 快
-（含 Turing 老架构**，核不依赖 cp.async），无需按架构改代码。峰值：H200 bf16 解码 **6,938 tok/s**
-@bsz32、预填充 **78,268 tok/s**。完整网格见 [`bench/results/multigpu.md`](bench/results/multigpu.md)。
+**5. 全 GPU 系列可跑**——**10 种 GPU、7 个 SM 世代、Turing → Blackwell**（T4 / L4 / A10G /
+A100-40/80 / L40S / H100 / H200 / **B200** / **RTX PRO 6000**）各卡真机实测：bf16 **全 10 卡
+逐-token 精确**；手写 **int4 全 10 卡可跑且 bsz1 比 fp16 快**——从 Turing（不依赖 cp.async）到
+Blackwell sm120（RTX PRO 6000 上 int4 bsz1 **1.41×** bf16），无需按架构改代码。峰值：**B200
+预填充 103,022 tok/s、解码 7,213 tok/s** @bsz32。（int8 仅支持 sm80–90——上游 sgl-kernel cutlass
+覆盖限制。）完整网格见 [`bench/results/multigpu.md`](bench/results/multigpu.md)。
 
 ### albatross 唯一领先的那条轴——完整摊开 🔬
 **同精度 fp16、*单流*裸解码。** 这是 albatross 的主场：它是纯单流 mega-kernel，已达

@@ -1247,5 +1247,237 @@
         ]
       }
     ]
+  },
+  {
+    "label": "B200",
+    "device": "NVIDIA B200",
+    "sm": "10.0",
+    "total_vram_mib": 182632,
+    "wall_s": 165.6,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 36.089674298999995,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 24,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 28.084900142000002,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 217.4,
+            "prefill_tok_s": 24546.6,
+            "ttft_ms": 41.7,
+            "peak_vram_mib": 46387,
+            "vram_minus_base_mib": 46383
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1801.1,
+            "prefill_tok_s": 93261.5,
+            "ttft_ms": 87.8,
+            "peak_vram_mib": 47351,
+            "vram_minus_base_mib": 47347
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 7213.1,
+            "prefill_tok_s": 103022.0,
+            "ttft_ms": 318.1,
+            "peak_vram_mib": 48695,
+            "vram_minus_base_mib": 48691
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-int8",
+        "rc": -9,
+        "wall_s": 18.27533051200001,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": null,
+        "match": null,
+        "n": null
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-int8",
+        "rc": -9,
+        "wall_s": 17.97743013200001,
+        "dtype": "bfloat16",
+        "rows": []
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-w4",
+        "rc": 1,
+        "wall_s": 38.61380000800001,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 14,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-w4",
+        "rc": 0,
+        "wall_s": 26.546434026000014,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 248.7,
+            "prefill_tok_s": 24268.8,
+            "ttft_ms": 42.2,
+            "peak_vram_mib": 45437,
+            "vram_minus_base_mib": 45433
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1541.7,
+            "prefill_tok_s": 91022.9,
+            "ttft_ms": 90.0,
+            "peak_vram_mib": 46305,
+            "vram_minus_base_mib": 46301
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 4384.6,
+            "prefill_tok_s": 99922.2,
+            "ttft_ms": 327.9,
+            "peak_vram_mib": 47649,
+            "vram_minus_base_mib": 47645
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "RTX-PRO-6000",
+    "device": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "sm": "12.0",
+    "total_vram_mib": 97250,
+    "wall_s": 193.4,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 43.336581436,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 24,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-bf16-cg",
+        "rc": 0,
+        "wall_s": 30.199625726000008,
+        "dtype": "bfloat16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 201.3,
+            "prefill_tok_s": 23952.5,
+            "ttft_ms": 42.8,
+            "peak_vram_mib": 25829,
+            "vram_minus_base_mib": 25826
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1167.1,
+            "prefill_tok_s": 54516.2,
+            "ttft_ms": 150.3,
+            "peak_vram_mib": 26813,
+            "vram_minus_base_mib": 26810
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 5469.4,
+            "prefill_tok_s": 57407.9,
+            "ttft_ms": 570.8,
+            "peak_vram_mib": 26833,
+            "vram_minus_base_mib": 26830
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-int8",
+        "rc": -9,
+        "wall_s": 20.842225389000006,
+        "dtype": "bfloat16",
+        "cuda_graph": true,
+        "exact": null,
+        "match": null,
+        "n": null
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-int8",
+        "rc": -9,
+        "wall_s": 21.32437739000001,
+        "dtype": "bfloat16",
+        "rows": []
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-w4",
+        "rc": 1,
+        "wall_s": 46.58245898800001,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 14,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-w4",
+        "rc": 0,
+        "wall_s": 31.14497576400001,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 284.2,
+            "prefill_tok_s": 22701.2,
+            "ttft_ms": 45.1,
+            "peak_vram_mib": 24847,
+            "vram_minus_base_mib": 24844
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 1501.3,
+            "prefill_tok_s": 51272.8,
+            "ttft_ms": 159.8,
+            "peak_vram_mib": 25735,
+            "vram_minus_base_mib": 25732
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 3190.6,
+            "prefill_tok_s": 52835.2,
+            "ttft_ms": 620.2,
+            "peak_vram_mib": 25755,
+            "vram_minus_base_mib": 25752
+          }
+        ]
+      }
+    ]
   }
 ]

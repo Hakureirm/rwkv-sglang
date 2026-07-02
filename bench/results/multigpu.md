@@ -2,7 +2,7 @@
 
 Goal: broad GPU coverage (consumer + datacenter). We prove the deliverable (`sglang_overlay/`
 over sglang **0.5.10.post1**) is **greedy-EXACT** vs the numpy-oracle fixture and measure decode
-speed across consumer + datacenter GPU architectures (Turing / Ampere / Ada / Hopper), with **no
+speed across consumer + datacenter GPU architectures (Turing / Ampere / Ada / Hopper / Blackwell), with **no
 per-arch code change**. Each GPU was benchmarked on a real instance of that card.
 
 - **Correctness gate** per GPU = `bench/verify_m1d.py` greedy **EXACT** vs fixture, at **bf16 +
@@ -13,7 +13,7 @@ per-arch code change**. Each GPU was benchmarked on a real instance of that card
   `tools/convert_rwkv7_blinkdl_to_fla.py`). Image = a CUDA-devel base + sglang 0.5.10.post1 + the
   overlay (== `scripts/deploy.sh`). Raw per-GPU JSON: [`allcards.json`](allcards.json).
 
-## 1. Comprehensive 1.5B sweep — bf16 + **int4**, 8 architectures
+## 1. Comprehensive 1.5B sweep — bf16 + **int4**, 10 GPU types (Turing → Blackwell)
 
 bf16 greedy-EXACT gate + decode tok/s (bsz 1/8/32), plus our int4 decode (bsz1) and its speedup
 over bf16:
@@ -28,10 +28,18 @@ over bf16:
 | L40S | 8.9 (Ada) | **24/24** | 171.3 / 1090.1 / 4150.0 | 287.9 | **1.68×** | 12265 |
 | H100 | 9.0 (Hopper) | **24/24** | 229.7 / 1788.1 / 6569.2 | 261.2 | 1.14× | 21042 |
 | H200 | 9.0 (Hopper) | **24/24** | 241.6 / 1875.4 / 6937.6 | 262.7 | 1.09× | 35782 |
+| B200 | 10.0 (Blackwell) | **24/24** | 217.4 / 1801.1 / 7213.1 | 248.7 | 1.14× | 45437 |
+| RTX PRO 6000 | 12.0 (Blackwell) | **24/24** | 201.3 / 1167.1 / 5469.4 | 284.2 | **1.41×** | 24847 |
 
-- **bf16 is greedy-EXACT on all 8 architectures** — broad-GPU-coverage correctness holds universally; the RWKV-7
-  WKV + fused-glue Triton kernels JIT-compiled and ran on every SM generation with no per-arch change
-  (only sgl_kernel needs the `libnuma1` system lib in the image).
+- **bf16 is greedy-EXACT on all 10 GPU types across 7 SM generations** (7.5 / 8.0 / 8.6 / 8.9 /
+  9.0 / 10.0 / 12.0 — Turing → Blackwell) — broad-GPU-coverage correctness holds universally; the
+  RWKV-7 WKV + fused-glue Triton kernels JIT-compiled and ran on every SM generation with no
+  per-arch change (only sgl_kernel needs the `libnuma1` system lib in the image).
+- **Blackwell rows** (B200, RTX PRO 6000) were measured on a CUDA **12.8** devel image with the
+  torch **cu128** wheel (Blackwell needs sm100/sm120 kernels + a 12.8 nvcc for the int4 JIT);
+  the other rows used the CUDA 12.4 image with the same sglang/torch versions — the base-image
+  difference affects only the JIT toolchain, not the model stack. B200 peak prefill:
+  **103,022 tok/s** @bsz32 (new peak, vs H200's 78,268).
 - **Turing caveat (honest):** sm75 has **no native bf16 compute** — on T4, bf16 runs via
   fp32-conversion emulation. It is numerically exact (24/24 above), and we measured the fp16
   (Turing's natural dtype) baseline for a fair comparison: **T4 fp16 is also greedy-EXACT 24/24**,
@@ -63,12 +71,14 @@ Every precision on every card. bf16 decode + prefill:
 | L40S | Ada 8.9 | 171 / 1,090 / 4,150 | 23,364 / 39,156 / 40,806 |
 | H100 | Hopper 9.0 | 230 / 1,788 / 6,569 | 23,874 / 71,690 / 74,109 |
 | H200 | Hopper 9.0 | 242 / 1,875 / 6,938 | 24,830 / 74,319 / 78,268 |
+| B200 | Blackwell 10.0 | 217 / 1,801 / 7,213 | 24,547 / 93,262 / 103,022 |
+| RTX PRO 6000 | Blackwell 12.0 | 201 / 1,167 / 5,469 | 23,952 / 54,516 / 57,408 |
 
 int8 (w8a8) + int4 decode:
 
 | GPU | int8 decode 1/8/32 | int4 decode 1/8/32 |
 |---|---|---|
-| T4 | — | 115 / 196 / 614 |
+| T4 | — (needs sm80+) | 115 / 196 / 614 |
 | L4 | 106 / 792 / 505 | 155 / 371 / 752 |
 | A10G | 142 / 1,085 / 620 | 198 / 384 / 922 |
 | A100-40GB | 174 / 1,342 / 4,535 | 205 / 628 / 2,383 |
@@ -76,10 +86,15 @@ int8 (w8a8) + int4 decode:
 | L40S | 201 / 1,511 / 5,069 | 288 / 763 / 2,944 |
 | H100 | 218 / 1,688 / 6,266 | 261 / 848 / 3,283 |
 | H200 | 225 / 1,739 / 6,475 | 263 / 912 / 3,537 |
+| B200 | — (sm100 unsupported) | 249 / 1,542 / 4,385 |
+| RTX PRO 6000 | — (sm120 unsupported) | 284 / 1,501 / 3,191 |
 
-int8 runs on Ampere/Ada/Hopper (int8 greedy is exact at 7.2B; at 1.5B it has the usual small-model
-quant drift — see `comparison_clean.md`). Prefill scales strongly with card class (H200 ~78k tok/s
-at bsz32). Peak: **H200 bf16 decode 6,938 tok/s @bsz32, prefill 78,268 tok/s**.
+**int8 (w8a8) is bounded to sm80–90** by sgl-kernel's cutlass int8 GEMM: below (T4 sm75) it
+crashes with cutlass `Error Internal`; above (B200 sm100 / RTX PRO 6000 sm120) it raises an
+explicit `NotImplementedError: No implemented int8_scaled_mm for current compute capability` —
+an upstream kernel-coverage limit, not an RWKV-path issue. **Our int4 runs on all 10** (it JIT
+builds per-arch). int8 greedy is exact at 7.2B; at 1.5B it has the usual small-model quant drift
+(`comparison_clean.md`). Peaks: **B200 prefill 103,022 tok/s @bsz32; B200 bf16 decode 7,213 tok/s**.
 
 ## 2. 0.1B correctness (all architectures)
 
@@ -96,11 +111,12 @@ at bsz32). Peak: **H200 bf16 decode 6,938 tok/s @bsz32, prefill 78,268 tok/s**.
 Greedy-EXACT held on every architecture — Turing, Ampere (consumer sm86 + datacenter sm80), Ada, Hopper.
 
 ## 3. Quantization notes across GPUs
-- **int8 (w8a8) requires sm80+**: on T4 (sm75) the load fails inside cuda-graph capture with
-  sglang's cutlass int8 GEMM throwing `gemm execution failed: Error Internal` — sgl-kernel's
-  int8 scaled-mm ships no Turing configuration (diagnosed from the captured T4 stderr; the
-  scheduler then kills the child, which is the `rc=-9` in `allcards.json`). On Turing, use our
-  **int4** (works, faster than fp16) or fp16.
+- **int8 (w8a8) requires sm80–90** (both ends bounded by sgl-kernel's cutlass int8 GEMM): on T4
+  (sm75) the load fails inside cuda-graph capture with `gemm execution failed: Error Internal`
+  (no Turing config); on B200 (sm100) / RTX PRO 6000 (sm120) it raises
+  `NotImplementedError: No implemented int8_scaled_mm for current compute capability` — both are
+  upstream kernel-coverage limits (the `rc=-9` rows in `allcards.json`). Outside sm80–90, use our
+  **int4** (works on all 10 GPUs, faster than fp16 at bsz1) or fp16.
 - **int8 (w8a8)** runs on Ampere / Ada / Hopper; on Hopper it is ~neutral vs bf16 at 1.5B (bf16
   tensor cores already saturate), so int8's value there is VRAM (−41–46% weights), not decode speed —
   its cross-precision decode win vs albatross-fp16 is at 7.2B (see [`comparison_clean.md`](comparison_clean.md)).

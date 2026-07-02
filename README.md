@@ -83,11 +83,13 @@ and **verified live on a real 16 GB T4**: greedy 8/8 exact, 32.9 tok/s bsz1, pea
 0.1B / 1.5B / 7.2B (fp16 + bf16, cuda-graph); lm-eval **ties** rwkv-lm (1.5B lambada 0.673 vs
 0.671, MMLU 0.524 vs 0.511).
 
-**5. Runs on the whole GPU lineup** — measured on **8 architectures, Turing → Hopper**
-(T4 / L4 / A10G / A100-40/80 / L40S / H100 / H200): bf16 is **greedy-EXACT on all 8**, and the
-hand-written **int4 runs (and is faster than fp16) on all 8 — including Turing** (the kernel needs
-no `cp.async`), no per-arch code change. Peak: H200 bf16 decode **6,938 tok/s** @bsz32, prefill
-**78,268 tok/s**. Full grid: [`bench/results/multigpu.md`](bench/results/multigpu.md).
+**5. Runs on the whole GPU lineup** — measured on **10 GPU types across 7 SM generations,
+Turing → Blackwell** (T4 / L4 / A10G / A100-40/80 / L40S / H100 / H200 / **B200** /
+**RTX PRO 6000**): bf16 is **greedy-EXACT on all 10**, and the hand-written **int4 runs (and is
+faster than fp16 at bsz1) on all 10** — from Turing (no `cp.async` needed) to Blackwell sm120
+(RTX PRO 6000: int4 bsz1 **1.41×** bf16), no per-arch code change. Peaks: **B200 prefill
+103,022 tok/s, decode 7,213 tok/s** @bsz32. (int8 is sm80–90 only — an sgl-kernel cutlass
+coverage limit.) Full grid: [`bench/results/multigpu.md`](bench/results/multigpu.md).
 
 ### The one axis albatross leads — shown in full 🔬
 **Same-precision fp16, *single-stream* raw decode.** This is albatross's home turf: it's a pure

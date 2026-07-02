@@ -4,7 +4,7 @@ project: rwkv-sglang
 title: "RWKV-7 × sglang adaptation — canonical state"
 date: 2026-07-02
 status: active
-last_verified_commit: 9a24433
+last_verified_commit: 1e8f87c
 schema_invariant: |
   - Every ADR referenced anywhere MUST appear once in §"ADR roster".
   - Every finding referenced anywhere MUST appear once in §"Findings ledger".
@@ -50,10 +50,10 @@ we WIN on VRAM, int8 (7.2B ≥ albatross-fp16 cross-precision), and real serving
 `bench/results/serving_scale/`. README reframed to lead with the won axes (concurrency/VRAM/int8/
 accuracy), same-precision single-stream chart demoted to an honest "one axis albatross leads" section. ALL
 milestones done: Phase-0 + M0 + M1 + M2 + M3(comparison+lm-eval) + M3b(de-FLA) + M4(int8) + M5(multi-GPU)
-+ M-rigor + M6(3 CUDA kernels) + **M7(int4: hand-written GEMV + GPTQ, [[F0017]])** + ShareGPT serving
-bench + the 8-arch all-card sweep (`bench/results/multigpu.md`) + 7.2B full lambada 0.742. Published
-(single clean commit). Remaining = int4 M>1 fused GEMM, 7.2B int4 numbers, T4-int8 diagnosis,
-v0.1.0 tag, optional fp8/TP.
++ M-rigor + M6(3 CUDA kernels) + **M7(int4: 3 hand-written kernels + GPTQ, [[F0017]])** + ShareGPT
+serving bench + the **10-GPU all-card sweep, Turing→Blackwell** (`bench/results/multigpu.md`) +
+7.2B full lambada 0.742 + 7.2B serving-scale. **v0.1.0 tagged + released.** Remaining = int4 bsz64+
+tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 - ✅ Recon/arch/baselines/re-analysis → sglang chosen. [[F0001]][[F0002]][[F0003]][[F0004]]
 - ✅ ADR-0001 (scope/wedge), ADR-0002 (integration), ADR-0003 (M1 scope & slicing).
 - ✅ M1 plan (`docs/design/m1-implementation-plan.md`) + correctness gate `bench/oracle_numpy.py`.
@@ -127,9 +127,10 @@ v0.1.0 tag, optional fp8/TP.
   regression-clean (24/24). Opt-in `RWKV_W4=1`.
 - ✅ **ShareGPT serving bench** (`bench/results/serving_scale/`, standard `bench_serving`, 1.5B,
   500 reqs): peak 1275 out-tok/s / 3361 total-tok/s; @16 req/s median TTFT **273 ms**.
-- ✅ **8-arch all-card sweep** (`bench/results/multigpu.md` + `allcards.json`): bf16 greedy-EXACT
-  on ALL 8 (T4/L4/A10G/A100-40/-80/L40S/H100/H200); **int4 runs + bsz1-faster on all 8 incl.
-  Turing** (no cp.async; 2.04× L4 … 1.09× H200); int8 on 7 of 8 (T4 rc=-9 undiagnosed — open).
+- ✅ **10-GPU all-card sweep (Turing→Blackwell incl. B200 + RTX PRO 6000; int8 = sm80–90 only, sgl-kernel limit)** (`bench/results/multigpu.md` + `allcards.json`): bf16 greedy-EXACT
+  on ALL 10 (T4/L4/A10G/A100-40/-80/L40S/H100/H200/B200/RTX-PRO-6000); **int4 runs + bsz1-faster
+  on all 10, Turing→Blackwell** (2.04× L4 … 1.41× RTX PRO 6000 … 1.09× H200); int8 sm80–90 only
+  (T4: cutlass Error Internal; Blackwell: explicit NotImplementedError — upstream sgl-kernel).
   7.2B full lambada **0.742** (`out/lmeval_72b-lambada`). Chunked-prefill gate 48/48 exact
   (`bench/verify_chunked_prefill.py`).
 - ✅ **published**: single clean commit `9a24433` → github.com/Hakureirm/rwkv-sglang (PUBLIC);
@@ -181,7 +182,7 @@ v0.1.0 tag, optional fp8/TP.
 | F0009 | 7.2B exact + dynamic-batch correctness (radix auto-off) + comparison (gap shrinks→~1.2-1.8× @7.2B) | info | open |
 | F0010 | M3b de-FLA complete — own WKV kernel (decode+prefill), 100% FLA-free, zero speed cost | info | closed_by_M3b |
 | F0011 | M4 w8a8-int8 — decode FASTER than bf16 (+15-53%) + weight bytes -41-46% (safetensors), 7.2B EXACT | info | open |
-| F0012 | Multi-GPU coverage — greedy-EXACT T4/L4/A10G/A100/H100, no per-arch change | info | open |
+| F0012 | Multi-GPU coverage — greedy-EXACT on 10 GPU types / 7 SM gens (Turing→Blackwell incl. B200 + RTX PRO 6000); int4 on all 10; int8 = sm80–90 only (sgl-kernel) | info | open |
 | F0013 | Fusion +5-11% decode (EXACT); bit-exact caps fusion at the elementwise subset | info | open |
 | F0014 | Clean same-precision standing — raw speed loses, accuracy TIES, VRAM/int8/serving win; CUDA endgame chosen | info | open |
 | F0015 | CUDA endgame result — fused fp16 GEMV greedy-EXACT, +5-9% bsz1 decode @1.5B/7.2B; cuda-graph amortizes the eager win; mega-kernel to match albatross DECLINED | info | open |
