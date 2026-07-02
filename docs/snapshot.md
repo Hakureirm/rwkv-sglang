@@ -162,6 +162,10 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
   v_first was reassembled into a franken-tensor; fix = full-width across the boundary
   (upstream-relevant). Same session: sm80+ cp.async 2-stage pipeline in gemm_w4/w8_tc
   (e2e bsz64 w4 0.77→0.80×, w8 0.74→0.77×; bsz≤32 unchanged ≥fp16; Turing sync fallback).
+- ✅ **M11 fused LoRA** [[F0020]] (2026-07-03): all four LoRA chains in 2 launches
+  (`RWKV_FUSED_LORA=1`) — fp16 bsz1 decode **203.0 → 226.5 tok/s (+11.6%), greedy 24/24
+  EXACT**; per-component profile shows lm_head = 58.5% of the graphed step (268 MB fp16
+  read at ~91% BW — the head, not the layers, is the remaining fp16 wall).
 - 🔄 **remaining**: w4/w8 M=64 long-K final gap (cp.async landed; next lever = 256-thread TC block) · tp/pp throughput-tuned numbers (cuda-graph ON) + 7.2B multi-GPU · W4/W8 × tp>1 · per-arch small-M cutover (T4) ·
   7.2B GPTQ streamed calibration · fp8 · upstream PR (main port DONE — unblocked).
 
@@ -209,6 +213,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 | F0014 | Clean same-precision standing — raw speed loses, accuracy TIES, VRAM/int8/serving win; CUDA endgame chosen | info | open |
 | F0015 | CUDA endgame result — fused fp16 GEMV greedy-EXACT, +5-9% bsz1 decode @1.5B/7.2B; cuda-graph amortizes the eager win; mega-kernel to match albatross DECLINED | info | open |
 | F0016 | Serving-scale measured — ~50× concurrency throughput at flat VRAM; context-invariant memory (O(1)-state wedge) | info | open |
+| F0020 | Fused LoRA kernel — fp16 bsz1 226.5 tok/s (+11.6%), greedy EXACT; lm_head identified as 58.5% of the graphed step | info | open |
 | F0019 | TP+PP full matrix greedy-EXACT on real L4 fleets (tp 2/4/8, pp 2/4/8, mixed tp2×pp2 after the v_first full-width fix); PP-transfer chunk-send pitfall documented (upstream-relevant) | info | open |
 | F0018 | Hand-written weight-only int8 (w8a16) — greedy-EXACT 24/24; ≥fp16 at every bsz≤32 (1.02–1.37×); runs on every arch (JIT; vs cutlass w8a8 sm80–90 only) | info | open |
 | F0017 | Hand-written weight-only int4 — faster than fp16 at every bsz≤8 (1.04–1.56×); 7.2B: 102.8 tok/s bsz1 (1.29× albatross-fp16), fixture-EXACT, lambada −2.64pt, 9.8GB total; GPTQ 1.5B −3.34pt; M>8 dequant ~0.5× (fused GEMM = endgame) | info | open |

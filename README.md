@@ -103,7 +103,7 @@ coverage limit.) Full grid: [`bench/results/multigpu.md`](bench/results/multigpu
 **Same-precision fp16, *single-stream* raw decode.** This is albatross's home turf: it's a pure
 single-stream mega-kernel already at **~92% of the 3090's memory-bandwidth ceiling**, whereas we
 are a full dynamic-batching serving engine. We publish every number anyway (higher = closer to
-its raw kernel; `1.00×` = parity; best config = in-place WKV + `RWKV_SPARSE_FFN=1` + `RWKV_FAST_LINEAR=1`):
+its raw kernel; `1.00×` = parity; best config = in-place WKV + `RWKV_SPARSE_FFN=1` + `RWKV_FAST_LINEAR=1` + `RWKV_FUSED_LORA=1`, [F0020](docs/findings/0020-fused-lora.md)):
 ```
               ours / albatross-fp16 — same-precision single-stream (decode tok/s)
 7.2B  bsz1  ██████████████████░░░░  0.83×   (45.9 → 65.7 tok/s)

@@ -60,6 +60,7 @@ from sglang.srt.distributed import (
     get_tensor_model_parallel_world_size,
 )
 from sglang.srt.layers.attention.rwkv7_kernels import fast_linear
+from sglang.srt.layers.attention.rwkv7_kernels import lora_fused
 from sglang.srt.layers.attention.rwkv7_kernels import sparse_cmix
 from sglang.srt.layers.attention.rwkv7_kernels import w4_linear
 from sglang.srt.layers.attention.rwkv7_kernels.fused import (
@@ -85,6 +86,23 @@ from sglang.srt.utils import add_prefix, make_layers
 
 import os
 
+
+def _tp_size() -> int:
+    """TP world size, tolerating uninitialized distributed state (standalone
+    tools like bench/profile_components.py build layers without an engine)."""
+    try:
+        return get_tensor_model_parallel_world_size()
+    except (AssertionError, ValueError):
+        return 1
+
+
+def _tp_rank() -> int:
+    try:
+        return get_tensor_model_parallel_rank()
+    except (AssertionError, ValueError):
+        return 0
+
+
 # e^-0.5 = 1/sqrt(e); w_log = -this * sigmoid(w_raw)  =>  decay = exp(w_log).
 _INV_SQRT_E = 0.6065306597126334
 
@@ -98,6 +116,16 @@ _INV_SQRT_E = 0.6065306597126334
 # Ampere fp16==bf16). bf16/fp32/quantized + any M>1 keep the ReplicatedLinear path.
 # Gate: greedy-EXACT (verify_m1d) before it can be the default. Default OFF.
 _FAST_LINEAR = os.environ.get("RWKV_FAST_LINEAR", "0") == "1"
+
+# M9: fused 4-chain LoRA on the bsz1 fp16 decode path. Per layer the w/a/g[,v]
+# LoRA chains are ~12+ tiny launches (4x down-GEMV + act + up-GEMV[+bias]) whose
+# LAUNCH LATENCY, not bandwidth, dominates; rwkv7_lora.lora4_m1 packs all chains
+# into one op with 2 kernels (fp32 accum, torch's fp16 intermediate roundings
+# reproduced -> matches the torch chain to ~1 fp16 ULP, same class as gemv_m1).
+# Eligible only fp16 + M==1 + quant_config None + tp=1 + plain fp16 LoRA weights;
+# everything else keeps the existing per-chain path untouched. Gate: greedy-EXACT
+# (verify_m1d) before it can be the default. Default OFF.
+_FUSED_LORA = os.environ.get("RWKV_FUSED_LORA", "0") == "1"
 
 # M6 measurement gate: log the per-token zero-fraction of the ffn sqrelu activation
 # (relu(k)^2 == 0 iff k<=0). Reproduces the 86-90% figure in bench/results/sparse_ffn/
@@ -276,7 +304,7 @@ def _make_proj(in_f: int, out_f: int, quant_config, prefix: str, parallel: str =
     quant-aware ReplicatedLinear (unquantized / w8a8-int8). Under tp>1 the projection
     is head-parallel instead: ColumnParallelLinear (output = this rank's head slice,
     no gather) or RowParallelLinear (local-slice input, allreduce inside)."""
-    if get_tensor_model_parallel_world_size() > 1:
+    if _tp_size() > 1:
         if _W4 or _W8:
             raise NotImplementedError(
                 "RWKV_W4/RWKV_W8 quantized projections require tp=1 for now"
@@ -374,7 +402,7 @@ class Rwkv7LoRA(nn.Module):
             act = nn.Sigmoid()
         else:
             act = nn.Identity()
-        if get_tensor_model_parallel_world_size() > 1:
+        if _tp_size() > 1:
             up = ColumnParallelLinear(
                 low_rank,
                 hidden_size,
@@ -436,7 +464,7 @@ class Rwkv7Attention(nn.Module):
         # ranks. Everything downstream of the r/k/v/LoRA-up projections (per-
         # channel params, g_norm, the WKV recurrence and its state) lives on
         # this rank's head slice; o_proj (row-parallel) restores the full H.
-        tp_size = get_tensor_model_parallel_world_size()
+        tp_size = _tp_size()
         assert self.num_heads % tp_size == 0, (
             f"RWKV-7 TP requires num_heads({self.num_heads}) divisible by "
             f"tp_size({tp_size})"
@@ -448,7 +476,7 @@ class Rwkv7Attention(nn.Module):
             import sys
             from sglang.srt.distributed import get_tensor_model_parallel_rank
             print(f"[par-debug] attn L{layer_id}: tp_size={tp_size} "
-                  f"tp_rank={get_tensor_model_parallel_rank()} nh_local={self.local_num_heads}",
+                  f"tp_rank={_tp_rank()} nh_local={self.local_num_heads}",
                   file=sys.stderr, flush=True)
 
         H = self.hidden_size
@@ -512,6 +540,63 @@ class Rwkv7Attention(nn.Module):
             import sys
             print("[rwkv7] M6 fused fp16 GEMV projection path ENABLED "
                   "(bsz1 decode, fp16)", file=sys.stderr, flush=True)
+        # M9: fused 4-chain LoRA (see _FUSED_LORA above). The packed weight
+        # tensors are built lazily (like _mix6 / the sparse-ffn tiles) on the
+        # first eligible forward — i.e. the eager warmup run, post weight-load,
+        # before cuda-graph capture. Not packable (quantized / non-fp16 / odd
+        # shapes) -> the flag flips off and the per-chain path runs unchanged.
+        self._fused_lora = (
+            _FUSED_LORA and (quant_config is None) and tp_size == 1
+            and lora_fused.available()
+        )
+        self._lora_pack = None
+
+    def _build_lora_pack(self):
+        """Pack the layer's LoRA chains (w, a, g[, v] — matching lp[2:] order)
+        into (d_cat, u_cat, bias_cat, meta) for lora4_m1. Returns None unless
+        every chain is a plain fp16 ReplicatedLinear pair (the quantized / bnb /
+        tp>1 variants keep the per-chain path)."""
+        try:
+            loras = [self.w_lora, self.a_lora, self.g_lora]
+            if self.layer_id > 0:
+                loras.append(self.v_lora)
+            H = self.hidden_size
+            if (H % 4) != 0:
+                return None
+            chains = []
+            for m in loras:
+                down, act_m, up = m.lora[0], m.lora[1], m.lora[2]
+                if not (isinstance(down, ReplicatedLinear)
+                        and isinstance(up, ReplicatedLinear)):
+                    return None
+                dw = getattr(down, "weight", None)
+                uw = getattr(up, "weight", None)
+                if (
+                    dw is None or uw is None
+                    or dw.dtype != torch.float16 or uw.dtype != torch.float16
+                    or dw.dim() != 2 or uw.dim() != 2
+                    or dw.shape[1] != H or uw.shape[0] != H
+                    or uw.shape[1] != dw.shape[0]
+                ):
+                    return None
+                b = getattr(up, "bias", None)
+                if b is not None and (b.dtype != torch.float16 or b.shape != (H,)):
+                    return None
+                if isinstance(act_m, nn.Tanh):
+                    act = lora_fused.ACT_TANH
+                elif isinstance(act_m, nn.Sigmoid):
+                    act = lora_fused.ACT_SIGMOID
+                elif isinstance(act_m, nn.Identity):
+                    act = lora_fused.ACT_IDENTITY
+                else:
+                    return None
+                chains.append((
+                    dw.detach(), uw.detach(),
+                    None if b is None else b.detach(), act,
+                ))
+            return lora_fused.pack_loras(chains)
+        except Exception:
+            return None
 
     def _mix6_buf(self) -> torch.Tensor:
         if self._mix6 is None:
@@ -566,11 +651,38 @@ class Rwkv7Attention(nn.Module):
             v_first = v
 
         # LoRA gates: w=decay, a=in-context-lr, g=output-gate, v=v-residual (layer>0).
-        w_log = -torch.sigmoid(self.w_lora(xw)) * _INV_SQRT_E
-        a = torch.sigmoid(self.a_lora(xa))
-        g = self.g_lora(xg)
-        if self.layer_id != 0:
-            v = v + (v_first - v) * torch.sigmoid(self.v_lora(xv))
+        # M9 fused path (bsz1 fp16 decode): one lora4_m1 op (2 launches) computes all
+        # chains' up(act(down(x)))+bias; the OUTER nonlinearities (w_log sigmoid, a
+        # sigmoid, v-residual mix) stay in model code, identical to the torch path.
+        lo = None
+        if self._fused_lora and fused and T == 1 and x.dtype == torch.float16:
+            if self._lora_pack is None:
+                # lazy build on the first eligible (eager warmup) forward
+                self._lora_pack = self._build_lora_pack()
+                if self._lora_pack is None:
+                    self._fused_lora = False  # not packable -> torch path from now on
+                elif self.layer_id == 0:
+                    import sys
+                    print("[rwkv7] M9 fused LoRA path ENABLED (bsz1 decode, fp16)",
+                          file=sys.stderr, flush=True)
+            if self._lora_pack is not None:
+                # lp rows [2:6] are xw,xa,xg,xv — a contiguous zero-copy [C,1,H]
+                # slice in exactly the pack's chain order (w,a,g[,v]).
+                C = 4 if self.layer_id > 0 else 3
+                xs = lp[2:2 + C].reshape(C, -1)
+                lo = lora_fused.lora4_m1(xs, *self._lora_pack)
+        if lo is not None:
+            w_log = -torch.sigmoid(lo[0:1]) * _INV_SQRT_E
+            a = torch.sigmoid(lo[1:2])
+            g = lo[2:3]
+            if self.layer_id != 0:
+                v = v + (v_first - v) * torch.sigmoid(lo[3:4])
+        else:
+            w_log = -torch.sigmoid(self.w_lora(xw)) * _INV_SQRT_E
+            a = torch.sigmoid(self.a_lora(xa))
+            g = self.g_lora(xg)
+            if self.layer_id != 0:
+                v = v + (v_first - v) * torch.sigmoid(self.v_lora(xv))
 
         if fused:
             # kk = L2norm(k·k_k) over hd; k <- k + k·(a-1)·k_a  (one launch)
@@ -623,7 +735,7 @@ class Rwkv7FeedForward(nn.Module):
         self.x_k = nn.Parameter(torch.zeros(H))
         # tp>1: key is column-parallel (local inter slice; sqrelu is elementwise so
         # it acts per-slice), value is row-parallel (allreduce restores the full H).
-        tp_size = get_tensor_model_parallel_world_size()
+        tp_size = _tp_size()
         self.key = _make_proj(H, inter, quant_config, add_prefix("key", prefix))
         self.value = _make_proj(inter, H, quant_config, add_prefix("value", prefix),
                                 parallel="row")
@@ -776,21 +888,21 @@ class Rwkv7Model(nn.Module):
             # sglang's pp tensor-dict transfer chunk-sends over the tp group and
             # all-gathers on receive, which is only lossless for tp-replicated
             # tensors) — slice back to this rank's head slice.
-            tp_size = get_tensor_model_parallel_world_size()
+            tp_size = _tp_size()
             if tp_size > 1 and v_first.shape[0] > 0:
                 if os.environ.get("RWKV_PAR_DEBUG") == "1":
                     import sys
                     print(f"[par-debug] recv-pre-slice {tuple(v_first.shape)} x={tuple(x.shape)}",
                           file=sys.stderr, flush=True)
                 Hl = v_first.shape[-1] // tp_size
-                r = get_tensor_model_parallel_rank()
+                r = _tp_rank()
                 v_first = v_first[:, r * Hl:(r + 1) * Hl].contiguous()
             if os.environ.get("RWKV_PAR_DEBUG") == "1" and x.shape[0] > 0:
                 import sys
                 _c = getattr(self, "_dbg_recv", 0)
                 if _c < 4:
                     self._dbg_recv = _c + 1
-                    print(f"[par-debug] recv tp{get_tensor_model_parallel_rank()} "
+                    print(f"[par-debug] recv tp{_tp_rank()} "
                           f"call{_c} T={x.shape[0]} xsum={x.float().sum().item():.6f} "
                           f"vfsum={v_first.float().sum().item():.6f}",
                           file=sys.stderr, flush=True)
@@ -814,7 +926,7 @@ class Rwkv7Model(nn.Module):
                 _c = getattr(self, "_dbg_send", 0)
                 if _c < 4:
                     self._dbg_send = _c + 1
-                    print(f"[par-debug] send tp{get_tensor_model_parallel_rank()} "
+                    print(f"[par-debug] send tp{_tp_rank()} "
                           f"call{_c} T={x.shape[0]} xsum={x.float().sum().item():.6f} "
                           f"vfsum={v_first.float().sum().item():.6f}",
                           file=sys.stderr, flush=True)
@@ -822,7 +934,7 @@ class Rwkv7Model(nn.Module):
             # reassembles rank-by-rank on receive — lossless ONLY for tp-replicated
             # tensors. v_first is the LOCAL head slice under tp>1, so gather it to
             # full width here (the receiver slices its head range back out).
-            if get_tensor_model_parallel_world_size() > 1 and v_first.shape[0] > 0:
+            if _tp_size() > 1 and v_first.shape[0] > 0:
                 from sglang.srt.distributed.communication_op import (
                     tensor_model_parallel_all_gather,
                 )
@@ -927,8 +1039,8 @@ class Rwkv7ForCausalLM(nn.Module):
         # W4Linear (RWKV_W4) stores int4 qweight + group scale as BUFFERS, not params —
         # include them so the .qweight/.scale checkpoint keys resolve.
         params_dict.update(dict(self.named_buffers()))
-        tp_size = get_tensor_model_parallel_world_size()
-        tp_rank = get_tensor_model_parallel_rank()
+        tp_size = _tp_size()
+        tp_rank = _tp_rank()
         # Head-sharded per-channel params (tp>1): the checkpoint stores the full
         # tensor; narrow dim 0 (channels resp. heads) to this rank's head slice
         # before the plain copy. Parallel linears shard via their own weight_loader.
