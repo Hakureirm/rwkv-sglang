@@ -67,6 +67,12 @@ transformer's memory grows with batch × context and OOMs long before. Decode st
 **0.88–1.21× albatross-fp16** (decode, bsz 1/8/32 — i.e. a *cross-precision* matchup: our int8
 vs its fp16) while cutting weight bytes **−46%**. A quant path albatross lacks.
 
+**3b. Hand-written int4 beats fp16 at every bsz ≤ 8** — 1.5B decode 1.56×/1.45×/1.35×/**1.04×**
+faster than fp16 at bsz 1/2/4/8 (259/435/773/1153 vs 166/300/574/1113 tok/s). At **7.2B**: bsz1
+**102.8 tok/s = 1.29× albatross-fp16** (79.6; cross-precision), fixture-greedy **EXACT 8/8**,
+lambada 0.7161 vs 0.7425 bf16 (−2.64pt, RTN) — and **verified live on a real 16 GB T4**:
+greedy 8/8 exact, 32.9 tok/s bsz1, peak VRAM **6.7 GB**. Details: [`bench/results/w4/`](bench/results/w4/).
+
 **4. Accuracy is EXACT** — greedy token-for-token match to the rwkv-lm numpy oracle at
 0.1B / 1.5B / 7.2B (fp16 + bf16, cuda-graph); lm-eval **ties** rwkv-lm (1.5B lambada 0.673 vs
 0.671, MMLU 0.524 vs 0.511).
@@ -150,7 +156,7 @@ sglang inference integration; ✅ done, ◑ partial, ⬜ open/out-of-scope-here.
 | 3 | transformers PEFT/RL training | ⬜ out of scope for this project (an sglang inference integration) |
 | 4 | Dynamic batching + chunked prefill + state cache | ✅ sglang-native dynamic batching + chunked prefill + O(1) recurrent state pool; ◑ radix/prefix **reuse** auto-off (state not yet prefix-cacheable — a documented `MambaRadixCache` follow-up) |
 | 5 | Pascal+/AMD/Intel/domestic; PP+TP; zero2/3; autotune | ◑ greedy-EXACT Turing→Hopper (T4/L4/A10G/A100/H100); ⬜ Pascal/AMD/Intel untested, PP/TP not done (tp=1), training/autotune out of scope |
-| 6 | w8 + w4, faster than w16, old cards, Q\*_K_M accuracy | ◑ **w8 (w8a8-int8)** done — faster than bf16, −46% weight bytes, 7.2B greedy-EXACT; ⬜ w4 (bnb-nf4 metadata wired, not benchmarked), Q\*_K_M comparison not done |
+| 6 | w8 + w4, faster than w16, old cards, Q\*_K_M accuracy | ✅ **w8 (w8a8-int8)** — faster than bf16 (+46–59% decode @1.5B/7.2B), −46% weight bytes, 7.2B greedy-EXACT; ✅ **w4 (hand-written int4)** — **faster than fp16 at every bsz≤8** (1.04–1.56× @1.5B; 7.2B bsz1 102.8 tok/s, fixture-EXACT 8/8, lambada 0.7161 vs 0.7425, 9.8 GB total), runs on Turing→Hopper; ◑ Q\*_K_M-style side-by-side not done (our GPTQ g64 −3.34pt @1.5B is the comparable point) |
 | 7 | Speculative decoding (RWKV draft) | ⬜ not done |
 
 The strongest, fully-verified contributions here: **exact correctness (0.1B/1.5B/7.2B)**,

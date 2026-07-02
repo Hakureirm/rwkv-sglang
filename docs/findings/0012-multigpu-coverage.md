@@ -42,10 +42,14 @@ our overlay (== `deploy.sh`); model = the same BlinkDL `.pth` the fixtures came 
   `libnuma1` for sgl_kernel + `CPATH`→headers for triton JIT). ⇒ **broad-GPU-coverage goal met**.
 - **int4 runs on ALL 8 incl. Turing (sm7.5)** — the kernel has no `cp.async` (not limited to sm80+);
   bsz1 faster than bf16 everywhere, biggest on bandwidth-starved cards (see F0017 + multigpu.md §1).
-- **int8** runs on Ampere/Ada/Hopper; ~neutral vs bf16 at 1.5B on Hopper (bf16 saturates), decode
-  win is on Ampere consumer (F0011). **fp8 (H100): BLOCKED** — the strict `load_weights` rejects
-  sglang's runtime fp8 `weight_scale` params (int8 works via its offline scale-baking converter; no
-  fp8 converter exists yet).
+- **int8 requires sm80+** (diagnosed 2026-07-02 from the captured T4 stderr): sglang's cutlass
+  int8 scaled-mm throws `gemm execution failed: Error Internal` at cuda-graph capture on sm75 —
+  no Turing kernel config in sgl-kernel; the child is then SIGKILLed (`rc=-9` in allcards.json).
+  On Ampere/Ada/Hopper int8 runs; ~neutral vs bf16 at 1.5B on Hopper (bf16 saturates), decode
+  win is on Ampere consumer (F0011). **Turing bf16 caveat**: sm75 has no native bf16 compute —
+  bf16 runs emulated (exact, but slow); fp16 is Turing's natural dtype (fp16 baseline measured).
+  **fp8 (H100): BLOCKED** — the strict `load_weights` rejects sglang's runtime fp8 `weight_scale`
+  params (int8 works via its offline scale-baking converter; no fp8 converter exists yet).
 
 ## Conclusion
 The deliverable is **portable across all common consumer + pro NVIDIA GPUs** (Turing→Hopper),

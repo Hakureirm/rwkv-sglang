@@ -65,6 +65,12 @@ bsz 256  ████████████████████░  8,187 
 **albatross-fp16 的 0.88–1.21×**（解码，bsz 1/8/32；即*跨精度*对比：我们的 int8 vs 它的 fp16），
 同时权重字节 **−46%**。这是 albatross 没有的量化路径。
 
+**3b. 手写 int4 在 bsz≤8 每档都快于 fp16**——1.5B 解码 bsz 1/2/4/8 分别为 fp16 的
+1.56×/1.45×/1.35×/**1.04×**（259/435/773/1153 vs 166/300/574/1113 tok/s）。**7.2B**：bsz1
+**102.8 tok/s = albatross-fp16（79.6）的 1.29×**（跨精度），样本贪心 **8/8 精确**，lambada
+0.7161 vs bf16 0.7425（−2.64pt，RTN）——并已**在真 16 GB T4 上实测**：贪心 8/8 精确、
+bsz1 32.9 tok/s、峰值显存仅 **6.7 GB**。详见 [`bench/results/w4/`](bench/results/w4/)。
+
 **4. 精度逐-token 精确**——对 rwkv-lm 纯 numpy oracle 贪心逐-token 命中，0.1B / 1.5B / 7.2B
 （fp16 + bf16，cuda-graph）；lm-eval 与 rwkv-lm **持平**（1.5B lambada 0.673 vs 0.671，MMLU 0.524 vs 0.511）。
 
@@ -145,7 +151,7 @@ serving**（动态批——albatross 没有）上**领先**，并用三个手写
 | 3 | transformers 的 PEFT/RL 训练 | ⬜ 不在本项目范围（一个 sglang 推理集成） |
 | 4 | 动态批 + 分块预填充 + 状态缓存 | ✅ sglang 原生动态批 + 分块预填充 + O(1) 循环状态池；◑ 前缀**复用** radix 暂自动关闭（状态尚不可前缀缓存——已记录为 `MambaRadixCache` 后续项） |
 | 5 | Pascal+/AMD/Intel/国产；PP+TP；zero2/3；autotune | ◑ Turing→Hopper 贪心精确（T4/L4/A10G/A100/H100）；⬜ Pascal/AMD/Intel 未测，PP/TP 未做（tp=1），训练/autotune 不在范围 |
-| 6 | w8 + w4，比 w16 快，老卡，Q\*_K_M 精度 | ◑ **w8（w8a8-int8）**已做——比 bf16 快、权重 −46%、7.2B 贪心精确；⬜ w4（bnb-nf4 元数据已接，未测速）、Q\*_K_M 对比未做 |
+| 6 | w8 + w4，比 w16 快，老卡，Q\*_K_M 精度 | ✅ **w8（w8a8-int8）**——比 bf16 快（1.5B/7.2B 解码 +46–59%）、权重 −46%、7.2B 贪心精确；✅ **w4（手写 int4）**——**bsz≤8 每档都比 fp16 快**（1.5B 1.04–1.56×；7.2B bsz1 102.8 tok/s、样本贪心 8/8 精确、lambada 0.7161 vs 0.7425、总显存 9.8 GB），Turing→Hopper 全卡可跑；◑ Q\*_K_M 直接对表未做（我们的 GPTQ g64 @1.5B −3.34pt 为可比点） |
 | 7 | 初步投机解码（RWKV 做 draft） | ⬜ 未做 |
 
 已完整验证、最强的贡献是：**精确正确性（0.1B/1.5B/7.2B）**、**int8 速度/显存**、

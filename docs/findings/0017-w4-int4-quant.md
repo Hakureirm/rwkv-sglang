@@ -1,7 +1,7 @@
 ---
 doc_kind: finding
 finding_id: F0017
-title: "Hand-written weight-only int4: bsz1 decode 1.54x FASTER than fp16 + ~4x weight-VRAM cut, greedy-consistent, integrated end-to-end in sglang. Accuracy: GPTQ g64 lambada 0.6390 (−3.34pt, within ~1.2pt of int8) vs RTN g64 0.6229 (−4.95pt). M>1 uses a dequant→cuBLAS fallback (~0.5x fp16); a fused int4 GEMM is the throughput endgame."
+title: "Hand-written weight-only int4: FASTER than fp16 at every bsz≤8 (1.04–1.56×, gemv_m1 + gemm_w4_small) + ~4x weight-VRAM cut; 7.2B: 102.8 tok/s bsz1 (1.29× albatross-fp16 cross-precision), fixture-EXACT 8/8, lambada 0.7161 vs 0.7425 (−2.64pt RTN), 9.8GB total. 1.5B accuracy: GPTQ −3.34pt / RTN −4.95pt. M>8 dequant fallback ~0.5× fp16 (fused tensor-core GEMM = endgame)."
 last_verified_commit: "HEAD"
 discovered_by: lead (M7), 2026-07-02
 severity: info
@@ -33,11 +33,39 @@ hand-written int4 path — no bitsandbytes, no FLA.
   unchanged (regression: non-w4 1.5B still **greedy-EXACT 24/24**).
 
 ## End-to-end results (1.5B, RTX 3090, cuda-graph ON, fp16)
-| bsz | fp16 decode tok/s | w4 decode tok/s | w4/fp16 |
-|----:|------------------:|----------------:|--------:|
-|   1 |             166.5 |       **256.1** | **1.54× faster** |
-|   8 |            1112.9 |           541.1 | 0.49× |
-|  32 |            3872.6 |          2014.6 | 0.52× |
+| bsz | fp16 decode tok/s | w4 decode tok/s | w4/fp16 | w4 path |
+|----:|------------------:|----------------:|--------:|---|
+|   1 |             166.5 |       **259.1** | **1.56× faster** | `gemv_w4_m1` |
+|   2 |             299.5 |       **434.9** | **1.45× faster** | `gemm_w4_small` |
+|   4 |             574.1 |       **773.2** | **1.35× faster** | `gemm_w4_small` |
+|   8 |            1112.9 |      **1153.0** | **1.04× faster** | `gemm_w4_small` |
+|  32 |            3872.6 |          1997.2 | 0.52× | dequant→cuBLAS |
+
+**`gemm_w4_small` (added 2026-07-02)** closes the small-batch gap: a template kernel for
+2≤M≤8 where ONE int4 weight-word read feeds all M rows (weight bandwidth amortized across the
+batch). Each row's k-iteration/accumulation order is identical to `gemv_w4_m1`, so every row is
+**BIT-identical to the M==1 kernel** (verified `torch.equal` in `bench/verify_w4.py`) →
+batch-invariant by construction. Standalone vs fp16 cuBLAS: M=2 2.3×, M=4 1.8–2.0×, M=8
+1.07–1.75×; vs the old dequant+cuBLAS fallback: 3–9× (75–149µs → 14–42µs). M>8 stays on
+dequant→cuBLAS deliberately: the scalar-FMA kernel's compute scales linearly with M while
+cuBLAS uses tensor cores — measured crossover is at M≈8 (chunking M=32 into 4×M=8 would be
+~4×42µs = 166µs vs cuBLAS 45µs, i.e. slower).
+
+## 7.2B results (RTX 3090, RTN g64, fp16, cuda-graph ON) — added 2026-07-02
+| metric | fp16 (best, 3 opt-in kernels) | albatross-fp16 | **w4 RTN** |
+|---|---|---|---|
+| decode bsz1 tok/s | 65.7 | 79.6 | **102.8** (1.56× ours-fp16, **1.29× albatross-fp16**, cross-precision) |
+| greedy vs oracle fixture | 24/24-class EXACT | EXACT | **8/8 EXACT** (7.2B quant robustness) |
+| lambada (full 5153) | 0.7425 (bf16) | — | **0.7161 (−2.64pt)** — RTN only; cf. 1.5B RTN −4.95pt |
+| peak serve VRAM (mem-frac 0.55) | ~17.5 GB weights alone | — | **9.8 GB total** |
+| checkpoint | 14.4 GB | — | **4.8 GB** (3.0×) |
+
+**Verified live on a real 16 GB T4** (sm7.5): greedy **8/8 EXACT**, decode **32.9 tok/s** bsz1 /
+**65.3** bsz4, peak VRAM **6,735 MiB** of 14,913 — 7.2B serves on a 16 GB Turing card with more
+than half the VRAM free (raw: `bench/results/allcards.json` entry `T4-72b-w4`).
+
+7.2B GPTQ is deferred: the `RWKV_CALIB` hook accumulates fp32 Hessians on-GPU and the ffn.value
+input dim is 16384 → 1 GB/layer × 32 layers won't fit 24 GB; needs streamed/CPU accumulation.
 
 - **Correctness**: w4 greedy on the oracle fixture = **14/24, first-div @14 — bit-identical to
   the offline fake-quant reference**, confirming the kernel path == dequant (as verify_w4 predicts).
@@ -53,11 +81,12 @@ hand-written int4 path — no bitsandbytes, no FLA.
   GPTQ) would need per-column `g_idx` in the kernel (breaks contiguous groups) — deferred.
 
 ## Honest limitations & the endgame
-- **M>1 decode is ~0.5× fp16.** At batch, the GEMM is compute-bound (weight read amortized), so
-  int4's bandwidth edge is gone AND the dequant→cuBLAS fallback adds an HBM round-trip. A **fused
-  int4 GEMM (marlin-style, dequant in shared memory, no fp16 materialization)** is the throughput
-  endgame; until then w4 is best used as a **single-stream latency + VRAM mode** (bsz1: 1.54×
-  faster + weight VRAM cut), opt-in and default-off.
+- **M>8 decode is ~0.5× fp16** (bsz32: 1997 vs 3873 tok/s). Large batch is compute-bound (weight
+  read amortized) so int4's bandwidth edge is gone AND the dequant→cuBLAS fallback adds an HBM
+  round-trip; the scalar-FMA small-M kernel can't compete with tensor cores past M≈8 (measured).
+  A **fused int4 tensor-core GEMM (marlin-style, dequant in shared memory)** is the remaining
+  endgame for M>8. Through **bsz 8, w4 is now faster than fp16 at every batch size** (1.04–1.56×),
+  opt-in and default-off.
 - **Accuracy**: GPTQ closed RTN's −4.95pt to **−3.34pt** (within ~1.2pt of int8). Closing the
   last bit toward Q4_K_M would need act-order GPTQ (per-column `g_idx` in the kernel — breaks the
   contiguous-group assumption) or more calibration; deferred as diminishing returns.

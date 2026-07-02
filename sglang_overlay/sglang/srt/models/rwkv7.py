@@ -162,13 +162,19 @@ class W4Linear(nn.Module):
             persistent=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        M = x.shape[0]
         if (
-            x.shape[0] == 1
-            and x.dtype == torch.float16
+            x.dtype == torch.float16
             and (x.shape[-1] % self.group) == 0
             and w4_linear.available()
         ):
-            return w4_linear.gemv_w4_m1(x, self.qweight, self.scale)
+            if M == 1:
+                return w4_linear.gemv_w4_m1(x, self.qweight, self.scale)
+            # small batched decode: one int4 weight read feeds all M rows; each row
+            # is bit-identical to the M==1 kernel (batch-invariant by construction).
+            if 2 <= M <= 8 and (self.out_features % 2) == 0:
+                return w4_linear.gemm_w4_small(x, self.qweight, self.scale)
+        # M>8 / prefill: dequant -> cuBLAS (compute-bound regime; weight read amortized)
         w = w4_linear.dequant(self.qweight, self.scale, self.group).to(x.dtype)
         return torch.nn.functional.linear(x, w)
 

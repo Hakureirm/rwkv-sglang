@@ -2,11 +2,12 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 """JIT loader + adapter for the hand-written weight-only int4 decode GEMV (rwkv7_w4.cu).
 
-Weight-only group-wise (GROUP=128) symmetric int4 for the big r/k/v/o + ffn key/value
-projections. Decode (M==1) is weight-bandwidth-bound, so reading int4 weights (~1/4 the
-bytes of fp16) makes bsz1 decode *faster* than fp16 while cutting weight VRAM ~4x — the
-two things 4-bit must deliver. Not bitsandbytes (its nf4 GEMV is slower than fp16
-at M==1) and no FLA. Built WITHOUT --use_fast_math (IEEE). cuda-graph safe.
+Weight-only group-wise (GROUP=64) symmetric int4 for the big r/k/v/o + ffn key/value
+projections. Small-batch decode (M<=8) is weight-bandwidth-bound, so reading int4 weights
+(~1/4 the bytes of fp16) makes decode *faster* than fp16 while cutting weight VRAM ~4x —
+the two things 4-bit quantization must deliver (VRAM down, speed >= 16-bit). Not
+bitsandbytes (its nf4 GEMV is slower than fp16 at M==1) and no FLA. Built WITHOUT
+--use_fast_math (IEEE). cuda-graph safe.
 
 Numerics validated bit-identically vs the dequant reference in bench/verify_w4.py
 (rel err ~2e-4, i.e. same ULP as torch's own fp16 matmul).
@@ -57,6 +58,10 @@ def _register_fakes():
         def _gemv_w4_m1_fake(x, qweight, scale):
             return x.new_empty((1, qweight.shape[0]))
 
+        @torch.library.register_fake("rwkv7_w4::gemm_w4_small")
+        def _gemm_w4_small_fake(x, qweight, scale):
+            return x.new_empty((x.shape[0], qweight.shape[0]))
+
         @torch.library.register_fake("rwkv7_w4::dequant_w4")
         def _dequant_w4_fake(qweight, scale):
             return scale.new_empty((qweight.shape[0], qweight.shape[1] * 2))
@@ -70,8 +75,15 @@ def available() -> bool:
 
 def gemv_w4_m1(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
     """y[1,N] = dequant(qweight,scale) applied to x[1,K]. M==1, fp16. Caller guards
-    fp16 + M==1 + K%128==0 before dispatching here."""
+    fp16 + M==1 + K%64==0 before dispatching here."""
     return torch.ops.rwkv7_w4.gemv_w4_m1(x.contiguous().view(1, -1), qweight, scale)
+
+
+def gemm_w4_small(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    """y[M,N] for 2<=M<=8 (small batched decode): one int4 weight-word read feeds all M
+    rows; each row is bit-identical to the M==1 kernel (same accumulation order) ->
+    batch-invariant. Caller guards fp16 + 2<=M<=8 + K%64==0 + N even."""
+    return torch.ops.rwkv7_w4.gemm_w4_small(x.contiguous(), qweight, scale)
 
 
 def dequant(qweight: torch.Tensor, scale: torch.Tensor, group: int = GROUP) -> torch.Tensor:

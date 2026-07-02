@@ -4,7 +4,7 @@
 // token and dominate the byte traffic. Storing those weights as symmetric int4
 // (per-output-channel scale) cuts that traffic ~4x vs fp16, so a bsz1 decode GEMV
 // over int4 weights is *faster* than fp16 (not merely parity) AND cuts weight VRAM
-// ~4x — the two things 4-bit must deliver (VRAM down, speed >= 16-bit).
+// ~4x — the two things 4-bit quantization must deliver (VRAM down, speed >= 16-bit).
 //
 // This is a hand-written int4 variant of `rwkv7_fast.cu::gemv_m1` (same block/warp
 // reduction skeleton); it does NOT use bitsandbytes (whose nf4 GEMV dequant is
@@ -132,8 +132,123 @@ at::Tensor gemv_w4_m1(at::Tensor x, at::Tensor qweight, at::Tensor scale) {
 }
 
 // ---------------------------------------------------------------------------
+// gemm_w4_small: y[M,N] for 2<=M<=8 (small batched decode). ONE int4 weight-word
+// read feeds all M rows — the weight traffic (the bandwidth cost) is amortized
+// across the batch instead of falling back to dequant->cuBLAS (which round-trips
+// a full fp16 copy of the weights through HBM every call). Each row's k-iteration
+// and accumulation order is IDENTICAL to gemv_w4_m1, so every row's result is
+// bit-identical to the M==1 kernel -> batch-invariant by construction.
+// Activations x[M,K] are tiny (<=64KB) and L2-resident across blocks.
+// ---------------------------------------------------------------------------
+template <int Threads, int OutTile, int M>
+__global__ __launch_bounds__(Threads, 1) void gemm_w4_small_kernel(
+    int K, int N, int NG,
+    const __half* __restrict__ x,       // [M, K]
+    const uint32_t* __restrict__ qw,    // [N, K/8]
+    const __half* __restrict__ scale,   // [N, NG]
+    __half* __restrict__ y) {           // [M, N]
+  const int n0 = blockIdx.x * OutTile;
+  const int KW = K >> 3;
+  float acc[M][OutTile];
+#pragma unroll
+  for (int m = 0; m < M; ++m)
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) acc[m][j] = 0.0f;
+
+  for (int t = threadIdx.x; t < KW; t += Threads) {
+    const int k = t << 3;
+    const int g = t / WORDS_PER_GROUP;
+    float2 a[M][4];
+#pragma unroll
+    for (int m = 0; m < M; ++m) {
+      const __half* xm = x + static_cast<int64_t>(m) * K + k;
+      a[m][0] = __half22float2(*reinterpret_cast<const __half2*>(xm));
+      a[m][1] = __half22float2(*reinterpret_cast<const __half2*>(xm + 2));
+      a[m][2] = __half22float2(*reinterpret_cast<const __half2*>(xm + 4));
+      a[m][3] = __half22float2(*reinterpret_cast<const __half2*>(xm + 6));
+    }
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      const uint32_t p = qw[static_cast<int64_t>(n0 + j) * KW + t];
+      int q0 = (int)((p >> 0) & 0xF);  q0 -= (q0 & 8) << 1;
+      int q1 = (int)((p >> 4) & 0xF);  q1 -= (q1 & 8) << 1;
+      int q2 = (int)((p >> 8) & 0xF);  q2 -= (q2 & 8) << 1;
+      int q3 = (int)((p >> 12) & 0xF); q3 -= (q3 & 8) << 1;
+      int q4 = (int)((p >> 16) & 0xF); q4 -= (q4 & 8) << 1;
+      int q5 = (int)((p >> 20) & 0xF); q5 -= (q5 & 8) << 1;
+      int q6 = (int)((p >> 24) & 0xF); q6 -= (q6 & 8) << 1;
+      int q7 = (int)((p >> 28) & 0xF); q7 -= (q7 & 8) << 1;
+      const float s = __half2float(scale[static_cast<int64_t>(n0 + j) * NG + g]);
+#pragma unroll
+      for (int m = 0; m < M; ++m) {
+        float part = a[m][0].x * (float)q0 + a[m][0].y * (float)q1
+                   + a[m][1].x * (float)q2 + a[m][1].y * (float)q3
+                   + a[m][2].x * (float)q4 + a[m][2].y * (float)q5
+                   + a[m][3].x * (float)q6 + a[m][3].y * (float)q7;
+        acc[m][j] = fmaf(part, s, acc[m][j]);
+      }
+    }
+  }
+
+  __shared__ float partial[Threads / 32][M][OutTile];
+  const int lane = threadIdx.x & 31;
+  const int warp = threadIdx.x >> 5;
+#pragma unroll
+  for (int m = 0; m < M; ++m)
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      const float v = warp_sum_w4(acc[m][j]);
+      if (lane == 0) partial[warp][m][j] = v;
+    }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+#pragma unroll
+    for (int m = 0; m < M; ++m)
+#pragma unroll
+      for (int j = 0; j < OutTile; ++j) {
+        float sum = 0.0f;
+#pragma unroll
+        for (int w = 0; w < Threads / 32; ++w) sum += partial[w][m][j];
+        y[static_cast<int64_t>(m) * N + n0 + j] = __float2half_rn(sum);
+      }
+  }
+}
+
+// x: [M,K] fp16 (2<=M<=8, N even);  qweight: uint8 [N,K/2];  scale: fp16 [N,K/GROUP].
+at::Tensor gemm_w4_small(at::Tensor x, at::Tensor qweight, at::Tensor scale) {
+  const int64_t M = x.size(0);
+  const int64_t K = x.size(1);
+  const int64_t N = qweight.size(0);
+  const int64_t NG = K / GROUP;
+  TORCH_CHECK(M >= 2 && M <= 8, "gemm_w4_small requires 2<=M<=8");
+  TORCH_CHECK((K % GROUP) == 0, "gemm_w4_small requires K%64==0");
+  TORCH_CHECK((N % 2) == 0, "gemm_w4_small requires N even");
+  TORCH_CHECK(qweight.size(1) == K / 2, "gemm_w4_small qweight [N,K/2] mismatch");
+  TORCH_CHECK(scale.size(0) == N && scale.size(1) == NG, "gemm_w4_small scale [N,K/64] mismatch");
+  auto y = at::empty({M, N}, x.options());
+  if (K == 0 || N == 0) return y;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  const auto* qptr = reinterpret_cast<const uint32_t*>(qweight.data_ptr<uint8_t>());
+  const auto* xptr = reinterpret_cast<const __half*>(x.data_ptr<dtype>());
+  const auto* sptr = reinterpret_cast<const __half*>(scale.data_ptr<dtype>());
+  auto* yptr = reinterpret_cast<__half*>(y.data_ptr<dtype>());
+  const int blocks = static_cast<int>(N / 2);
+  switch (M) {
+    case 2: gemm_w4_small_kernel<128, 2, 2><<<blocks, 128, 0, stream>>>(K, N, NG, xptr, qptr, sptr, yptr); break;
+    case 3: gemm_w4_small_kernel<128, 2, 3><<<blocks, 128, 0, stream>>>(K, N, NG, xptr, qptr, sptr, yptr); break;
+    case 4: gemm_w4_small_kernel<128, 2, 4><<<blocks, 128, 0, stream>>>(K, N, NG, xptr, qptr, sptr, yptr); break;
+    case 5: gemm_w4_small_kernel<128, 2, 5><<<blocks, 128, 0, stream>>>(K, N, NG, xptr, qptr, sptr, yptr); break;
+    case 6: gemm_w4_small_kernel<128, 2, 6><<<blocks, 128, 0, stream>>>(K, N, NG, xptr, qptr, sptr, yptr); break;
+    case 7: gemm_w4_small_kernel<128, 2, 7><<<blocks, 128, 0, stream>>>(K, N, NG, xptr, qptr, sptr, yptr); break;
+    case 8: gemm_w4_small_kernel<128, 2, 8><<<blocks, 128, 0, stream>>>(K, N, NG, xptr, qptr, sptr, yptr); break;
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return y;
+}
+
+// ---------------------------------------------------------------------------
 // dequant_w4: int4 (qweight,scale) -> fp16 weight [N, K]. Memory-bound; used by the
-// M>1 (prefill / batched-decode) path which then calls cuBLAS. At M>1 the GEMM is
+// M>8 (prefill / large-batch) path which then calls cuBLAS. At large M the GEMM is
 // compute-bound and the weight read is amortized across the batch, so w4 cannot beat
 // fp16 there — the goal is only to MATCH it (req#5 "not slower than 16-bit") while
 // keeping the int4 checkpoint. One fp16 word per thread-iteration; coalesced.
@@ -178,9 +293,11 @@ at::Tensor dequant_w4(at::Tensor qweight, at::Tensor scale) {
 
 TORCH_LIBRARY(rwkv7_w4, m) {
   m.def("gemv_w4_m1(Tensor x, Tensor qweight, Tensor scale) -> Tensor");
+  m.def("gemm_w4_small(Tensor x, Tensor qweight, Tensor scale) -> Tensor");
   m.def("dequant_w4(Tensor qweight, Tensor scale) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(rwkv7_w4, CUDA, m) {
   m.impl("gemv_w4_m1", &gemv_w4_m1);
+  m.impl("gemm_w4_small", &gemm_w4_small);
   m.impl("dequant_w4", &dequant_w4);
 }

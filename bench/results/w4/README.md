@@ -5,25 +5,57 @@ hand-written `rwkv7_w4.cu` GEMV. Opt-in (`RWKV_W4=1`), default off. No bitsandby
 See [`../../../docs/findings/0017-w4-int4-quant.md`](../../../docs/findings/0017-w4-int4-quant.md)
 for the full write-up; kernel test `bench/verify_w4.py`, quantizer `bench/quant_w4.py`.
 
-## Kernel (standalone, `bench/verify_w4.py`, RTX 3090)
+## Kernels (standalone, `bench/verify_w4.py`, RTX 3090)
+
+**`gemv_w4_m1` (M=1):**
 | K×N | kernel vs dequant (rel) | int4 GEMV vs fp16 GEMV (M=1) |
 |---|---|---|
 | 2048×2048 | 2.0e-4 | **2.10×** |
 | 4096×4096 | 2.1e-4 | **2.02×** |
 | 4096×14336 | 2.1e-4 | **3.41×** |
-Kernel is ULP-accurate vs the dequant reference; 1.7–3.4× faster than cuBLAS fp16 at M==1.
+
+**`gemm_w4_small` (2≤M≤8, one weight read feeds all M rows; every row BIT-identical to the
+M=1 kernel — `torch.equal`-verified):**
+| M | K×N | rows == M1 kernel | vs fp16 cuBLAS | vs dequant+cuBLAS |
+|---|---|---|---|---|
+| 2 | 4096×4096 | BIT-EXACT | **2.27×** | 7.5× |
+| 4 | 4096×4096 | BIT-EXACT | **1.79×** | 6.0× |
+| 8 | 4096×4096 | BIT-EXACT | **1.07×** | 3.6× |
+
+M>8 deliberately stays on dequant→cuBLAS: the scalar-FMA kernel scales linearly with M while
+cuBLAS uses tensor cores — measured crossover ≈ M=8.
 
 ## End-to-end (1.5B, sglang, cuda-graph ON, fp16)
-| bsz | fp16 tok/s | w4 tok/s | w4/fp16 |
-|----:|-----------:|---------:|--------:|
-|   1 |      166.5 | **256.1** | **1.54× faster** |
-|   8 |     1112.9 |    541.1 | 0.49× (dequant→cuBLAS fallback) |
-|  32 |     3872.6 |   2014.6 | 0.52× |
+| bsz | fp16 tok/s | w4 tok/s | w4/fp16 | path |
+|----:|-----------:|---------:|--------:|---|
+|   1 |      166.5 | **259.1** | **1.56×** | gemv_w4_m1 |
+|   2 |      299.5 | **434.9** | **1.45×** | gemm_w4_small |
+|   4 |      574.1 | **773.2** | **1.35×** | gemm_w4_small |
+|   8 |     1112.9 | **1153.0** | **1.04×** | gemm_w4_small |
+|  32 |     3872.6 |   1997.2 | 0.52× | dequant→cuBLAS (fused GEMM = endgame) |
+
+**int4 is faster than fp16 at every batch size through 8.**
 
 - Checkpoint: **1.2 GB vs 2.9 GB** fp16 (2.4× at 1.5B; grows with model size — emb/lm_head stay bf16).
 - Serve VRAM (bsz1): **8202 vs 9152 MiB** (−950 MiB at 1.5B).
 - Correctness: w4 greedy on the oracle fixture = 14/24 (first-div @14) — **bit-identical to the
-  offline dequant reference**, so the int4 kernel path == the quantizer.
+  offline dequant reference**, so the int4 kernel path == the quantizer; unchanged after the
+  small-M kernel (bit-identical rows, verified end-to-end).
+
+## 7.2B (RTX 3090, RTN g64, fp16, cuda-graph ON)
+| metric | ours fp16 best | albatross-fp16 | **w4 RTN** |
+|---|---|---|---|
+| decode bsz1 tok/s | 65.7 | 79.6 | **102.8** — 1.56× ours-fp16, **1.29× albatross-fp16** (cross-precision) |
+| greedy vs oracle fixture | EXACT | EXACT | **EXACT 8/8** |
+| lambada (full 5153) | 0.7425 (bf16) | — | **0.7161 (−2.64pt, RTN)** |
+| peak serve VRAM | ~17.5 GB weights | — | **9.8 GB total** (fits a 16 GB card) |
+| checkpoint | 14.4 GB | — | **4.8 GB** (3.0×) |
+
+**7.2B on a real 16 GB T4** (`allcards.json` entry `T4-72b-w4`): greedy **8/8 EXACT**, decode
+**32.9 tok/s** bsz1 / **65.3** bsz4, prefill ~1,012 tok/s, peak VRAM **6,735 MiB** — the 7.2B
+model serves on a 16 GB Turing card with more than half the VRAM to spare.
+
+7.2B GPTQ deferred (ffn.value Hessian = 16384² × fp32 = 1 GB/layer × 32 — needs streamed accumulation).
 
 ## Accuracy (lambada_openai, full 5153, lm-eval local-completions)
 | model | acc | Δ vs bf16 |

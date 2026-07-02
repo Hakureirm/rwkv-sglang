@@ -1,0 +1,17 @@
+Disabling Radix Cache for RWKV7ForCausalLM as it is not yet supported.
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:03<00:00,  3.07s/it]Multi-thread loading shards: 100% Completed | 1/1 [00:03<00:00,  3.07s/it]
+  0%|          | 0/4 [00:00<?, ?it/s]Capturing batches (bs=8 avail_mem=14.70 GB):   0%|          | 0/4 [00:00<?, ?it/s]Capturing batches (bs=8 avail_mem=14.70 GB):  25%|██▌       | 1/4 [00:02<00:07,  2.34s/it]Capturing batches (bs=4 avail_mem=14.50 GB):  25%|██▌       | 1/4 [00:02<00:07,  2.34s/it]Capturing batches (bs=4 avail_mem=14.50 GB):  50%|█████     | 2/4 [00:02<00:02,  1.18s/it]Capturing batches (bs=2 avail_mem=14.49 GB):  50%|█████     | 2/4 [00:02<00:02,  1.18s/it]Capturing batches (bs=2 avail_mem=14.49 GB):  75%|███████▌  | 3/4 [00:03<00:00,  1.24it/s]Capturing batches (bs=1 avail_mem=14.47 GB):  75%|███████▌  | 3/4 [00:03<00:00,  1.24it/s]Capturing batches (bs=1 avail_mem=14.47 GB): 100%|██████████| 4/4 [00:03<00:00,  1.60it/s]Capturing batches (bs=1 avail_mem=14.47 GB): 100%|██████████| 4/4 [00:03<00:00,  1.17it/s]
+
+==============================================================================
+THROUGHPUT  model=w4-72b  dtype=float16  cuda_graph=ON  radix_cache=OFF
+  decode=64tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.55
+  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=1 MiB
+------------------------------------------------------------------------------
+ bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base
+------------------------------------------------------------------------------
+   1 |         102.8 |         3055.6 |     335.1 |          9828 |       9827
+   8 |         132.4 |         3327.2 |    2462.2 |         10006 |      10005
+==============================================================================

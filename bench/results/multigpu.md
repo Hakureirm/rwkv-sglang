@@ -32,6 +32,15 @@ over bf16:
 - **bf16 is greedy-EXACT on all 8 architectures** — broad-GPU-coverage correctness holds universally; the RWKV-7
   WKV + fused-glue Triton kernels JIT-compiled and ran on every SM generation with no per-arch change
   (only sgl_kernel needs the `libnuma1` system lib in the image).
+- **Turing caveat (honest):** sm75 has **no native bf16 compute** — on T4, bf16 runs via
+  fp32-conversion emulation. It is numerically exact (24/24 above), and we measured the fp16
+  (Turing's natural dtype) baseline for a fair comparison: **T4 fp16 is also greedy-EXACT 24/24**,
+  and fp16 decode ≈ bf16 decode (65.4/446.0/604.6 vs 65.1/446.5/592.3 at bsz 1/8/32) — the
+  emulation cost is negligible here because decode is bandwidth-bound. **T4 int4 vs fp16**
+  (`gemm_w4_small` kernel): 116.0/354.5/642.4 → **1.77× at bsz1**, 0.79× at bsz8 (T4's scalar-FMA
+  throughput moves the small-M crossover earlier than on the 3090 — per-arch cutover tuning is a
+  noted follow-up), 1.06× at bsz32; int4 peak VRAM 4609 vs fp16 5597 MiB (bsz1). Raw:
+  `allcards.json` entry `T4-fp16`.
 - **int4 runs on all 8, including Turing (T4 sm7.5)** — the kernel uses plain vectorized loads, no
   `cp.async` (so it is not limited to sm80+). int4 bsz1 is faster than bf16 on every card; the
   speedup is **largest on bandwidth-starved cards** (L4 2.04×, A10G 1.88×, T4 1.77×) and smallest on
@@ -87,10 +96,15 @@ at bsz32). Peak: **H200 bf16 decode 6,938 tok/s @bsz32, prefill 78,268 tok/s**.
 Greedy-EXACT held on every architecture — Turing, Ampere (consumer sm86 + datacenter sm80), Ada, Hopper.
 
 ## 3. Quantization notes across GPUs
+- **int8 (w8a8) requires sm80+**: on T4 (sm75) the load fails inside cuda-graph capture with
+  sglang's cutlass int8 GEMM throwing `gemm execution failed: Error Internal` — sgl-kernel's
+  int8 scaled-mm ships no Turing configuration (diagnosed from the captured T4 stderr; the
+  scheduler then kills the child, which is the `rc=-9` in `allcards.json`). On Turing, use our
+  **int4** (works, faster than fp16) or fp16.
 - **int8 (w8a8)** runs on Ampere / Ada / Hopper; on Hopper it is ~neutral vs bf16 at 1.5B (bf16
   tensor cores already saturate), so int8's value there is VRAM (−41–46% weights), not decode speed —
   its cross-precision decode win vs albatross-fp16 is at 7.2B (see [`comparison_clean.md`](comparison_clean.md)).
-- **int4** — see §1 and [`w4/`](w4/): bsz1 faster than fp16 on every arch + ~4× weight-VRAM cut.
+- **int4** — see §1 and [`w4/`](w4/): bsz1 faster than fp16 on every arch + ~4× weight-VRAM cut. **7.2B int4 verified live on a 16 GB T4**: greedy 8/8 EXACT, 32.9 tok/s bsz1, peak 6,735 MiB (`allcards.json`: `T4-72b-w4`).
 - **fp8 (Hopper)** — **not feasible with the deliverable as-is**: sglang's dynamic-fp8 registers
   runtime `weight_scale` params the strict `load_weights` counts as "not loaded" (int8 works because
   its offline converter bakes the scales in). Would need an offline fp8 converter or a relaxed loader.

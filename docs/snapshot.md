@@ -2,9 +2,9 @@
 doc_kind: snapshot
 project: rwkv-sglang
 title: "RWKV-7 × sglang adaptation — canonical state"
-date: 2026-07-01
+date: 2026-07-02
 status: active
-last_verified_commit: 9901a9f
+last_verified_commit: 9a24433
 schema_invariant: |
   - Every ADR referenced anywhere MUST appear once in §"ADR roster".
   - Every finding referenced anywhere MUST appear once in §"Findings ledger".
@@ -29,8 +29,9 @@ batching + chunked prefill + recurrent state cache + 8/4-bit quant, on consumer 
 datacenter GPUs, matching `rwkv-lm` accuracy.* Goals: match rwkv-lm accuracy +
 albatross speed/VRAM across batch sizes; sglang-native dynamic batching + chunked
 prefill + constant-size state cache; 8/4-bit quant no slower than 16-bit; broad GPU support.
-**Delivered standing (honest, F0014/F0015):** accuracy TIES rwkv-lm; we WIN int8
-speed / VRAM / real serving; **albatross wins same-precision raw-kernel latency**
+**Delivered standing (honest, F0014/F0015):** accuracy TIES rwkv-lm (1.5B lambada 0.6728 vs
+ref 0.6711, MMLU 0.5235 vs 0.5110; 7.2B greedy-EXACT + full lambada 0.7425 — ref number still
+to be measured); we WIN int8 speed / VRAM / real serving; **albatross wins same-precision raw-kernel latency**
 (a static-batch, no-serving micro-bench) and we do NOT claim to match it — the
 original "match albatross raw speed" aspiration proved to require whole-time-mix
 mega-kernel fusion, deliberately declined for elegance.
@@ -38,7 +39,8 @@ mega-kernel fusion, deliberately declined for elegance.
 ## Current phase
 
 **Correctness DONE + verified (exact 0.1B/1.5B/7.2B, dynamic batching safe-by-default, cuda-graph;
-RWKV-7 path 100% FLA-free); accuracy = PARITY with rwkv-lm (lm-eval, [[F0014]]).** Honest same-precision
+RWKV-7 path 100% FLA-free); accuracy = PARITY with rwkv-lm (lm-eval [[F0014]]: 1.5B lambada
+0.6728 vs 0.6711, MMLU 0.5235 vs 0.5110).** Honest same-precision
 (fp16) decode standing: **default config 0.46-0.85× albatross**; **with the three opt-in hand-written
 kernels (in-place WKV + sparse FFN + fused GEMV) 0.49-0.90×** (7.2B bsz1 0.83×, 1.5B bsz8 0.90×;
 `bench/results/comparison_clean.md`). albatross still leads raw decode (monolithic mega-kernel ~92% BW);
@@ -48,7 +50,10 @@ we WIN on VRAM, int8 (7.2B ≥ albatross-fp16 cross-precision), and real serving
 `bench/results/serving_scale/`. README reframed to lead with the won axes (concurrency/VRAM/int8/
 accuracy), same-precision single-stream chart demoted to an honest "one axis albatross leads" section. ALL
 milestones done: Phase-0 + M0 + M1 + M2 + M3(comparison+lm-eval) + M3b(de-FLA) + M4(int8) + M5(multi-GPU)
-+ M-rigor + M6(3 CUDA kernels). Remaining = the public push + optional fp8/polish.
++ M-rigor + M6(3 CUDA kernels) + **M7(int4: hand-written GEMV + GPTQ, [[F0017]])** + ShareGPT serving
+bench + the 8-arch all-card sweep (`bench/results/multigpu.md`) + 7.2B full lambada 0.742. Published
+(single clean commit). Remaining = int4 M>1 fused GEMM, 7.2B int4 numbers, T4-int8 diagnosis,
+v0.1.0 tag, optional fp8/TP.
 - ✅ Recon/arch/baselines/re-analysis → sglang chosen. [[F0001]][[F0002]][[F0003]][[F0004]]
 - ✅ ADR-0001 (scope/wedge), ADR-0002 (integration), ADR-0003 (M1 scope & slicing).
 - ✅ M1 plan (`docs/design/m1-implementation-plan.md`) + correctness gate `bench/oracle_numpy.py`.
@@ -105,8 +110,35 @@ milestones done: Phase-0 + M0 + M1 + M2 + M3(comparison+lm-eval) + M3b(de-FLA) +
   Lifts batched decode: **7.2B bsz32 0.61→0.72×, 1.5B bsz32 0.57→0.70× albatross (~+24%)**.
   **Combined standing now 0.49-0.90× across all sizes/bsz** (7.2B bsz1 0.83×, 1.5B bsz8 0.90×;
   was 0.46-0.85×) — `bench/results/{comparison_clean.md,best2}`. (Qwen3.5 comparison out of scope.)
-- 🔄 **remaining**: (stretch) time-mix mega-fusion for the last raw-speed bit · ⬜ **publish** overlay
-  (v0.5.10.post1) to `Hakureirm/rwkv-sglang` (PRIVATE) · fp8 · 7.2B full scored lm-eval · upstream PR.
+- ✅ **M7 int4 (weight-only w4)** [[F0017]]: hand-written `rwkv7_w4.cu` — `gemv_w4_m1` (M=1) +
+  **`gemm_w4_small` (2≤M≤8, one weight read feeds all M rows; every row BIT-identical to the M=1
+  kernel, torch.equal-verified)** + `dequant_w4` for M>8; GROUP=64 sym, fp32 accum, cuda-graph
+  safe, FakeTensor regs. Offline RTN (`bench/quant_w4.py`) **and GPTQ** (`bench/{calib_run,
+  gptq_w4}.py`, RWKV_CALIB Hessian hook, wikitext). **1.5B: faster than fp16 at EVERY bsz≤8**
+  (bsz1 259 vs 166 = 1.56×, bsz2 1.45×, bsz4 1.35×, bsz8 1153 vs 1113 = 1.04×; bsz32 0.52×
+  dequant fallback — fused tensor-core GEMM = endgame, measured scalar-FMA crossover at M≈8);
+  checkpoint 2.9→1.2 GB, serve VRAM −950 MiB; lambada **GPTQ −3.34pt** (RTN −4.95; int8 −2.15).
+  **7.2B (RTN)**: bsz1 **102.8 tok/s = 1.29× albatross-fp16 (79.6, cross-precision), 1.56× ours-fp16
+  best (65.7)**; fixture greedy **EXACT 8/8**; lambada **0.7161 vs 0.7425 bf16 (−2.64pt)**;
+  **9.8 GB total serve VRAM** (checkpoint 4.8 GB, 3.0×) → fits a 16 GB card. 7.2B GPTQ deferred
+  (value-proj Hessian 16384²=1GB/layer ×32 — needs streamed accumulation). Default path
+  regression-clean (24/24). Opt-in `RWKV_W4=1`.
+- ✅ **ShareGPT serving bench** (`bench/results/serving_scale/`, standard `bench_serving`, 1.5B,
+  500 reqs): peak 1275 out-tok/s / 3361 total-tok/s; @16 req/s median TTFT **273 ms**.
+- ✅ **8-arch all-card sweep** (`bench/results/multigpu.md` + `allcards.json`): bf16 greedy-EXACT
+  on ALL 8 (T4/L4/A10G/A100-40/-80/L40S/H100/H200); **int4 runs + bsz1-faster on all 8 incl.
+  Turing** (no cp.async; 2.04× L4 … 1.09× H200); int8 on 7 of 8 (T4 rc=-9 undiagnosed — open).
+  7.2B full lambada **0.742** (`out/lmeval_72b-lambada`). Chunked-prefill gate 48/48 exact
+  (`bench/verify_chunked_prefill.py`).
+- ✅ **published**: single clean commit `9a24433` → github.com/Hakureirm/rwkv-sglang (PUBLIC);
+  docs carry a human track (`docs/human/`, 中文+mermaid) + this dense agent track.
+- ✅ (2026-07-02, post-audit fixes): small-M int4 kernel `gemm_w4_small` (bsz≤8 all faster than
+  fp16) · 7.2B int4 measured (102.8 tok/s bsz1, EXACT 8/8, lambada 0.7161, 9.8 GB — and verified
+  live on a real 16 GB T4) · T4-int8 diagnosed (cutlass int8 needs sm80+, "Error Internal" @sm75)
+  · T4 fp16 baseline (24/24 EXACT; fp16≈bf16 speed on T4) · CONTRIBUTING.md.
+- 🔄 **remaining**: v0.1.0 tag + release notes (drafted, `scratchpad/release_notes_v0.1.0.md`) ·
+  int4 fused tensor-core GEMM for M>8 · per-arch small-M cutover (T4 crossover earlier than 3090) ·
+  fp8 · (stretch) time-mix mega-fusion · TP/PP · upstream PR.
 
 > Dev model: `sglang_overlay/` (new+edited files) → `scripts/deploy.sh` rsyncs into the
 > box's wheel sglang site-packages (no editable build). Head config = 12×64 (from r_k).
@@ -152,6 +184,7 @@ milestones done: Phase-0 + M0 + M1 + M2 + M3(comparison+lm-eval) + M3b(de-FLA) +
 | F0014 | Clean same-precision standing — raw speed loses, accuracy TIES, VRAM/int8/serving win; CUDA endgame chosen | info | open |
 | F0015 | CUDA endgame result — fused fp16 GEMV greedy-EXACT, +5-9% bsz1 decode @1.5B/7.2B; cuda-graph amortizes the eager win; mega-kernel to match albatross DECLINED | info | open |
 | F0016 | Serving-scale measured — ~50× concurrency throughput at flat VRAM; context-invariant memory (O(1)-state wedge) | info | open |
+| F0017 | Hand-written weight-only int4 — faster than fp16 at every bsz≤8 (1.04–1.56×); 7.2B: 102.8 tok/s bsz1 (1.29× albatross-fp16), fixture-EXACT, lambada −2.64pt, 9.8GB total; GPTQ 1.5B −3.34pt; M>8 dequant ~0.5× (fused GEMM = endgame) | info | open |
 
 ## Environment (single source of truth)
 

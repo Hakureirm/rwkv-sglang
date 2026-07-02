@@ -108,6 +108,51 @@ def main():
     print("-" * 104)
     print("ALL KERNEL-NUMERICS OK" if all_ok else "SOME KERNEL NUMERICS FAILED")
 
+    # ---- small-M kernel (gemm_w4_small, 2<=M<=8): rows must be BIT-identical to the
+    # M==1 kernel (same accumulation order); speed vs dequant+cuBLAS and fp16 cuBLAS.
+    print()
+    print(f"{'M':>3} {'K':>6} {'N':>6} | {'rows==M1 kernel':>16} | "
+          f"{'fp16 us':>8} {'dq+blas us':>10} {'smallM us':>9} {'vs fp16':>8}")
+    print("-" * 104)
+    small_ok = True
+    for M in (2, 4, 8):
+        for K, N in [(2048, 2048), (4096, 4096)]:
+            W = (torch.randn(N, K, device=dev) * 0.02).to(torch.float16)
+            X = (torch.randn(M, K, device=dev)).to(torch.float16)
+            qweight, scale, _ = quantize_w4(W)
+            qweight = qweight.to(dev); scale = scale.to(dev)
+
+            y_small = torch.ops.rwkv7_w4.gemm_w4_small(X, qweight, scale)
+            y_rows = torch.cat([
+                torch.ops.rwkv7_w4.gemv_w4_m1(X[m:m + 1], qweight, scale) for m in range(M)
+            ], dim=0)
+            bitexact = torch.equal(y_small, y_rows)
+            small_ok &= bitexact
+
+            Wt = W.t().contiguous()
+            def dq_blas():
+                wq = torch.ops.rwkv7_w4.dequant_w4(qweight, scale)
+                return X @ wq.t()
+            for _ in range(20):
+                _ = X @ Wt; _ = dq_blas()
+                _ = torch.ops.rwkv7_w4.gemm_w4_small(X, qweight, scale)
+            torch.cuda.synchronize()
+            it = 200
+            t0 = time.perf_counter()
+            for _ in range(it): _ = X @ Wt
+            torch.cuda.synchronize(); fp16_us = (time.perf_counter() - t0) / it * 1e6
+            t0 = time.perf_counter()
+            for _ in range(it): _ = dq_blas()
+            torch.cuda.synchronize(); dq_us = (time.perf_counter() - t0) / it * 1e6
+            t0 = time.perf_counter()
+            for _ in range(it): _ = torch.ops.rwkv7_w4.gemm_w4_small(X, qweight, scale)
+            torch.cuda.synchronize(); sm_us = (time.perf_counter() - t0) / it * 1e6
+
+            print(f"{M:>3} {K:>6} {N:>6} | {('BIT-EXACT' if bitexact else 'MISMATCH'):>16} | "
+                  f"{fp16_us:>8.1f} {dq_us:>10.1f} {sm_us:>9.1f} {fp16_us / sm_us:>7.2f}x")
+    print("-" * 104)
+    print("SMALL-M OK" if small_ok else "SMALL-M FAILED")
+
 
 if __name__ == "__main__":
     main()

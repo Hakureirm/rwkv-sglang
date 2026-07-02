@@ -1105,5 +1105,147 @@
         ]
       }
     ]
+  },
+  {
+    "label": "T4-fp16",
+    "device": "Tesla T4",
+    "sm": "7.5",
+    "total_vram_mib": 14913,
+    "wall_s": 307.2,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "1.5b-fp16-cg",
+        "rc": 0,
+        "wall_s": 75.669287695,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 24,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-fp16-cg",
+        "rc": 0,
+        "wall_s": 68.20125124199998,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 65.4,
+            "prefill_tok_s": 5069.9,
+            "ttft_ms": 202.0,
+            "peak_vram_mib": 5597,
+            "vram_minus_base_mib": 5594
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 446.0,
+            "prefill_tok_s": 5728.8,
+            "ttft_ms": 1430.0,
+            "peak_vram_mib": 5753,
+            "vram_minus_base_mib": 5750
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 604.6,
+            "prefill_tok_s": 5659.4,
+            "ttft_ms": 5790.0,
+            "peak_vram_mib": 5753,
+            "vram_minus_base_mib": 5750
+          }
+        ]
+      },
+      {
+        "kind": "verify",
+        "tag": "1.5b-w4",
+        "rc": 1,
+        "wall_s": 91.21151552,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": false,
+        "match": 14,
+        "n": 24
+      },
+      {
+        "kind": "throughput",
+        "tag": "1.5b-w4",
+        "rc": 0,
+        "wall_s": 72.09358131999997,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 116.0,
+            "prefill_tok_s": 4480.2,
+            "ttft_ms": 228.6,
+            "peak_vram_mib": 4609,
+            "vram_minus_base_mib": 4606
+          },
+          {
+            "bsz": 8,
+            "decode_tok_s": 354.5,
+            "prefill_tok_s": 5390.5,
+            "ttft_ms": 1519.7,
+            "peak_vram_mib": 4733,
+            "vram_minus_base_mib": 4730
+          },
+          {
+            "bsz": 32,
+            "decode_tok_s": 642.4,
+            "prefill_tok_s": 5310.0,
+            "ttft_ms": 6171.0,
+            "peak_vram_mib": 4733,
+            "vram_minus_base_mib": 4730
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "T4-72b-w4",
+    "device": "Tesla T4",
+    "sm": "7.5",
+    "total_vram_mib": 14913,
+    "wall_s": 219.0,
+    "results": [
+      {
+        "kind": "verify",
+        "tag": "7.2b-w4",
+        "rc": 0,
+        "wall_s": 140.770476138,
+        "dtype": "float16",
+        "cuda_graph": true,
+        "exact": true,
+        "match": 8,
+        "n": 8
+      },
+      {
+        "kind": "throughput",
+        "tag": "7.2b-w4",
+        "rc": 0,
+        "wall_s": 78.26180897999998,
+        "dtype": "float16",
+        "rows": [
+          {
+            "bsz": 1,
+            "decode_tok_s": 32.9,
+            "prefill_tok_s": 1012.4,
+            "ttft_ms": 1011.5,
+            "peak_vram_mib": 6735,
+            "vram_minus_base_mib": 6732
+          },
+          {
+            "bsz": 4,
+            "decode_tok_s": 65.3,
+            "prefill_tok_s": 1159.0,
+            "ttft_ms": 3534.1,
+            "peak_vram_mib": 6865,
+            "vram_minus_base_mib": 6862
+          }
+        ]
+      }
+    ]
   }
 ]
