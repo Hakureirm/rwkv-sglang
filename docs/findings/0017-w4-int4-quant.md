@@ -1,7 +1,7 @@
 ---
 doc_kind: finding
 finding_id: F0017
-title: "Hand-written weight-only int4: faster than (or ties) fp16 at EVERY bsz≤32 (1.03–1.56×; gemv_m1 + gemm_w4_small + tensor-core gemm_w4_tc with in-smem dequant + deterministic split-K) + ~4x weight-VRAM cut; 7.2B: 102.8 tok/s bsz1 (1.29× albatross-fp16 cross-precision), fixture-EXACT 8/8, lambada 0.7161 (−2.64pt RTN), 9.8GB total, live-verified on a 16GB T4. 1.5B accuracy: GPTQ −3.34pt / RTN −4.95pt. bsz64 0.77× (M=64 long-K ffn shapes — tiling work remains)."
+title: "Hand-written weight-only int4: faster than (or ties) fp16 at EVERY bsz≤32 (1.03–1.56×; gemv_m1 + gemm_w4_small + tensor-core gemm_w4_tc with in-smem dequant + deterministic split-K) + ~4x weight-VRAM cut; 7.2B: 102.8 tok/s bsz1 (1.29× albatross-fp16 cross-precision), fixture-EXACT 8/8, lambada 0.7161 (−2.64pt RTN), 9.8GB total, live-verified on a 16GB T4. 1.5B accuracy: GPTQ −3.34pt / RTN −4.95pt. bsz64 0.80× (M=64 long-K ffn shapes; sm80+ cp.async pipeline landed, 256-thread block rework remains)."
 last_verified_commit: "HEAD"
 discovered_by: lead (M7), 2026-07-02
 severity: info
@@ -43,7 +43,7 @@ targeting the unmet bar: **4-bit that is faster than 16-bit in a serving engine*
 |   8 |            1112.9 |      **1153.0** | **1.04× faster** | `gemm_w4_small` |
 |  16 |            2243.3 |      **2619.8** | **1.17× faster** | `gemm_w4_tc` |
 |  32 |            3872.6 |      **3978.2** | **1.03× faster** | `gemm_w4_tc` |
-|  64 |            6574.4 |          5064.6 | 0.77× | `gemm_w4_tc` (M=64 ffn shapes) |
+|  64 |            6574.4 |          5283.6 | 0.80× | `gemm_w4_tc` (cp.async pipelined; M=64 long-K ffn shapes still drag) |
 
 **`gemm_w4_small` (added 2026-07-02)** closes the small-batch gap: a template kernel for
 2≤M≤8 where ONE int4 weight-word read feeds all M rows (weight bandwidth amortized across the
@@ -96,7 +96,7 @@ input dim is 16384 → 1 GB/layer × 32 layers won't fit 24 GB; needs streamed/C
 
 ## Honest limitations & the endgame
 - **Through bsz 32, w4 is faster than (or ties) fp16 at every batch size** (1.03–1.56×), via the
-  three-kernel dispatch (gemv_m1 / gemm_w4_small / gemm_w4_tc). **bsz64 is 0.77×** — the M=64
+  three-kernel dispatch (gemv_m1 / gemm_w4_small / gemm_w4_tc). **bsz64 is 0.80×** — the M=64
   long-K/wide-N ffn shapes (4096², 2048×8192) lose to tensor-core cuBLAS (0.54–0.56× standalone);
   remaining levers: larger N-tiles per block, cp.async double-buffering (sm80+; would need an
   arch-guard to keep Turing), better smem swizzle. Prefill (M>64) = dequant→cuBLAS at ~0.95× fp16.

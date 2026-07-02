@@ -47,7 +47,7 @@ is the honest, dated trail of how each result was reached + verified.
 | [F0015](findings/0015-cuda-endgame-result.md) | CUDA endgame result — fused GEMV + the honest ceiling |
 | [F0016](findings/0016-serving-scale-wedge.md) | Serving-scale measured — ~50× concurrency throughput at flat VRAM; context-invariant memory (the O(1)-state wedge) |
 | [F0018](findings/0018-w8-weight-only.md) | Hand-written weight-only int8 (w8a16) — greedy-EXACT 24/24, ≥fp16 at every bsz≤32 (1.02–1.37×), JIT-runs on every arch (vs cutlass w8a8 sm80–90) |
-| [F0019](findings/0019-tp-pp-parallel.md) | TP (head-parallel) + PP (layer partition, v_first proxy) — both greedy-EXACT 24/24 on real 2×L4; zero tp=1/pp=1 regression |
+| [F0019](findings/0019-tp-pp-parallel.md) | TP+PP: full matrix greedy-EXACT on real L4 fleets (tp 2/4/8, pp 2/4/8, mixed tp2×pp2 after the v_first full-width fix); documents sglang's PP chunk-send pitfall for non-replicated proxy tensors |
 | [F0017](findings/0017-w4-int4-quant.md) | Hand-written weight-only int4 — faster than fp16 at every bsz≤8 (1.04–1.56×); 7.2B: 102.8 tok/s (1.29× albatross-fp16), 9.8GB total, lambada −2.64pt; GPTQ 1.5B −3.34pt; M>8 fused-GEMM = endgame |
 
 See **[`../bench/results/`](../bench/results/)** for the committed measurement artifacts each

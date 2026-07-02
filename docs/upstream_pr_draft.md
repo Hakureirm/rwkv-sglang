@@ -24,7 +24,9 @@ sglang currently has no RWKV support; this PR adds the RWKV-7 model family
 - `models/rwkv7.py` — the model: token-shift + time-mix (WKV-7 recurrence) +
   channel-mix (sqrelu), LoRA-style low-rank gates, greedy token-exact vs the
   BlinkDL rwkv-lm numpy reference at 0.1B/1.5B/7.2B (fp16+bf16, cuda-graph,
-  dynamic batching, chunked prefill). Head-parallel TP.
+  dynamic batching, chunked prefill). Head-parallel TP + llama-pattern PP —
+  full matrix greedy-exact on real multi-GPU (tp 2/4/8, pp 2/4/8, mixed
+  tp2×pp2).
 - `layers/attention/linear/rwkv7_backend.py` — linear-attention backend on the
   mamba state pool: two width-2 token-shift conv states + the (H,64,64) fp32 WKV
   state; triton WKV kernel (decode + varlen prefill), FLA-free.
@@ -46,6 +48,13 @@ bsz 1→256: 166 → 8,298 (plateau ~8.2k); VRAM flat (+202 MiB @bsz256).
 H100 ShareGPT (bench_serving): peak 14,245 total tok/s, TTFT 69 ms @16 req/s.
 
 ### Open questions for maintainers
+0. Heads-up (found while validating mixed tp×pp): `send_tensor_dict`'s
+   chunk-send optimization (`reshape(tp,-1)[tp_rank]` + rank-wise reassembly)
+   silently corrupts NON-tp-replicated PPProxyTensors entries. RWKV-7's
+   `v_first` (a per-rank head slice) hit this; we work around it by
+   all-gathering to full width before the stage boundary. Other hybrid models
+   shipping sliced proxy tensors would hit the same — worth an assert or a
+   per-tensor replicated flag upstream.
 1. Preferred placement for the RWKV kernels (in-tree triton vs sgl-kernel).
 2. Radix: we force-disable for RWKV-7; a state-aware MambaRadixCache is the
    follow-up — same shape as the GDN/hybrid discussion.

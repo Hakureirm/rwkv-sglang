@@ -22,7 +22,8 @@ per-arch (runs everywhere the int4 family runs, Turing→Blackwell) and keeps ac
 - `gemv_w8_m1` (M=1) + `gemm_w8_small` (2≤M≤8, one weight-word feeds all M rows, every row
   BIT-identical to the M=1 kernel — torch.equal-verified) + `gemm_w8_tc` (8<M≤64: wmma
   tensor cores, int8→fp16 dequant in shared memory per K-step so weight HBM traffic stays
-  1/2 of a cuBLAS fp16 GEMM, fp32 accumulators, deterministic split-K — the w8 sibling of
+  1/2 of a cuBLAS fp16 GEMM, fp32 accumulators, deterministic split-K, and on sm80+ a 2-stage
+  cp.async pipeline double-buffering the activation tile + raw int8 words — the w8 sibling of
   `gemm_w4_tc`) + `dequant_w8` (M>64 → cuBLAS).
 - Group-wise symmetric int8, GROUP=64 (same structure as w4): 4 int8 per uint32, fp32
   accumulate, IEEE, cuda-graph safe. Quantizer: `bench/quant_w4.py --bits 8`.

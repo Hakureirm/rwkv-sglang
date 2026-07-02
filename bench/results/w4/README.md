@@ -41,14 +41,17 @@ M=1 kernel — `torch.equal`-verified):**
 tile is dequantized to fp16 **in shared memory** each K-step (K_TILE == GROUP == 64 → exactly one
 scale per (n, k-tile)), so weight HBM traffic stays 1/4 of a cuBLAS fp16 GEMM; one block covers
 all M rows (weight dequanted once per block) and **deterministic split-K** (f32 partials + a
-fixed-order reduce, no atomics) restores GPU-filling parallelism. Numerics vs the dequant
-reference: rel-err ~2.7e-4 at every shape. Standalone vs fp16 cuBLAS (RTX 3090):
+fixed-order reduce, no atomics) restores GPU-filling parallelism. On sm80+ a **2-stage
+cp.async pipeline** double-buffers the activation tile and the raw int4 words, prefetching
+tile t+1 while tile t is dequanted + MMA'd (Turing keeps the synchronous path). Numerics vs
+the dequant reference: rel-err ~2.7e-4 at every shape. Standalone vs fp16 cuBLAS (RTX 3090,
+pipelined; pre-pipeline values in parens):
 
 | M | 2048×2048 | 4096×4096 | 2048×8192 |
 |---|---|---|---|
-| 16 | **1.20×** | **1.16×** | **1.23×** |
-| 32 | **1.17×** | 0.81× | 0.86× |
-| 64 | **1.17×** | 0.56× | 0.55× |
+| 16 | **1.31×** (1.20) | **1.26×** (1.16) | **1.27×** (1.23) |
+| 32 | **1.31×** (1.17) | 0.82× (0.81) | 0.90× (0.86) |
+| 64 | **1.30×** (1.17) | 0.68× (0.56) | 0.70× (0.55) |
 
 M>64 (prefill) stays on dequant→cuBLAS (compute-bound; weight read amortized over many tokens).
 

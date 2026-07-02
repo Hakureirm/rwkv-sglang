@@ -72,15 +72,15 @@ vs its fp16) while cutting weight bytes **−46%**. A quant path albatross lacks
 
 **3b. Hand-written weight-only int8 (w8a16) is greedy-EXACT and beats (or ties) fp16 at every
 bsz ≤ 32** — 24/24 token-exact vs the oracle (lossless in practice), decode
-1.37×/1.31×/1.27×/1.06×/**1.12×/1.02×** vs fp16 at bsz 1/2/4/8/16/32 (227/392/732/1181/2513/3936
-tok/s; bsz64 0.74×, honest), via the same three-kernel dispatch as int4 (GEMV / bit-identical-rows
+1.37×/1.31×/1.27×/1.06×/**1.13×/1.02×** vs fp16 at bsz 1/2/4/8/16/32 (227/392/732/1181/2523/3962
+tok/s; bsz64 0.77×, honest), via the same three-kernel dispatch as int4 (GEMV / bit-identical-rows
 small-GEMM / tensor-core GEMM with in-smem dequant), and it JIT-runs on **every** arch — unlike
 the cutlass w8a8 path (sm80–90 only). `RWKV_W8=1`; details:
 [`docs/findings/0018`](docs/findings/0018-w8-weight-only.md).
 
 **3c. Hand-written int4 beats (or ties) fp16 at every bsz ≤ 32** — 1.5B decode
-1.56×/1.45×/1.35×/1.04×/**1.17×/1.03×** vs fp16 at bsz 1/2/4/8/16/32 (259/435/773/1153/2620/3978
-vs 166/300/574/1113/2243/3873 tok/s; bsz64 0.77×, honest), via three kernels: `gemv_w4_m1`,
+1.56×/1.45×/1.35×/1.04×/**1.17×/1.03×** vs fp16 at bsz 1/2/4/8/16/32 (259/435/773/1153/2619/4004
+vs 166/300/574/1113/2243/3873 tok/s; bsz64 0.80×, honest), via three kernels: `gemv_w4_m1`,
 `gemm_w4_small` (bit-identical rows), and tensor-core `gemm_w4_tc` (in-smem int4 dequant +
 deterministic split-K). At **7.2B**: bsz1 **102.8 tok/s = 1.29× albatross-fp16** (79.6;
 cross-precision), fixture-greedy **EXACT 8/8**, lambada 0.7161 vs 0.7425 bf16 (−2.64pt, RTN) —
