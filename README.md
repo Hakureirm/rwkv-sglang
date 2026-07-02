@@ -70,10 +70,13 @@ at +308 MiB — 64 concurrent 7.2B streams on one 24 GB card
 **0.88–1.21× albatross-fp16** (decode, bsz 1/8/32 — i.e. a *cross-precision* matchup: our int8
 vs its fp16) while cutting weight bytes **−46%**. A quant path albatross lacks.
 
-**3b. Hand-written weight-only int8 (w8a16) is greedy-EXACT and faster than fp16** — 24/24
-token-exact vs the oracle (lossless in practice), decode 1.37×/1.31×/1.27×/**1.06×** vs fp16 at
-bsz 1/2/4/8 (227/392/732/1181 tok/s), and it JIT-runs on **every** arch — unlike the cutlass
-w8a8 path (sm80–90 only). `RWKV_W8=1`; details: [`docs/findings/0018`](docs/findings/0018-w8-weight-only.md).
+**3b. Hand-written weight-only int8 (w8a16) is greedy-EXACT and beats (or ties) fp16 at every
+bsz ≤ 32** — 24/24 token-exact vs the oracle (lossless in practice), decode
+1.37×/1.31×/1.27×/1.06×/**1.12×/1.02×** vs fp16 at bsz 1/2/4/8/16/32 (227/392/732/1181/2513/3936
+tok/s; bsz64 0.74×, honest), via the same three-kernel dispatch as int4 (GEMV / bit-identical-rows
+small-GEMM / tensor-core GEMM with in-smem dequant), and it JIT-runs on **every** arch — unlike
+the cutlass w8a8 path (sm80–90 only). `RWKV_W8=1`; details:
+[`docs/findings/0018`](docs/findings/0018-w8-weight-only.md).
 
 **3c. Hand-written int4 beats (or ties) fp16 at every bsz ≤ 32** — 1.5B decode
 1.56×/1.45×/1.35×/1.04×/**1.17×/1.03×** vs fp16 at bsz 1/2/4/8/16/32 (259/435/773/1153/2620/3978

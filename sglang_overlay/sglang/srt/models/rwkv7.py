@@ -18,6 +18,13 @@ and the int8 tensor cores keep decode at-least as fast as bf16 on Ampere. The WK
 recurrence/state and the small per-channel params (x_*, k_k, k_a, r_k, g_norm)
 are NEVER quantized — they stay bf16/fp32.
 
+Tensor parallelism is head-parallel: head_dim stays whole and whole heads are
+split across ranks (r/k/v + LoRA-up column-parallel with no gather, per-channel
+params / g_norm / WKV state on the local head slice, o_proj and ffn.value
+row-parallel with a single allreduce each). The token-shift mix vectors and the
+conv (prev-token) state stay full-width — they act on the replicated hidden
+before the column-parallel projections. tp=1 keeps the exact original path.
+
 Per-layer time-mix (att):
   shifted = prev_token(x);  x* = x + x_*·(shifted - x)
   r = r_proj(xr); k = k_proj(xk); v = v_proj(xv)
@@ -37,7 +44,11 @@ import torch
 from torch import nn
 
 from sglang.srt.configs.rwkv7 import Rwkv7Config
-from sglang.srt.distributed import get_pp_group
+from sglang.srt.distributed import (
+    get_pp_group,
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+)
 from sglang.srt.layers.attention.rwkv7_kernels import fast_linear
 from sglang.srt.layers.attention.rwkv7_kernels import sparse_cmix
 from sglang.srt.layers.attention.rwkv7_kernels import w4_linear
@@ -46,7 +57,11 @@ from sglang.srt.layers.attention.rwkv7_kernels.fused import (
     fused_kk_kmix,
     fused_lerp6,
 )
-from sglang.srt.layers.linear import ReplicatedLinear
+from sglang.srt.layers.linear import (
+    ColumnParallelLinear,
+    ReplicatedLinear,
+    RowParallelLinear,
+)
 from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.vocab_parallel_embedding import (
@@ -217,14 +232,36 @@ class W8Linear(nn.Module):
                 return w4_linear.gemv_w8_m1(x, self.qweight, self.scale)
             if 2 <= M <= 8 and (self.out_features % 2) == 0:
                 return w4_linear.gemm_w8_small(x, self.qweight, self.scale)
+            # medium batched decode: tensor-core GEMM with in-smem int8 dequant
+            # (weight HBM traffic = 1/2 of cuBLAS fp16; wmma fp32 accumulate).
+            if 8 < M <= 64 and (self.out_features % 64) == 0:
+                return w4_linear.gemm_w8_tc(x, self.qweight, self.scale)
+        # M>64 / prefill: dequant -> cuBLAS (compute-bound regime; weight read amortized)
         w = w4_linear.dequant_w8(self.qweight, self.scale, self.group).to(x.dtype)
         return torch.nn.functional.linear(x, w)
 
 
-def _make_proj(in_f: int, out_f: int, quant_config, prefix: str):
+def _make_proj(in_f: int, out_f: int, quant_config, prefix: str, parallel: str = "column"):
     """A bias-free projection: W4Linear under RWKV_W4, W8Linear under RWKV_W8, else the
-    quant-aware ReplicatedLinear (unquantized / w8a8-int8)."""
-    if _W4:
+    quant-aware ReplicatedLinear (unquantized / w8a8-int8). Under tp>1 the projection
+    is head-parallel instead: ColumnParallelLinear (output = this rank's head slice,
+    no gather) or RowParallelLinear (local-slice input, allreduce inside)."""
+    if get_tensor_model_parallel_world_size() > 1:
+        if _W4 or _W8:
+            raise NotImplementedError(
+                "RWKV_W4/RWKV_W8 quantized projections require tp=1 for now"
+            )
+        if parallel == "row":
+            m = RowParallelLinear(
+                in_f, out_f, bias=False, input_is_parallel=True,
+                reduce_results=True, quant_config=quant_config, prefix=prefix,
+            )
+        else:
+            m = ColumnParallelLinear(
+                in_f, out_f, bias=False, gather_output=False,
+                quant_config=quant_config, prefix=prefix,
+            )
+    elif _W4:
         m = W4Linear(in_f, out_f)
     elif _W8:
         m = W8Linear(in_f, out_f)
@@ -234,10 +271,21 @@ def _make_proj(in_f: int, out_f: int, quant_config, prefix: str):
     return m
 
 
+def _linear_backend(forward_batch: ForwardBatch):
+    """The RWKV-7 linear-attention backend, across sglang versions: v0.5.10 hangs
+    it off forward_batch.attn_backend; main moved it to the global forward context."""
+    ab = getattr(forward_batch, "attn_backend", None)
+    if ab is None:
+        from sglang.srt.model_executor.forward_context import get_attn_backend
+
+        ab = get_attn_backend()
+    return ab.linear_attn_backend
+
+
 def _proj_gemv(layer, x: torch.Tensor, fast: bool) -> torch.Tensor:
     """r/k/v/o/ffn projection. W4Linear self-dispatches (int4 GEMV at M==1). Otherwise
     uses the fused fp16 GEMV ONLY on the eligible single-row decode path; anything the
-    kernel can't handle falls back to the quant-aware ReplicatedLinear (never crashes).
+    kernel can't handle falls back to the quant-aware sglang linear (never crashes).
     All these projections are bias-free, so gemv_m1 (no bias) is a drop-in. Eligibility
     mirrors the kernel's requirements so an odd-shaped checkpoint degrades gracefully:
     fast + M==1 + fp16 activation + fp16 contiguous weight + K%4==0 + N even."""
@@ -272,6 +320,12 @@ class Rwkv7LoRA(nn.Module):
     config they carry int8/4-bit weights. The ``nn.Sequential`` is kept purely as
     a name container so checkpoint keys stay ``lora.0`` / ``lora.2`` (we drive the
     forward manually because ReplicatedLinear returns a ``(out, bias)`` tuple).
+
+    Under tp>1 the down proj stays replicated (its input is the full replicated
+    hidden and the rank-dim output is tiny, so every rank computes it locally,
+    no comm) while the up proj is ColumnParallelLinear (no gather): its output —
+    and its bias, sharded by the ColumnParallelLinear bias loader — is exactly
+    this rank's head slice, matching the head-parallel r/k/v projections.
     """
 
     def __init__(
@@ -290,6 +344,23 @@ class Rwkv7LoRA(nn.Module):
             act = nn.Sigmoid()
         else:
             act = nn.Identity()
+        if get_tensor_model_parallel_world_size() > 1:
+            up = ColumnParallelLinear(
+                low_rank,
+                hidden_size,
+                bias=bias,
+                gather_output=False,
+                quant_config=quant_config,
+                prefix=add_prefix("lora.2", prefix),
+            )
+        else:
+            up = ReplicatedLinear(
+                low_rank,
+                hidden_size,
+                bias=bias,
+                quant_config=quant_config,
+                prefix=add_prefix("lora.2", prefix),
+            )
         self.lora = nn.Sequential(
             ReplicatedLinear(
                 hidden_size,
@@ -299,13 +370,7 @@ class Rwkv7LoRA(nn.Module):
                 prefix=add_prefix("lora.0", prefix),
             ),
             act,
-            ReplicatedLinear(
-                low_rank,
-                hidden_size,
-                bias=bias,
-                quant_config=quant_config,
-                prefix=add_prefix("lora.2", prefix),
-            ),
+            up,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -337,8 +402,20 @@ class Rwkv7Attention(nn.Module):
             f"RWKV-7 head geometry mismatch: num_heads({self.num_heads}) * "
             f"head_dim({self.head_dim}) != hidden_size({self.hidden_size})"
         )
+        # Head-parallel TP: head_dim stays whole, whole heads are split across
+        # ranks. Everything downstream of the r/k/v/LoRA-up projections (per-
+        # channel params, g_norm, the WKV recurrence and its state) lives on
+        # this rank's head slice; o_proj (row-parallel) restores the full H.
+        tp_size = get_tensor_model_parallel_world_size()
+        assert self.num_heads % tp_size == 0, (
+            f"RWKV-7 TP requires num_heads({self.num_heads}) divisible by "
+            f"tp_size({tp_size})"
+        )
+        self.local_num_heads = self.num_heads // tp_size
+        self.local_hidden_size = self.local_num_heads * self.head_dim
 
         H = self.hidden_size
+        Hl = self.local_hidden_size
         # token-shift mix vectors (lerp coefficients)
         self.x_r = nn.Parameter(torch.zeros(1, 1, H))
         self.x_w = nn.Parameter(torch.zeros(1, 1, H))
@@ -351,7 +428,8 @@ class Rwkv7Attention(nn.Module):
         self.r_proj = _make_proj(H, H, quant_config, add_prefix("r_proj", prefix))
         self.k_proj = _make_proj(H, H, quant_config, add_prefix("k_proj", prefix))
         self.v_proj = _make_proj(H, H, quant_config, add_prefix("v_proj", prefix))
-        self.o_proj = _make_proj(H, H, quant_config, add_prefix("o_proj", prefix))
+        self.o_proj = _make_proj(H, H, quant_config, add_prefix("o_proj", prefix),
+                                 parallel="row")
 
         self.w_lora = Rwkv7LoRA(
             H, config.decay_low_rank_dim, "tanh", bias=True,
@@ -371,13 +449,13 @@ class Rwkv7Attention(nn.Module):
                 quant_config=quant_config, prefix=add_prefix("v_lora", prefix),
             )
 
-        self.k_k = nn.Parameter(torch.zeros(H))
-        self.k_a = nn.Parameter(torch.zeros(H))
-        self.r_k = nn.Parameter(torch.zeros(self.num_heads, self.head_dim))
+        self.k_k = nn.Parameter(torch.zeros(Hl))
+        self.k_a = nn.Parameter(torch.zeros(Hl))
+        self.r_k = nn.Parameter(torch.zeros(self.local_num_heads, self.head_dim))
 
         self.g_norm = nn.GroupNorm(
-            num_groups=self.num_heads,
-            num_channels=H,
+            num_groups=self.local_num_heads,
+            num_channels=Hl,
             eps=self.head_dim * config.norm_eps,
             affine=True,
         )
@@ -386,9 +464,13 @@ class Rwkv7Attention(nn.Module):
         # on first forward and cached. Order [x_r, x_k, x_w, x_a, x_g, x_v].
         self._mix6 = None
         # M6: build the fp16 GEMV extension at load time (CUDA is up; graceful
-        # fallback if the build fails). Only for the unquantized path (the kernel
-        # is fp16 dense, not int8-aware).
-        self._fast = _FAST_LINEAR and (quant_config is None) and fast_linear.available()
+        # fallback if the build fails). Only for the unquantized tp=1 path (the
+        # kernel is fp16 dense, not int8-aware, and wraps the ReplicatedLinear
+        # weight — under tp>1 the parallel linears run instead).
+        self._fast = (
+            _FAST_LINEAR and (quant_config is None) and tp_size == 1
+            and fast_linear.available()
+        )
         if self._fast and layer_id == 0:
             import sys
             print("[rwkv7] M6 fused fp16 GEMV projection path ENABLED "
@@ -416,8 +498,9 @@ class Rwkv7Attention(nn.Module):
         if T == 0:
             return x, v_first
 
-        be = forward_batch.attn_backend.linear_attn_backend
-        H, hd, nh = self.hidden_size, self.head_dim, self.num_heads
+        be = _linear_backend(forward_batch)
+        # Local (per-rank) head slice; == the full width at tp=1.
+        H, hd, nh = self.local_hidden_size, self.head_dim, self.local_num_heads
 
         # Fused triton elementwise path: bit-identical to the torch reference at
         # bf16/fp16 (verified), so it stacks with cuda-graph + int8. fp32 keeps the
@@ -501,18 +584,29 @@ class Rwkv7FeedForward(nn.Module):
         self.hidden_size = H
         inter = config.intermediate_size
         self.x_k = nn.Parameter(torch.zeros(H))
+        # tp>1: key is column-parallel (local inter slice; sqrelu is elementwise so
+        # it acts per-slice), value is row-parallel (allreduce restores the full H).
+        tp_size = get_tensor_model_parallel_world_size()
         self.key = _make_proj(H, inter, quant_config, add_prefix("key", prefix))
-        self.value = _make_proj(inter, H, quant_config, add_prefix("value", prefix))
-        self._fast = _FAST_LINEAR and (quant_config is None) and fast_linear.available()
-        # M6 sparse value-proj: eligible only unquantized (not int8, not W4Linear); the
-        # tiled weight is built lazily on the first (eager warmup) forward, once loaded.
-        self._sparse = _SPARSE_FFN and (quant_config is None) and not (_W4 or _W8)
+        self.value = _make_proj(inter, H, quant_config, add_prefix("value", prefix),
+                                parallel="row")
+        self._fast = (
+            _FAST_LINEAR and (quant_config is None) and tp_size == 1
+            and fast_linear.available()
+        )
+        # M6 sparse value-proj: eligible only unquantized tp=1 (not int8, not W4Linear;
+        # it wraps the ReplicatedLinear weight); the tiled weight is built lazily on
+        # the first (eager warmup) forward, once loaded.
+        self._sparse = (
+            _SPARSE_FFN and (quant_config is None) and tp_size == 1
+            and not (_W4 or _W8)
+        )
         self._value_tiled = None
 
     def forward(self, forward_batch: ForwardBatch, x: torch.Tensor) -> torch.Tensor:
         if x.shape[0] == 0:
             return x
-        be = forward_batch.attn_backend.linear_attn_backend
+        be = _linear_backend(forward_batch)
         shifted = be.token_shift(x, self.layer_id, 1, forward_batch)
         xk = x + self.x_k * (shifted - x)
         k = _proj_gemv(self.key, xk, self._fast)
@@ -698,6 +792,12 @@ class Rwkv7ForCausalLM(nn.Module):
         # W4Linear (RWKV_W4) stores int4 qweight + group scale as BUFFERS, not params —
         # include them so the .qweight/.scale checkpoint keys resolve.
         params_dict.update(dict(self.named_buffers()))
+        tp_size = get_tensor_model_parallel_world_size()
+        tp_rank = get_tensor_model_parallel_rank()
+        # Head-sharded per-channel params (tp>1): the checkpoint stores the full
+        # tensor; narrow dim 0 (channels resp. heads) to this rank's head slice
+        # before the plain copy. Parallel linears shard via their own weight_loader.
+        _head_sharded = (".k_k", ".k_a", ".r_k", ".g_norm.weight", ".g_norm.bias")
         loaded_params: Set[str] = set()
         for name, loaded_weight in weights:
             if name not in params_dict:
@@ -705,6 +805,9 @@ class Rwkv7ForCausalLM(nn.Module):
                     f"[rwkv7.load_weights] unexpected checkpoint key: {name}"
                 )
             param = params_dict[name]
+            if tp_size > 1 and name.endswith(_head_sharded):
+                shard = param.shape[0]
+                loaded_weight = loaded_weight.narrow(0, tp_rank * shard, shard)
             weight_loader = getattr(param, "weight_loader", default_weight_loader)
             weight_loader(param, loaded_weight)
             loaded_params.add(name)

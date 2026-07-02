@@ -2046,7 +2046,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
                 Rwkv7NoOpFullAttnBackend,
             )
 
-            full_attention_backend = Rwkv7NoOpFullAttnBackend()
+            full_attention_backend = Rwkv7NoOpFullAttnBackend(self)
         else:
             full_attention_backend = ATTENTION_BACKENDS[backend_str](self)
         return attn_backend_wrapper(self, full_attention_backend)

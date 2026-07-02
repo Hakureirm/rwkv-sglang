@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Standalone numerics + speed test for the hand-written weight-only int8 kernels
-(rwkv7_w8.cu): gemv_w8_m1 + gemm_w8_small. Same de-risk pattern as verify_w4.py.
+(rwkv7_w8.cu): gemv_w8_m1 + gemm_w8_small + gemm_w8_tc. Same de-risk pattern as verify_w4.py.
 
   source ~/rwkv_env.sh && CUDA_VISIBLE_DEVICES=0 python bench/verify_w8.py
 """
@@ -51,8 +51,10 @@ def main():
           f"{'fp16 us':>8} {'w8 us':>7} {'vs fp16':>8} | {'rows==M1':>9}")
     print("-" * 108)
     ok_all = True
-    for M in (1, 2, 4, 8):
+    for M in (1, 2, 4, 8, 16, 32, 64):
         for K, N in [(2048, 2048), (4096, 4096), (4096, 14336)]:
+            if M > 8 and N % 64 != 0:
+                continue
             W = (torch.randn(N, K, device=dev) * 0.02).to(torch.float16)
             X = (torch.randn(M, K, device=dev)).to(torch.float16)
             qw, sc, qi = quantize_w8(W)
@@ -61,12 +63,18 @@ def main():
             if M == 1:
                 y = torch.ops.rwkv7_w8.gemv_w8_m1(X, qw, sc).float()
                 bitexact = "-"
-            else:
+            elif M <= 8:
                 y = torch.ops.rwkv7_w8.gemm_w8_small(X, qw, sc).float()
                 y_rows = torch.cat([torch.ops.rwkv7_w8.gemv_w8_m1(X[m:m+1], qw, sc)
                                     for m in range(M)], dim=0).float()
                 bitexact = "BIT-EXACT" if torch.equal(y.half(), y_rows.half()) else "MISMATCH"
                 ok_all &= (bitexact == "BIT-EXACT")
+            else:
+                # tensor-core path: fp16 wmma + fp32 accum — deterministic but not
+                # bit-identical to the scalar GEMV (different reduction structure);
+                # gate on rel-err vs the dequant reference instead.
+                y = torch.ops.rwkv7_w8.gemm_w8_tc(X, qw, sc).float()
+                bitexact = "tc"
             y_ref = X.float() @ dequant_ref(qi, sc).t()
             rel = ((y - y_ref).norm() / (y_ref.norm() + 1e-9)).item()
             y_fp = X.float() @ W.float().t()
@@ -75,8 +83,12 @@ def main():
             ok_all &= ok
 
             Wt = W.t().contiguous()
-            op = (lambda: torch.ops.rwkv7_w8.gemv_w8_m1(X, qw, sc)) if M == 1 else \
-                 (lambda: torch.ops.rwkv7_w8.gemm_w8_small(X, qw, sc))
+            if M == 1:
+                op = lambda: torch.ops.rwkv7_w8.gemv_w8_m1(X, qw, sc)
+            elif M <= 8:
+                op = lambda: torch.ops.rwkv7_w8.gemm_w8_small(X, qw, sc)
+            else:
+                op = lambda: torch.ops.rwkv7_w8.gemm_w8_tc(X, qw, sc)
             for _ in range(20):
                 _ = X @ Wt; _ = op()
             torch.cuda.synchronize()

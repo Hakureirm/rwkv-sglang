@@ -265,8 +265,10 @@ class Rwkv7StateShape:
         head_dim: int,
     ) -> "Rwkv7StateShape":
         # Token-shift conv state: store the previous token's (post-norm) hidden
-        # vector. conv_kernel=2 => last dim = conv_kernel - 1 = 1.
-        conv_state_shape = (divide(hidden_size, tp_world_size), 1)
+        # vector. conv_kernel=2 => last dim = conv_kernel - 1 = 1. Kept FULL-width
+        # per rank even under TP: it feeds the replicated hidden input of the
+        # column-parallel r/k/v/LoRA projections, so every rank needs all of it.
+        conv_state_shape = (hidden_size, 1)
         temporal_state_shape = (divide(num_heads, tp_world_size), head_dim, head_dim)
         return Rwkv7StateShape(
             # two token-shifts: conv[0] = attn (time-mix), conv[1] = ffn (channel-mix)

@@ -19,6 +19,8 @@ is still driven through HybridLinearAttnBackend, so `self.forward_metadata`
 (query_start_loc + mamba_cache_indices) is populated normally.
 """
 
+from typing import Optional
+
 import torch
 
 from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
@@ -42,6 +44,19 @@ class Rwkv7NoOpFullAttnBackend(AttentionBackend):
     (triton/flashinfer) either probe the empty full KV pool at construction or reject
     fp32 planning, so we substitute this no-op instead.
     """
+
+    # HybridLinearAttnBackend (sglang main) copies these off the full backend at
+    # construction; there is no full-attn KV pool here, and the req/token pools
+    # come from the runner when one is given.
+    token_to_kv_pool = None
+    req_to_token_pool = None
+    needs_cpu_seq_lens = False
+
+    def __init__(self, model_runner: Optional[ModelRunner] = None):
+        if model_runner is not None:
+            self.req_to_token_pool = model_runner.req_to_token_pool
+            self.token_to_kv_pool = getattr(model_runner, "token_to_kv_pool", None)
+            self.max_context_len = model_runner.model_config.context_len
 
     def init_forward_metadata(self, forward_batch: ForwardBatch):
         pass

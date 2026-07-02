@@ -131,6 +131,10 @@ def _ensure_w8_loaded():
             def _gemm_w8_small_fake(x, qweight, scale):
                 return x.new_empty((x.shape[0], qweight.shape[0]))
 
+            @torch.library.register_fake("rwkv7_w8::gemm_w8_tc")
+            def _gemm_w8_tc_fake(x, qweight, scale):
+                return x.new_empty((x.shape[0], qweight.shape[0]))
+
             @torch.library.register_fake("rwkv7_w8::dequant_w8")
             def _dequant_w8_fake(qweight, scale):
                 return scale.new_empty((qweight.shape[0], qweight.shape[1]))
@@ -154,6 +158,10 @@ def gemv_w8_m1(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> t
 
 def gemm_w8_small(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
     return torch.ops.rwkv7_w8.gemm_w8_small(x.contiguous(), qweight, scale)
+
+
+def gemm_w8_tc(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    return torch.ops.rwkv7_w8.gemm_w8_tc(x.contiguous(), qweight, scale)
 
 
 def dequant_w8(qweight: torch.Tensor, scale: torch.Tensor, group: int = GROUP) -> torch.Tensor:
