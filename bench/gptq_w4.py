@@ -79,8 +79,26 @@ def main():
             if os.path.isfile(src):
                 shutil.copy2(src, os.path.join(args.out, f))
 
-    hess = torch.load(args.hessians, map_location="cuda")["hessian"]
-    print(f"loaded {len(hess)} Hessians")
+    if os.path.isdir(args.hessians) or os.path.isdir(os.path.join(args.hessians, "hessians")):
+        shard_dir = args.hessians if os.path.isdir(args.hessians) and not os.path.exists(
+            os.path.join(args.hessians, "hessians")) else os.path.join(args.hessians, "hessians")
+        # lazy per-shard loading: 7.2B shards are ~1 GiB each; load to CUDA one at
+        # a time inside the quantization loop instead of all upfront
+        class _ShardHess(dict):
+            def __init__(self, d):
+                super().__init__()
+                self._dir = d
+                for f in os.listdir(d):
+                    if f.endswith(".pt"):
+                        self[f[:-3]] = None
+            def fetch(self, k):
+                return torch.load(os.path.join(self._dir, k + ".pt"),
+                                  map_location="cuda")["hessian"]
+        hess = _ShardHess(shard_dir)
+        print(f"sharded Hessians: {len(hess)} shards in {shard_dir}")
+    else:
+        hess = torch.load(args.hessians, map_location="cuda")["hessian"]
+        print(f"loaded {len(hess)} Hessians")
 
     n_q = n_skip = n_rtn = 0
     for sf in glob.glob(os.path.join(args.model, "*.safetensors")):
@@ -90,7 +108,10 @@ def main():
             if W.ndim == 2 and name.endswith(TARGET_SUFFIXES) and (W.shape[1] % args.group == 0):
                 base = name[: -len(".weight")]
                 if base in hess:
-                    Q, sc = gptq_quantize(W.cuda(), hess[base].cuda(), args.group, args.damp)
+                    Hcur = (hess.fetch(base) if hasattr(hess, "fetch")
+                            else hess[base].cuda())
+                    Q, sc = gptq_quantize(W.cuda(), Hcur, args.group, args.damp)
+                    del Hcur
                     n_q += 1
                 else:  # no Hessian (e.g. captured on a different layer set) -> RTN fallback
                     Wg = W.cuda().float().view(W.shape[0], -1, args.group)

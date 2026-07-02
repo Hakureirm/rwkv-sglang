@@ -135,6 +135,12 @@ _W8 = os.environ.get("RWKV_W8", "0") == "1"
 _CALIB = os.environ.get("RWKV_CALIB", "0") == "1"
 _CALIB_OUT = os.environ.get("RWKV_CALIB_OUT", "")
 _CALIB_TOKENS = int(os.environ.get("RWKV_CALIB_TOKENS", "20000"))
+# Streamed accumulation for big models (7.2B ffn.value: K=16384 -> a 1 GiB fp32
+# Hessian per layer x 32 layers, which cannot live on the GPU): projections with
+# K >= this threshold compute the per-chunk X^T X on GPU but accumulate on CPU,
+# and every Hessian dumps as its own shard under <out>/hessians/ (single-file
+# format kept for small models).
+_CALIB_CPU_K = int(os.environ.get("RWKV_CALIB_CPU_K", "8192"))
 _HESS: dict = {}
 _NSAMP: dict = {}
 _calib_state = {"dumped": False, "trigger": None}
@@ -144,23 +150,36 @@ def _calib_dump():
     if not _CALIB_OUT or not _HESS:
         return
     os.makedirs(_CALIB_OUT, exist_ok=True)
-    payload = {"hessian": {k: v.detach().cpu() for k, v in _HESS.items()},
-               "nsamp": dict(_NSAMP)}
-    torch.save(payload, os.path.join(_CALIB_OUT, "calib_hessians.pt"))
+    total_bytes = sum(v.numel() * 4 for v in _HESS.values())
+    if total_bytes > 8 << 30:
+        # big models: one shard per projection (a single 7.2B file would be >32 GiB)
+        shard_dir = os.path.join(_CALIB_OUT, "hessians")
+        os.makedirs(shard_dir, exist_ok=True)
+        for k, v in _HESS.items():
+            torch.save({"hessian": v.detach().cpu(), "nsamp": _NSAMP[k]},
+                       os.path.join(shard_dir, k.replace("/", "_") + ".pt"))
+    else:
+        payload = {"hessian": {k: v.detach().cpu() for k, v in _HESS.items()},
+                   "nsamp": dict(_NSAMP)}
+        torch.save(payload, os.path.join(_CALIB_OUT, "calib_hessians.pt"))
     import sys
     print(f"[rwkv7 calib] dumped {len(_HESS)} Hessians ({_NSAMP.get(_calib_state['trigger'],0)} "
-          f"tokens) -> {_CALIB_OUT}", file=sys.stderr, flush=True)
+          f"tokens, {total_bytes >> 20} MiB) -> {_CALIB_OUT}", file=sys.stderr, flush=True)
 
 
 def _calib_accumulate(qname: str, x: torch.Tensor):
     xf = x.reshape(-1, x.shape[-1]).float()
+    h = xf.t() @ xf
+    if xf.shape[-1] >= _CALIB_CPU_K:
+        # stream to CPU: the GPU only ever holds ONE such Hessian transiently
+        h = h.cpu()
     if qname not in _HESS:
-        _HESS[qname] = xf.t() @ xf
+        _HESS[qname] = h
         _NSAMP[qname] = xf.shape[0]
         if _calib_state["trigger"] is None:
             _calib_state["trigger"] = qname
     else:
-        _HESS[qname].add_(xf.t() @ xf)
+        _HESS[qname].add_(h)
         _NSAMP[qname] += xf.shape[0]
     if (not _calib_state["dumped"] and qname == _calib_state["trigger"]
             and _NSAMP[qname] >= _CALIB_TOKENS):
