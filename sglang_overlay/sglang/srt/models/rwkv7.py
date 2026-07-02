@@ -169,6 +169,13 @@ _CALIB_TOKENS = int(os.environ.get("RWKV_CALIB_TOKENS", "20000"))
 # and every Hessian dumps as its own shard under <out>/hessians/ (single-file
 # format kept for small models).
 _CALIB_CPU_K = int(os.environ.get("RWKV_CALIB_CPU_K", "8192"))
+# For models whose FULL Hessian set fits neither GPU nor host RAM (7.2B: 42 GB
+# total), calibrate in passes: only qnames matching this regex accumulate
+# (e.g. pass A 'ffn.value' layers 0-15 via 'layers\.([0-9]|1[0-5])\..*ffn.value',
+# pass B the rest, pass C the small projections). Empty = accumulate everything.
+import re as _re
+_CALIB_FILTER = os.environ.get("RWKV_CALIB_FILTER", "")
+_CALIB_FILTER_RE = _re.compile(_CALIB_FILTER) if _CALIB_FILTER else None
 _HESS: dict = {}
 _NSAMP: dict = {}
 _calib_state = {"dumped": False, "trigger": None}
@@ -196,6 +203,8 @@ def _calib_dump():
 
 
 def _calib_accumulate(qname: str, x: torch.Tensor):
+    if _CALIB_FILTER_RE is not None and not _CALIB_FILTER_RE.search(qname):
+        return
     xf = x.reshape(-1, x.shape[-1]).float()
     h = xf.t() @ xf
     if xf.shape[-1] >= _CALIB_CPU_K:
