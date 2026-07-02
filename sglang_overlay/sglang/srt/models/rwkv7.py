@@ -191,8 +191,10 @@ def _calib_dump():
         shard_dir = os.path.join(_CALIB_OUT, "hessians")
         os.makedirs(shard_dir, exist_ok=True)
         for k, v in _HESS.items():
-            torch.save({"hessian": v.detach().cpu(), "nsamp": _NSAMP[k]},
-                       os.path.join(shard_dir, k.replace("/", "_") + ".pt"))
+            dst = os.path.join(shard_dir, k.replace("/", "_") + ".pt")
+            tmp = dst + ".tmp"
+            torch.save({"hessian": v.detach().cpu(), "nsamp": _NSAMP[k]}, tmp)
+            os.replace(tmp, dst)  # atomic: an OOM-kill mid-write can't corrupt a shard
     else:
         payload = {"hessian": {k: v.detach().cpu() for k, v in _HESS.items()},
                    "nsamp": dict(_NSAMP)}

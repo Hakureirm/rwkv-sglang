@@ -92,8 +92,15 @@ def main():
                     if f.endswith(".pt"):
                         self[f[:-3]] = None
             def fetch(self, k):
-                return torch.load(os.path.join(self._dir, k + ".pt"),
-                                  map_location="cuda")["hessian"]
+                p = os.path.join(self._dir, k + ".pt")
+                try:
+                    h = torch.load(p, map_location="cuda")["hessian"]
+                except Exception as e:  # truncated/corrupt shard -> RTN fallback
+                    print(f"  !! shard {k} unreadable ({e}) -> RTN fallback")
+                    return None
+                if os.environ.get("GPTQ_CONSUME_SHARDS", "0") == "1":
+                    os.unlink(p)  # bound disk: shards shrink as the checkpoint grows
+                return h
         hess = _ShardHess(shard_dir)
         print(f"sharded Hessians: {len(hess)} shards in {shard_dir}")
     else:
@@ -107,13 +114,15 @@ def main():
         for name, W in sd.items():
             if W.ndim == 2 and name.endswith(TARGET_SUFFIXES) and (W.shape[1] % args.group == 0):
                 base = name[: -len(".weight")]
+                Hcur = None
                 if base in hess:
                     Hcur = (hess.fetch(base) if hasattr(hess, "fetch")
                             else hess[base].cuda())
+                if Hcur is not None:
                     Q, sc = gptq_quantize(W.cuda(), Hcur, args.group, args.damp)
                     del Hcur
                     n_q += 1
-                else:  # no Hessian (e.g. captured on a different layer set) -> RTN fallback
+                else:  # no/unreadable Hessian -> RTN fallback
                     Wg = W.cuda().float().view(W.shape[0], -1, args.group)
                     sc = (Wg.abs().amax(dim=2) / 7.0).clamp(min=1e-8)
                     Q = torch.round(Wg / sc[:, :, None]).clamp_(-7, 7).to(torch.int32).view(W.shape)
