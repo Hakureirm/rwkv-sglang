@@ -148,6 +148,23 @@ def _ensure_w8_loaded():
         return False
 
 
+_TC_SUPPORTED = None
+
+
+def tc_supported() -> bool:
+    """Tensor-core (wmma) kernels need sm70+; the gemm_*_tc device code is empty
+    below that (ARCH guard), so Pascal and older must never be routed to it —
+    they fall back to dequant→cuBLAS (the scalar gemv/small kernels are plain
+    FMA + warp shuffles and run fine from sm60)."""
+    global _TC_SUPPORTED
+    if _TC_SUPPORTED is None:
+        try:
+            _TC_SUPPORTED = torch.cuda.get_device_capability()[0] >= 7
+        except Exception:
+            _TC_SUPPORTED = False
+    return _TC_SUPPORTED
+
+
 def w8_available() -> bool:
     return _ensure_w8_loaded()
 
