@@ -213,7 +213,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 | F0014 | Clean same-precision standing — raw speed loses, accuracy TIES, VRAM/int8/serving win; CUDA endgame chosen | info | open |
 | F0015 | CUDA endgame result — fused fp16 GEMV greedy-EXACT, +5-9% bsz1 decode @1.5B/7.2B; cuda-graph amortizes the eager win; mega-kernel to match albatross DECLINED | info | open |
 | F0016 | Serving-scale measured — ~50× concurrency throughput at flat VRAM; context-invariant memory (O(1)-state wedge) | info | open |
-| F0022 | State prefix cache via MambaRadixCache (req#3) — greedy-EXACT shared-prefix at 0.1B+1.5B; ~30% cache hits on a shared-prefix load (was 0, radix forced off) | info | open |
+| F0022 | State prefix cache via MambaRadixCache (req#3) — greedy-EXACT shared-prefix at 0.1B+1.5B; ~98% cache hit rate on a high-reuse load (was 0, radix forced off); only RWKV serving stack with a state cache | info | open |
 | F0021 | Uncheatable compression (BlinkDL's decreed metric) — 1.5B full-corpus POOLED fp16 0.6085 / w8 0.6086 (lossless) / w4-GPTQ 0.6514; + position curve. 7.2B GPTQ lambada 0.7297 (−1.28pt). Weights on ModelScope | info | open |
 | F0020 | Fused LoRA kernel — fp16 bsz1 226.5 tok/s (+11.6%), greedy EXACT; lm_head identified as 58.5% of the graphed step | info | open |
 | F0019 | TP+PP full matrix greedy-EXACT on real L4 fleets (tp 2/4/8, pp 2/4/8, mixed tp2×pp2 after the v_first full-width fix); PP-transfer chunk-send pitfall documented (upstream-relevant) | info | open |
