@@ -12,6 +12,10 @@ checkpoint 1.8 vs 2.9 GB. Standalone: scalar family 1.13–2.29× at every M∈{
 bit-identical to M=1; TC 1.05–1.47× at M=16; quant error 5.9e-3 (18× smaller than int4).
 Unlike cutlass w8a8 (sm80–90 only), JIT-builds on every arch. Full write-up:
 `docs/findings/0018-w8-weight-only.md`; test `bench/verify_w8.py`.
+Raw transcripts: [`raw/`](raw/) — standalone kernel tables
+(`verify_w4_w8_kernel_tables.log`), pipelined e2e sweeps
+(`w4_w8_e2e_pipelined.log`), server-side length curves
+(`w8_w4_length_curves_server.log`).
 
 # w4 — hand-written weight-only int4 (4-bit quantization)
 
