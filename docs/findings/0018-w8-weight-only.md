@@ -51,6 +51,16 @@ End-to-end decode:
 
 VRAM: peak serve 8,502 vs 9,152 MiB (bsz1); checkpoint 1.8 GB vs 2.9 GB fp16.
 
+## High-concurrency gap (bsz>64) — open, per BlinkDL's "high-concurrency w8" ask (2026-07-03)
+The M>64 path currently falls back to **dequant→cuBLAS**: it saves weight VRAM but
+NOT bandwidth (weights are expanded to fp16 before the GEMM), so at bsz>64 w8 only
+~matches fp16 — no quant speedup. bsz64 itself is 0.77× (the M=64 long-K ffn shapes).
+A true large-M w8 tensor-core GEMM (256-thread block rework, weight-stationary tiling so
+the int8 byte advantage survives weight reuse) is the open follow-up, together with
+serving-level A/B at bsz128–256 (only single-GEMM microbench exists today). Small-batch
+w8 (bsz≤32, lossless + faster) is solid; high-concurrency w8 is an explicit TODO, not a
+shipped capability.
+
 ## Positioning (three quant modes, honest)
 | mode | accuracy | speed sweet spot | arch coverage |
 |---|---|---|---|
