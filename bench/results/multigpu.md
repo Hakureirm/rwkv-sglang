@@ -18,6 +18,7 @@ per-arch code change**. Each GPU was benchmarked on a real instance of that card
 bf16 greedy-EXACT gate + decode tok/s (bsz 1/8/32), plus our int4 decode (bsz1) and its speedup
 over bf16:
 
+*1.5B · each GPU on real HW of that card · cuda-graph ON · radix OFF · bf16 col = greedy 24/24 EXACT gate vs numpy oracle (quant none); int4 cols = RWKV_W4=1 RTN g64 (fixture-greedy bit-identical to the 3090); decode tok/s per bsz in the column header*
 | GPU | sm | bf16 greedy | bf16 decode 1/8/32 | int4 decode bsz1 | int4/bf16 (bsz1) | int4 peak VRAM (MiB) |
 |---|---|---|---|---|---|---|
 | T4 | 7.5 (Turing) | **24/24** | 65.1 / 446.5 / 592.3 | 114.9 | **1.77×** | 4661 |
@@ -61,6 +62,7 @@ over bf16:
 
 Every precision on every card. bf16 decode + prefill:
 
+*1.5B · each GPU on real HW of that card · cuda-graph ON · radix OFF · bf16 (quant none, greedy 24/24 EXACT) · decode + prefill tok/s at bsz 1/8/32*
 | GPU | arch | bf16 decode 1/8/32 | bf16 prefill 1/8/32 |
 |---|---|---|---|
 | T4 | Turing 7.5 | 65 / 446 / 592 | 4,909 / 5,590 / 5,562 |
@@ -76,6 +78,7 @@ Every precision on every card. bf16 decode + prefill:
 
 int8 (w8a8) + int4 decode:
 
+*1.5B · each GPU on real HW of that card · cuda-graph ON · radix OFF · decode tok/s at bsz 1/8/32 · int8 = sglang `w8a8_int8` (sm80–90 only) · int4 = RWKV_W4=1 RTN g64 (all archs)*
 | GPU | int8 decode 1/8/32 | int4 decode 1/8/32 |
 |---|---|---|
 | T4 | — (needs sm80+) | 115 / 196 / 614 |

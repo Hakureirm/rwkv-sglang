@@ -44,6 +44,7 @@ is then laid out in full below — nothing hidden.
 ### Where a production serving engine wins ✅
 
 **1. Concurrency throughput — scales ~50× as you fill the batch** (1.5B, steady-state decode tok/s, RTX 3090):
+*1.5B · bf16 · RTX 3090 · cuda-graph ON · radix OFF · quant none · 512-tok ctx · steady-state decode ([`serving_scale/`](bench/results/serving_scale/))*
 ```
 bsz   1  █░░░░░░░░░░░░░░░░░░░░░    166 tok/s
 bsz  16  █████░░░░░░░░░░░░░░░░░  2,143
@@ -53,6 +54,7 @@ bsz 256  ████████████████████░  8,187 
 ```
 
 **2. VRAM is O(1) — flat in both concurrency and context** (1.5B, peak nvidia-smi):
+*1.5B · bf16 · RTX 3090 · cuda-graph ON · radix OFF · quant none · whole-GPU nvidia-smi peak*
 | scale axis | baseline | scaled up | Δ peak VRAM |
 |---|---|---|---|
 | **concurrency** | bsz 1 = 12,420 MiB | **bsz 256** = 12,622 MiB | **+202 MiB** for 256 concurrent seqs |
@@ -105,6 +107,7 @@ coverage limit.) Full grid: [`bench/results/multigpu.md`](bench/results/multigpu
 single-stream mega-kernel already at **~92% of the 3090's memory-bandwidth ceiling**, whereas we
 are a full dynamic-batching serving engine. We publish every number anyway (higher = closer to
 its raw kernel; `1.00×` = parity; best config = in-place WKV + `RWKV_SPARSE_FFN=1` + `RWKV_FAST_LINEAR=1`):
+*1.5B + 7.2B · fp16 · bsz 1/8/32 · RTX 3090 · cuda-graph ON · radix OFF · greedy 24/24 EXACT · in-place WKV (default) + RWKV_SPARSE_FFN=1 + RWKV_FAST_LINEAR=1 — NOT RWKV_FUSED_LORA (chart predates it; see note below the chart)*
 ```
               ours / albatross-fp16 — same-precision single-stream (decode tok/s)
 7.2B  bsz1  ██████████████████░░░░  0.83×   (45.9 → 65.7 tok/s)
@@ -169,6 +172,8 @@ monolithic whole-time-mix mega-kernel (sacrifices the clean integration; ~parity
 ## Design goals & status
 Honest self-assessment against this project's engineering goals (2026-07-01), scoped to an
 sglang inference integration; ✅ done, ◑ partial, ⬜ open/out-of-scope-here.
+
+*Cited speed numbers: RTX 3090 · cuda-graph ON · radix OFF · greedy-EXACT unless noted; fp16 "best" = in-place WKV + RWKV_SPARSE_FFN=1 + RWKV_FAST_LINEAR=1 (+ RWKV_FUSED_LORA=1 lifts 1.5B bsz1 202.9→226.5, F0020); w4/w8 = RWKV_W4/RWKV_W8=1 (RTN/GPTQ per row); off-3090 GPUs per [`multigpu.md`](bench/results/multigpu.md).*
 
 | # | Goal | Status in this deliverable |
 |---|---|---|

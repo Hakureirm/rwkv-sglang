@@ -59,6 +59,8 @@ Three hand-written, greedy-EXACT, batch-invariant, FLA-free kernels (`bench/resu
 
 albatross baseline = faster3a (7.2B bsz1 also confirmed vs the newest faster3b_2606 = 79.05):
 
+*ours best config = in-place WKV (default) + `RWKV_SPARSE_FFN=1` + `RWKV_FAST_LINEAR=1`; 0.1B/1.5B/7.2B · fp16 · RTX 3090 · cuda-graph ON · radix OFF · greedy 24/24 EXACT · median of 7. This sweep does NOT include `RWKV_FUSED_LORA=1` (post-dates it; the fused-LoRA kernel lifts 1.5B bsz1 202.9→226.5, F0020 / `docs/findings/0020-fused-lora.md`).*
+
 | model | bsz | ours new | **ours best** | new/alb | **best/alb** |
 |---|---|---|---|---|---|
 | 0.1B | 1 | 536.1 | 570.3 | 0.46 | 0.49 |

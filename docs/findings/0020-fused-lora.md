@@ -25,6 +25,7 @@ ReplicatedLinear weights (mirrors `_mix6`); `xs` is a zero-copy view of
 bsz1 + fp16 + tp1 + unquantized; every other path untouched.
 
 ## Measured (1.5B, RTX 3090, cuda-graph ON, radix OFF)
+*1.5B · fp16 · bsz1 · tp1 · unquantized · RTX 3090 · cuda-graph ON · radix OFF · greedy 24/24 EXACT · RWKV_FUSED_LORA=1 eligible only on bsz1+fp16+tp1+unquantized*
 | config | greedy | decode bsz1 tok/s |
 |---|---|---|
 | best w/o fused lora (in-place WKV + sparse FFN + fast GEMV) | EXACT 24/24 | 203.0 |

@@ -26,6 +26,8 @@ for the full write-up; kernel test `bench/verify_w4.py`, quantizer `bench/quant_
 
 ## Kernels (standalone, `bench/verify_w4.py`, RTX 3090)
 
+*standalone single-GEMM microbench (NOT e2e) · int4 group64 symmetric · RTX 3090 · vs fp16 cuBLAS · rel-err quoted vs the dequant reference · shapes are raw K×N (model-agnostic)*
+
 **`gemv_w4_m1` (M=1):**
 | K×N | kernel vs dequant (rel) | int4 GEMV vs fp16 GEMV (M=1) |
 |---|---|---|
@@ -60,6 +62,7 @@ pipelined; pre-pipeline values in parens):
 M>64 (prefill) stays on dequant→cuBLAS (compute-bound; weight read amortized over many tokens).
 
 ## End-to-end (1.5B, sglang, cuda-graph ON, fp16)
+*1.5B · fp16 · RTX 3090 · cuda-graph ON · radix OFF · RWKV_W4=1 (group64 RTN) · decode tok/s · bsz per row · greedy 14/24 vs oracle fixture = bit-identical to the offline dequant reference (see Correctness below — NOT 24/24-exact)*
 | bsz | fp16 tok/s | w4 tok/s | w4/fp16 | path |
 |----:|-----------:|---------:|--------:|---|
 |   1 |      166.5 | **259.1** | **1.56×** | gemv_w4_m1 |
@@ -84,6 +87,7 @@ w4 prefill ≈ 0.95× fp16 (13.3–13.8k vs 14.0–14.4k tok/s).
   small-M kernel (bit-identical rows, verified end-to-end).
 
 ## 7.2B (RTX 3090, RTN g64, fp16, cuda-graph ON)
+*7.2B · fp16 · bsz1 · RTX 3090 · cuda-graph ON · radix OFF · RWKV_W4=1 (RTN g64) · fixture greedy 8/8 EXACT · w4/albatross ratio is cross-precision (our int4 vs its fp16)*
 | metric | ours fp16 best | albatross-fp16 | **w4 RTN** |
 |---|---|---|---|
 | decode bsz1 tok/s | 65.7 | 79.6 | **102.8** — 1.56× ours-fp16, **1.29× albatross-fp16** (cross-precision) |
@@ -99,6 +103,7 @@ model serves on a 16 GB Turing card with more than half the VRAM to spare.
 7.2B GPTQ deferred (ffn.value Hessian = 16384² × fp32 = 1 GB/layer × 32 — needs streamed accumulation).
 
 ## Accuracy (1.5B; lambada full 5153 + MMLU 2000-sample; lm-eval local-completions)
+*1.5B · RTX 3090 · lm-eval local-completions · greedy · baseline = fp16/bf16 (both greedy-EXACT); each row is that quant mode's weights (activations fp16 except w8a8) · Δ in accuracy points vs baseline*
 | model | lambada acc | Δ | MMLU acc | Δ |
 |---|---|---|---|---|
 | fp16/bf16 baseline | 0.6724 | — | 0.5235 | — |

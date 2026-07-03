@@ -17,6 +17,7 @@ same honest proxy `throughput.py` uses). Raw logs: [`conc_scale_15b.log`](conc_s
 Fixed 512-token context, sweeping the number of concurrent sequences (`throughput.py`,
 `--cuda-graph-max-bs 256 --mem-fraction 0.85`):
 
+*1.5B · bf16 · RTX 3090 · cuda-graph ON · radix OFF · quant none · 512-tok ctx*
 | bsz | decode tok/s | prefill tok/s | peak VRAM (MiB) |
 |----:|-------------:|--------------:|----------------:|
 |   1 |        166.0 |       10,161 |          12,420 |
@@ -37,6 +38,7 @@ limit** (O(1) state processes arbitrary length), so `--max-context 131072`
 (+`SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=1`) lets us measure serving **cost** past that window
 (output *quality* beyond the trained window is not claimed — this sweep measures cost, not accuracy):
 
+*1.5B · bf16 · RTX 3090 · cuda-graph ON · radix OFF · quant none · bsz 8*
 | context | decode tok/s | ms/step | TTFT (ms) | peak VRAM (MiB) |
 |--------:|-------------:|--------:|----------:|----------------:|
 |   1,024 |      1,034.3 |    7.73 |     581.1 |          12,364 |
@@ -68,6 +70,7 @@ guarantee (decode reads only the fixed-size state, never the context). We do not
 Same sweeps on **7.2B** (bf16, cuda-graph ON, radix off; raw: [`ctx_72b.log`](ctx_72b.log),
 [`conc_72b.log`](conc_72b.log)):
 
+*7.2B · bf16 · RTX 3090 · cuda-graph ON · radix OFF · quant none*
 **Context invariance (bsz 4, `--max-context 65536`):**
 | context | decode ms/step | peak VRAM (MiB) |
 |--------:|---------------:|----------------:|
@@ -95,6 +98,7 @@ The two sweeps above are synthetic (fixed-length) to isolate the O(1)-state prop
 industry-standard, realistic serving number we run sglang's own `bench_serving` on **ShareGPT**
 (variable-length real conversations), 500 prompts, 1.5B, bf16, RTX 3090 (radix off, piecewise off):
 
+*1.5B · bf16 · RTX 3090 · radix OFF · piecewise off · quant none · sglang `bench_serving`, ShareGPT 500 prompts*
 | request rate | req/s | output tok/s | total tok/s | median TTFT | P99 TTFT | median TPOT |
 |---|---|---|---|---|---|---|
 | `inf` (peak) | 6.48 | 1,275 | 3,361 | 7,220 ms | 12,958 ms | 112 ms |
@@ -112,6 +116,7 @@ different questions than §1/§2 and are reported alongside them, not in place o
 **Second environment — H100** (same `bench_serving` methodology, 300 prompts, in-container server;
 raw: [`h100_sharegpt.json`](h100_sharegpt.json)):
 
+*1.5B · bf16 · H100 · radix OFF · piecewise off · quant none · sglang `bench_serving`, ShareGPT 300 prompts*
 | request rate | req/s | output tok/s | total tok/s | median TTFT | P99 TTFT | median TPOT |
 |---|---|---|---|---|---|---|
 | `inf` (peak) | 26.33 | 5,590 | **14,245** | 1,425 ms | 1,962 ms | 14.4 ms |

@@ -23,6 +23,7 @@ fix verification at 0.1B and 1.5B (`tp2pp2_*_fix_verify.log`).
 
 ## Multi-GPU matrix (1.5B bf16, L4 ×N, gate config)
 
+*1.5B · bf16 · L4 ×N real HW · quant none (W4/W8 are tp1-only) · gate config = cuda-graph OFF (functional-verification tok/s, NOT tuned throughput) · greedy 24/24 EXACT vs the numpy oracle (24 tokens)*
 | config | GPUs | greedy | bsz1 tok/s | bsz8 | bsz32 | per-GPU mem MiB (nvidia-smi) |
 |---|---|---|---|---|---|---|
 | tp=2       | 2× L4 | **EXACT 24/24** | 20.6 | 161.9 | 644.4 | (see note) |

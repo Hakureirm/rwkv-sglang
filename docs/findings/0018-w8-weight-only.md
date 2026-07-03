@@ -39,6 +39,7 @@ Standalone kernels vs fp16 cuBLAS (`bench/verify_w8.py`): **1.13–2.29× at eve
 shape-dependence as `gemm_w4_tc`; numerics 2.9e-4.
 
 End-to-end decode:
+*1.5B · fp16 · RTX 3090 · cuda-graph ON · radix OFF · RWKV_W8=1 (weight-only int8 w8a16, group64 sym RTN) · decode tok/s · greedy 24/24 EXACT vs the numpy oracle (lossless in practice)*
 | bsz | fp16 tok/s | w8 tok/s | w8/fp16 |
 |----:|-----------:|---------:|--------:|
 | 1 | 166.5 | **227.4** | **1.37×** |

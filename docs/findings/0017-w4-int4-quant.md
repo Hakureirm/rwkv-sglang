@@ -35,14 +35,15 @@ targeting the unmet bar: **4-bit that is faster than 16-bit in a serving engine*
   unchanged (regression: non-w4 1.5B still **greedy-EXACT 24/24**).
 
 ## End-to-end results (1.5B, RTX 3090, cuda-graph ON, fp16)
+*1.5B · fp16 · RTX 3090 · cuda-graph ON · radix OFF · RWKV_W4=1 (group64 RTN) · decode tok/s · greedy 14/24 vs oracle fixture = bit-identical to the offline dequant reference (NOT 24/24-exact — see Correctness below)*
 | bsz | fp16 decode tok/s | w4 decode tok/s | w4/fp16 | w4 path |
 |----:|------------------:|----------------:|--------:|---|
 |   1 |             166.5 |       **259.1** | **1.56× faster** | `gemv_w4_m1` |
 |   2 |             299.5 |       **434.9** | **1.45× faster** | `gemm_w4_small` |
 |   4 |             574.1 |       **773.2** | **1.35× faster** | `gemm_w4_small` |
 |   8 |            1112.9 |      **1153.0** | **1.04× faster** | `gemm_w4_small` |
-|  16 |            2243.3 |      **2619.8** | **1.17× faster** | `gemm_w4_tc` |
-|  32 |            3872.6 |      **3978.2** | **1.03× faster** | `gemm_w4_tc` |
+|  16 |            2243.3 |      **2618.5** | **1.17× faster** | `gemm_w4_tc` |
+|  32 |            3872.6 |      **4004.4** | **1.03× faster** | `gemm_w4_tc` |
 |  64 |            6574.4 |          5283.6 | 0.80× | `gemm_w4_tc` (cp.async pipelined; M=64 long-K ffn shapes still drag) |
 
 **`gemm_w4_small` (added 2026-07-02)** closes the small-batch gap: a template kernel for
@@ -64,6 +65,7 @@ cp.async pipelining on sm80+) is the remaining lever. M>64 (prefill) stays dequa
 (compute-bound; amortized).
 
 ## 7.2B results (RTX 3090, RTN g64, fp16, cuda-graph ON) — added 2026-07-02
+*7.2B · fp16 · bsz1 · RTX 3090 · cuda-graph ON · radix OFF · RWKV_W4=1 (RTN g64) · fixture greedy 8/8 EXACT · w4/albatross ratio is cross-precision (our int4 vs its fp16)*
 | metric | fp16 (best, 3 opt-in kernels) | albatross-fp16 | **w4 RTN** |
 |---|---|---|---|
 | decode bsz1 tok/s | 65.7 | 79.6 | **102.8** (1.56× ours-fp16, **1.29× albatross-fp16**, cross-precision) |
