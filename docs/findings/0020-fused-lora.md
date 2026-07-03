@@ -30,6 +30,9 @@ bsz1 + fp16 + tp1 + unquantized; every other path untouched.
 | best w/o fused lora (in-place WKV + sparse FFN + fast GEMV) | EXACT 24/24 | 203.0 |
 | **+ RWKV_FUSED_LORA=1** | **EXACT 24/24** | **226.5 (+11.6%)** |
 
+Raw transcript (gate + fused run + same-session control):
+`bench/results/headline/raw/fused_lora_gate_and_throughput.log`.
+
 Micro: fused 2-launch vs torch chain (eager) 15.5–19.7×; the honest e2e gain is
 the +23.5 tok/s above (launch count is what it removes under cuda-graph).
 

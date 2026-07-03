@@ -12,7 +12,7 @@ related: [F0011, F0014, F0015, F0016]
 # Finding F0017: weight-only int4
 
 Goal: 8-bit AND 4-bit quant where VRAM drops and speed is not worse than
-16-bit. The landscape survey ([[project-rwkv-competitive-landscape]]) found **none of the
+16-bit. The landscape survey found **none of the
 vLLM/sglang/HF framework adaptations had a working 4-bit that meets the speed clause**
 (vllm-rwkv/vkwr: no quant at all; hf-adapter: bnb-4bit loads but decodes slower than fp16).
 4-bit artifacts do exist in other lanes (llama.cpp GGUF Q4_K_M; standalone servers with

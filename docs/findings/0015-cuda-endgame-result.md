@@ -11,6 +11,8 @@ related: [F0007, F0013, F0014]
 
 # Finding F0015: the CUDA endgame reached its honest ceiling
 
+> **Erratum (2026-07-03):** the "batch-invariant triton `grouped_gemm`" mentioned twice below never shipped — the LoRA path is per-chain `ReplicatedLinear` by default, or the fused `lora4_m1` CUDA op (`rwkv7_lora.cu`, `RWKV_FUSED_LORA=1`, [[F0020]]). The text below is kept as the historical record.
+
 ## What was built (greedy-EXACT + batch-invariant, FLA-free)
 `rwkv7_kernels/cuda/rwkv7_fast.cu` — one hand fp16 decode kernel adapted from
 BlinkDL/Albatross (Apache-2.0, re-attributed in cuda/NOTICE): `gemv_m1` (M==1 exact

@@ -24,7 +24,7 @@ schema_invariant: |
 **Scope: RWKV-7 on sglang** (ADR-0001, accepted 2026-06-30, on a verified
 latest-upstream re-analysis — see [[F0004]]).
 
-**Wedge**: *the first production-grade RWKV-7 serving in sglang — dynamic
+**Wedge**: *a production-grade RWKV-7 serving in sglang — dynamic
 batching + chunked prefill + recurrent state cache + 8/4-bit quant, on consumer +
 datacenter GPUs, matching `rwkv-lm` accuracy.* Goals: match rwkv-lm accuracy +
 albatross speed/VRAM across batch sizes; sglang-native dynamic batching + chunked
@@ -142,7 +142,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 - ✅ **M8 weight-only int8 (w8a16)** [[F0018]] (2026-07-02): `rwkv7_w8.cu` mirrors the w4 family
   (gemv_m1 + gemm_small bit-identical rows + **gemm_w8_tc** wmma/smem-dequant/split-K + dequant);
   **greedy 24/24 EXACT** (lossless in practice, matrix err 5.9e-3); e2e 1.5B
-  **1.37/1.31/1.27/1.06/1.12/1.02× fp16 at bsz 1/2/4/8/16/32** (227/392/732/1181/2513/3936 tok/s)
+  **1.37/1.31/1.27/1.06/1.13/1.02× fp16 at bsz 1/2/4/8/16/32** (227/392/732/1181/2522.9/3961.6 tok/s)
   — **≥fp16 at every bsz≤32**; bsz64 0.74× (same M=64 long-K crossover as int4); VRAM 8502 vs
   9152; checkpoint 1.8 vs 2.9 GB; runs on EVERY arch (JIT), unlike cutlass w8a8 (sm80–90).
   `RWKV_W8=1`, quantizer `bench/quant_w4.py --bits 8`.
@@ -216,7 +216,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 | F0020 | Fused LoRA kernel — fp16 bsz1 226.5 tok/s (+11.6%), greedy EXACT; lm_head identified as 58.5% of the graphed step | info | open |
 | F0019 | TP+PP full matrix greedy-EXACT on real L4 fleets (tp 2/4/8, pp 2/4/8, mixed tp2×pp2 after the v_first full-width fix); PP-transfer chunk-send pitfall documented (upstream-relevant) | info | open |
 | F0018 | Hand-written weight-only int8 (w8a16) — greedy-EXACT 24/24; ≥fp16 at every bsz≤32 (1.02–1.37×); runs on every arch (JIT; vs cutlass w8a8 sm80–90 only) | info | open |
-| F0017 | Hand-written weight-only int4 — faster than fp16 at every bsz≤8 (1.04–1.56×); 7.2B: 102.8 tok/s bsz1 (1.29× albatross-fp16), fixture-EXACT, lambada −2.64pt, 9.8GB total; GPTQ 1.5B −3.34pt; M>8 dequant ~0.5× (fused GEMM = endgame) | info | open |
+| F0017 | Hand-written weight-only int4 — faster than (or ties) fp16 at every bsz≤32 (1.03–1.56×; RTX 3090, 1.5B — off-3090 the verified win is bsz1); 7.2B: 102.8 tok/s bsz1 (1.29× albatross-fp16), fixture-EXACT, lambada −2.64pt, 9.8GB total; GPTQ 1.5B −3.34pt; M>8 dequant ~0.5× (fused GEMM = endgame) | info | open |
 
 ## Environment (single source of truth)
 

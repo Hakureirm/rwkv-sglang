@@ -34,7 +34,7 @@ GROUP = 64
 
 
 def quantize_w4(W: torch.Tensor):
-    """Group-wise (G=128) symmetric int4. Returns (qweight uint8[N,K/2], scale fp16[N,K/G], q_int).
+    """Group-wise (G=64) symmetric int4. Returns (qweight uint8[N,K/2], scale fp16[N,K/G], q_int).
 
     Must match rwkv7_w4.cu: scale[n,g]=max_{group}|W|/7; q=round(W/scale[group]) clamped
     [-7,7]; packed 2 nibbles/byte along K (byte[c] = q[2c]&0xF | (q[2c+1]&0xF)<<4)."""

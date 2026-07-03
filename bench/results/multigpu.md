@@ -49,7 +49,7 @@ over bf16:
   throughput moves the small-M crossover earlier than on the 3090 — per-arch cutover tuning is a
   noted follow-up), 1.06× at bsz32; int4 peak VRAM 4609 vs fp16 5597 MiB (bsz1). Raw:
   `allcards.json` entry `T4-fp16`.
-- **int4 runs on all 8, including Turing (T4 sm7.5)** — the kernel uses plain vectorized loads, no
+- **int4 runs on all 10, including Turing (T4 sm7.5)** — the kernel uses plain vectorized loads, no
   `cp.async` (so it is not limited to sm80+). int4 bsz1 is faster than bf16 on every card; the
   speedup is **largest on bandwidth-starved cards** (L4 2.04×, A10G 1.88×, T4 1.77×) and smallest on
   compute-rich Hopper (H100 1.14×, H200 1.09×) — the bandwidth-bound signature. int4 greedy matches
@@ -116,11 +116,11 @@ Greedy-EXACT held on every architecture — Turing, Ampere (consumer sm86 + data
   (no Turing config); on B200 (sm100) / RTX PRO 6000 (sm120) it raises
   `NotImplementedError: No implemented int8_scaled_mm for current compute capability` — both are
   upstream kernel-coverage limits (the `rc=-9` rows in `allcards.json`). Outside sm80–90, use our
-  **int4** (works on all 10 GPUs, faster than fp16 at bsz1) or fp16.
+  **int4** (works on all 10 GPUs, faster than bf16 at bsz1; fp16≈bf16 verified on T4) or fp16.
 - **int8 (w8a8)** runs on Ampere / Ada / Hopper; on Hopper it is ~neutral vs bf16 at 1.5B (bf16
   tensor cores already saturate), so int8's value there is VRAM (−41–46% weights), not decode speed —
   its cross-precision decode win vs albatross-fp16 is at 7.2B (see [`comparison_clean.md`](comparison_clean.md)).
-- **int4** — see §1 and [`w4/`](w4/): bsz1 faster than fp16 on every arch + ~4× weight-VRAM cut. **7.2B int4 verified live on a 16 GB T4**: greedy 8/8 EXACT, 32.9 tok/s bsz1, peak 6,735 MiB (`allcards.json`: `T4-72b-w4`).
+- **int4** — see §1 and [`w4/`](w4/): bsz1 faster than bf16 on every arch (fp16≈bf16 verified on T4) + ~4× weight-VRAM cut. **7.2B int4 verified live on a 16 GB T4**: greedy 8/8 EXACT, 32.9 tok/s bsz1, peak 6,735 MiB (`allcards.json`: `T4-72b-w4`).
 - **fp8 (Hopper)** — **not feasible with the deliverable as-is**: sglang's dynamic-fp8 registers
   runtime `weight_scale` params the strict `load_weights` counts as "not loaded" (int8 works because
   its offline converter bakes the scales in). Would need an offline fp8 converter or a relaxed loader.

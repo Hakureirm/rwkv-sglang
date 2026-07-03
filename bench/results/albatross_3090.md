@@ -5,6 +5,8 @@ Speed/VRAM parity baseline for BlinkDL/Albatross, **re-measured on our own RTX 3
 published numbers are on a 5090; everything in the tables below is **measured on the 3090**
 unless a row is explicitly labeled "5090 published".
 
+Albatross baseline: github.com/BlinkDL/Albatross @ `343147a333fcd6dd0845de0d165089685402c012` (`faster3a_2605`).
+
 ## 1. Build: did it compile + run on the 3090?
 
 **Yes.** Albatross's fastest engine, `faster3a_2605/rwkv7_fast_v3a.py`, compiles its custom

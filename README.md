@@ -78,14 +78,15 @@ small-GEMM / tensor-core GEMM with in-smem dequant), and it JIT-runs on **every*
 the cutlass w8a8 path (sm80–90 only). `RWKV_W8=1`; details:
 [`docs/findings/0018`](docs/findings/0018-w8-weight-only.md).
 
-**3c. Hand-written int4 beats (or ties) fp16 at every bsz ≤ 32** — 1.5B decode
+**3c. Hand-written int4 beats (or ties) fp16 at every bsz ≤ 32 (RTX 3090, 1.5B)** — decode
 1.56×/1.45×/1.35×/1.04×/**1.17×/1.03×** vs fp16 at bsz 1/2/4/8/16/32 (259/435/773/1153/2619/4004
 vs 166/300/574/1113/2243/3873 tok/s; bsz64 0.80×, honest), via three kernels: `gemv_w4_m1`,
 `gemm_w4_small` (bit-identical rows), and tensor-core `gemm_w4_tc` (in-smem int4 dequant +
 deterministic split-K). At **7.2B**: bsz1 **102.8 tok/s = 1.29× albatross-fp16** (79.6;
 cross-precision), fixture-greedy **EXACT 8/8**, lambada 0.7161 vs 0.7425 bf16 (−2.64pt, RTN) —
 and **verified live on a real 16 GB T4**: greedy 8/8 exact, 32.9 tok/s bsz1, peak VRAM
-**6.7 GB**. Details: [`bench/results/w4/`](bench/results/w4/).
+**6.7 GB**. Off the 3090 the verified int4 advantage is bsz1
+([`multigpu.md`](bench/results/multigpu.md)). Details: [`bench/results/w4/`](bench/results/w4/).
 
 **4. Accuracy is EXACT** — greedy token-for-token match to the rwkv-lm numpy oracle at
 0.1B / 1.5B / 7.2B (fp16 + bf16, cuda-graph); lm-eval **ties** rwkv-lm (1.5B lambada 0.673 vs
@@ -94,7 +95,7 @@ and **verified live on a real 16 GB T4**: greedy 8/8 exact, 32.9 tok/s bsz1, pea
 **5. Runs on the whole GPU lineup** — measured on **10 GPU types across 7 SM generations,
 Turing → Blackwell** (T4 / L4 / A10G / A100-40/80 / L40S / H100 / H200 / **B200** /
 **RTX PRO 6000**): bf16 is **greedy-EXACT on all 10**, and the hand-written **int4 runs (and is
-faster than fp16 at bsz1) on all 10** — from Turing (no `cp.async` needed) to Blackwell sm120
+faster than bf16 at bsz1; fp16≈bf16 verified on T4) on all 10** — from Turing (no `cp.async` needed) to Blackwell sm120
 (RTX PRO 6000: int4 bsz1 **1.41×** bf16), no per-arch code change. Peaks: **B200 prefill
 103,022 tok/s, decode 7,213 tok/s** @bsz32. (int8 is sm80–90 only — an sgl-kernel cutlass
 coverage limit.) Full grid: [`bench/results/multigpu.md`](bench/results/multigpu.md).
@@ -103,7 +104,7 @@ coverage limit.) Full grid: [`bench/results/multigpu.md`](bench/results/multigpu
 **Same-precision fp16, *single-stream* raw decode.** This is albatross's home turf: it's a pure
 single-stream mega-kernel already at **~92% of the 3090's memory-bandwidth ceiling**, whereas we
 are a full dynamic-batching serving engine. We publish every number anyway (higher = closer to
-its raw kernel; `1.00×` = parity; best config = in-place WKV + `RWKV_SPARSE_FFN=1` + `RWKV_FAST_LINEAR=1` + `RWKV_FUSED_LORA=1`, [F0020](docs/findings/0020-fused-lora.md)):
+its raw kernel; `1.00×` = parity; best config = in-place WKV + `RWKV_SPARSE_FFN=1` + `RWKV_FAST_LINEAR=1`):
 ```
               ours / albatross-fp16 — same-precision single-stream (decode tok/s)
 7.2B  bsz1  ██████████████████░░░░  0.83×   (45.9 → 65.7 tok/s)
@@ -113,6 +114,9 @@ its raw kernel; `1.00×` = parity; best config = in-place WKV + `RWKV_SPARSE_FFN
 1.5B  bsz8  ██████████████████░░░░  0.90×   ← closest to parity
 1.5B  bsz32 ██████████████░░░░░░░░  0.70×
 ```
+With the newer fused-LoRA kernel ([F0020](docs/findings/0020-fused-lora.md)) the 1.5B bsz1
+point improves to 226.5 tok/s (~0.73×); the chart predates it.
+
 The 0.1B rows (0.49–0.79×) are omitted here as **unrepresentative** — a launch-bound tiny model
 is the least serving-relevant case; full numbers in
 [`comparison_clean.md`](bench/results/comparison_clean.md). Even on this worst-for-us axis, the
@@ -125,7 +129,7 @@ albatross leads only same-precision single-stream raw decode, and only at its ba
 ## Status (2026-07-01) — honest standing vs BlinkDL/albatross
 The head-to-head vs-albatross numbers below are clean, exclusive-RTX-3090, reproducible
 (`bench/results/comparison_clean.md` + `lm_eval.md`, superseding the older co-tenant
-`comparison.md`); the **cross-GPU sweep spans 8 architectures T4 → H200 on their own hardware**
+`comparison.md`); the **cross-GPU sweep spans 10 GPU types, Turing → Blackwell, on their own hardware**
 (`bench/results/multigpu.md`).
 
 - ✅ **Correctness**: RWKV-7 **0.1B / 1.5B / 7.2B** all **greedy-EXACT** vs the pure-numpy /
@@ -150,8 +154,9 @@ The head-to-head vs-albatross numbers below are clean, exclusive-RTX-3090, repro
   fp16), not the same-precision comparison.
 - ✅ **VRAM**: recurrent state is O(1)/token → flat in batch; albatross's static B×T grows to
   near-OOM at 7.2B bsz32. int8 cuts weight bytes ~46% (7.2B).
-- ✅ **Multi-GPU (8 architectures, Turing→Hopper)**: T4/L4/A10G/A100-40/A100-80/L40S/H100/H200 all
-  bf16 greedy-EXACT + int4 runs and is faster, no per-arch code change (`bench/results/multigpu.md`).
+- ✅ **Multi-GPU (10 GPU types, Turing→Blackwell)**: T4/L4/A10G/A100-40/A100-80/L40S/H100/H200/
+  B200/RTX PRO 6000 all bf16 greedy-EXACT + int4 runs and is faster, no per-arch code change
+  (`bench/results/multigpu.md`).
   ✅ **RWKV-7 execution path is FLA-free** (our own WKV kernel; see the precise scope in "references" below).
 - 🔜 **Open**: fp8; fused int4 GEMM (M>1 throughput); World-tokenizer serving polish + upstream PR.
 
@@ -172,7 +177,7 @@ sglang inference integration; ✅ done, ◑ partial, ⬜ open/out-of-scope-here.
 | 3 | transformers PEFT/RL training | ⬜ out of scope for this project (an sglang inference integration) |
 | 4 | Dynamic batching + chunked prefill + state cache | ✅ sglang-native dynamic batching + chunked prefill + O(1) recurrent state pool; ◑ radix/prefix **reuse** auto-off (state not yet prefix-cacheable — a documented `MambaRadixCache` follow-up) |
 | 5 | Pascal+/AMD/Intel/domestic; PP+TP; zero2/3; autotune | ◑ greedy-EXACT on 10 GPU types Turing→Blackwell; **TP greedy-EXACT at 2/4/8 ranks AND PP greedy-EXACT at 2/4/8 stages, all on real L4 fleets** (tp=1/pp=1 zero regression; mixed tp×pp fixed (v_first full-width across stage boundaries) and greedy-EXACT; W4/W8 still tp=1; full matrix incl. per-GPU memory: [`bench/results/parallel/`](bench/results/parallel/), [`docs/findings/0019`](docs/findings/0019-tp-pp-parallel.md)); ⬜ Pascal/AMD/Intel untested, training/autotune out of scope |
-| 6 | w8 + w4, faster than w16, old cards, Q\*_K_M accuracy | ✅ **w8 (w8a8-int8)** — faster than bf16 (+46–59% decode @1.5B/7.2B), −46% weight bytes, 7.2B greedy-EXACT; ✅ **w4 (hand-written int4)** — **faster than fp16 at every bsz≤8** (1.04–1.56× @1.5B; 7.2B bsz1 102.8 tok/s, fixture-EXACT 8/8, lambada 0.7161 vs 0.7425, 9.8 GB total), runs on Turing→Hopper; ◑ Q\*_K_M-style side-by-side not done (our GPTQ g64 −3.34pt @1.5B is the comparable point) |
+| 6 | w8 + w4, faster than w16, old cards, Q\*_K_M accuracy | ✅ **w8 (w8a8-int8)** — faster than bf16 (+46–59% decode @1.5B/7.2B), −46% weight bytes, 7.2B greedy-EXACT; ✅ **w4 (hand-written int4)** — **faster than (or ties) fp16 at every bsz≤32 (RTX 3090, 1.5B; 1.03–1.56×)** — off-3090 the verified win is bsz1 (7.2B bsz1 102.8 tok/s, fixture-EXACT 8/8, lambada 0.7161 vs 0.7425, 9.8 GB total), runs on 10 GPU types Turing→Blackwell; ◑ Q\*_K_M-style side-by-side not done (our GPTQ g64 −3.34pt @1.5B is the comparable point) |
 | 7 | Speculative decoding (RWKV draft) | ⬜ not done |
 
 The strongest, fully-verified contributions here: **exact correctness (0.1B/1.5B/7.2B)**,

@@ -7,8 +7,9 @@
 //   * Extracted ONLY the row-1 exact GEMV (`gemv_m1`) that the bsz1-decode path
 //     uses for the r/k/v/o + ffn projections, into a standalone minimal-dependency
 //     extension (no cublasLt / WMMA) so it JIT-builds fast and carries no unused
-//     surface. (Upstream's fused LoRA GEMVs are NOT vendored — our LoRA path uses
-//     the batch-invariant triton `grouped_gemm`; see models/rwkv7.py.)
+//     surface. (Upstream's fused LoRA GEMVs are NOT vendored — the LoRA chains run
+//     on sglang's per-chain ReplicatedLinear by default, or on the fused `lora4_m1`
+//     op (rwkv7_lora.cu) under RWKV_FUSED_LORA=1; see models/rwkv7.py.)
 //   * fp32 accumulation throughout (upstream convention), IEEE arithmetic (the JIT
 //     build does NOT pass --use_fast_math, so no FTZ / approx transcendentals) —
 //     the greedy-EXACT + batch-invariance gates (bench/verify_m1d.py,

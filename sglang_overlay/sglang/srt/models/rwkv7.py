@@ -549,8 +549,9 @@ class Rwkv7Attention(nn.Module):
         )
         if self._fast and layer_id == 0:
             import sys
-            print("[rwkv7] M6 fused fp16 GEMV projection path ENABLED "
-                  "(bsz1 decode, fp16)", file=sys.stderr, flush=True)
+            print("[rwkv7] M6 fused fp16 GEMV projection path armed "
+                  "(fp16 bsz1 decode only; inactive for other dtypes)",
+                  file=sys.stderr, flush=True)
         # M9: fused 4-chain LoRA (see _FUSED_LORA above). The packed weight
         # tensors are built lazily (like _mix6 / the sparse-ffn tiles) on the
         # first eligible forward — i.e. the eager warmup run, post weight-load,
