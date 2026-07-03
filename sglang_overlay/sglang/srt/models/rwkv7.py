@@ -273,6 +273,14 @@ class W4Linear(nn.Module):
         return torch.nn.functional.linear(x, w)
 
 
+# Crossover M above which int8 stops paying off: the GEMM becomes compute-bound (tensor
+# cores MMA in fp16 either way, so int8 gives no FLOP advantage), and cuBLAS's mature
+# fp16 kernels win. Below it, the weight-stationary gemm_w8_tc_large keeps int8's 1/2-byte
+# HBM advantage. Tunable per shape via bench/verify_w8.py (expect 256-512 for the 2048/2560
+# widths, lower for the long-K ffn where cuBLAS pulls ahead sooner).
+M_CROSS = 256
+
+
 class W8Linear(nn.Module):
     """Weight-only group-wise symmetric int8 (w8a16) bias-free projection — the 8-bit
     sibling of W4Linear (same dispatch shape: M==1 GEMV / 2<=M<=8 small-GEMM /
@@ -302,10 +310,18 @@ class W8Linear(nn.Module):
             if 2 <= M <= 8 and (self.out_features % 2) == 0:
                 return w4_linear.gemm_w8_small(x, self.qweight, self.scale)
             # medium batched decode: tensor-core GEMM with in-smem int8 dequant
-            # (weight HBM traffic = 1/2 of cuBLAS fp16; wmma fp32 accumulate).
-            if 8 < M <= 64 and (self.out_features % 64) == 0 and w4_linear.tc_supported():
+            # (weight HBM traffic = 1/2 of cuBLAS fp16; wmma fp32 accumulate). Wins
+            # up to bsz~32 (1.02-1.47x); at bsz64 it's already 0.77x.
+            if 8 < M <= 32 and (self.out_features % 64) == 0 and w4_linear.tc_supported():
                 return w4_linear.gemm_w8_tc(x, self.qweight, self.scale)
-        # M>64 / prefill: dequant -> cuBLAS (compute-bound regime; weight read amortized)
+        # M>32 / prefill: dequant -> cuBLAS. High concurrency is compute-bound and the TC
+        # MMAs run in fp16 regardless, so a weight-only-int8 GEMM has NO FLOP advantage and
+        # the dequant is pure overhead — measured: gemm_w8_tc_large is 0.53-0.85x cuBLAS at
+        # M=96-256 (F0018), i.e. slower than this fallback. int8's win is bandwidth, which
+        # only pays off at small batch; a real high-concurrency int8 SPEEDUP needs w8a8
+        # (int8 activations -> int8 MMAs), which is sglang's cutlass path. So we keep
+        # dequant->cuBLAS here (~fp16 parity + the int8 VRAM saving). `gemm_w8_tc_large`
+        # stays in rwkv7_w8.cu / verify_w8.py as a verified-correct but non-winning kernel.
         w = w4_linear.dequant_w8(self.qweight, self.scale, self.group).to(x.dtype)
         return torch.nn.functional.linear(x, w)
 
@@ -901,7 +917,10 @@ class Rwkv7Model(nn.Module):
             # all-gathers on receive, which is only lossless for tp-replicated
             # tensors) — slice back to this rank's head slice.
             tp_size = _tp_size()
-            if tp_size > 1 and v_first.shape[0] > 0:
+            # RWKV_PP_LEGACY_VFIRST=1 disables this fix to reproduce the upstream
+            # all-gather corruption (issue #30015); default keeps the fix on.
+            _legacy = os.environ.get("RWKV_PP_LEGACY_VFIRST") == "1"
+            if tp_size > 1 and v_first.shape[0] > 0 and not _legacy:
                 if os.environ.get("RWKV_PAR_DEBUG") == "1":
                     import sys
                     print(f"[par-debug] recv-pre-slice {tuple(v_first.shape)} x={tuple(x.shape)}",
@@ -946,7 +965,7 @@ class Rwkv7Model(nn.Module):
             # reassembles rank-by-rank on receive — lossless ONLY for tp-replicated
             # tensors. v_first is the LOCAL head slice under tp>1, so gather it to
             # full width here (the receiver slices its head range back out).
-            if _tp_size() > 1 and v_first.shape[0] > 0:
+            if _tp_size() > 1 and v_first.shape[0] > 0 and os.environ.get("RWKV_PP_LEGACY_VFIRST") != "1":
                 from sglang.srt.distributed.communication_op import (
                     tensor_model_parallel_all_gather,
                 )

@@ -51,7 +51,7 @@ def main():
           f"{'fp16 us':>8} {'w8 us':>7} {'vs fp16':>8} | {'rows==M1':>9}")
     print("-" * 108)
     ok_all = True
-    for M in (1, 2, 4, 8, 16, 32, 64):
+    for M in (1, 2, 4, 8, 16, 32, 64, 96, 128, 192, 256):
         for K, N in [(2048, 2048), (4096, 4096), (4096, 14336)]:
             if M > 8 and N % 64 != 0:
                 continue
@@ -69,12 +69,17 @@ def main():
                                     for m in range(M)], dim=0).float()
                 bitexact = "BIT-EXACT" if torch.equal(y.half(), y_rows.half()) else "MISMATCH"
                 ok_all &= (bitexact == "BIT-EXACT")
-            else:
+            elif M <= 64:
                 # tensor-core path: fp16 wmma + fp32 accum — deterministic but not
                 # bit-identical to the scalar GEMV (different reduction structure);
                 # gate on rel-err vs the dequant reference instead.
                 y = torch.ops.rwkv7_w8.gemm_w8_tc(X, qw, sc).float()
                 bitexact = "tc"
+            else:
+                # large-M weight-stationary 2-D-grid tensor-core path (64<M<=~256):
+                # same numerical class as gemm_w8_tc (fp16 wmma, ascending-K fp32 accum).
+                y = torch.ops.rwkv7_w8.gemm_w8_tc_large(X, qw, sc).float()
+                bitexact = "tc-lg"
             y_ref = X.float() @ dequant_ref(qi, sc).t()
             rel = ((y - y_ref).norm() / (y_ref.norm() + 1e-9)).item()
             y_fp = X.float() @ W.float().t()
@@ -87,8 +92,10 @@ def main():
                 op = lambda: torch.ops.rwkv7_w8.gemv_w8_m1(X, qw, sc)
             elif M <= 8:
                 op = lambda: torch.ops.rwkv7_w8.gemm_w8_small(X, qw, sc)
-            else:
+            elif M <= 64:
                 op = lambda: torch.ops.rwkv7_w8.gemm_w8_tc(X, qw, sc)
+            else:
+                op = lambda: torch.ops.rwkv7_w8.gemm_w8_tc_large(X, qw, sc)
             for _ in range(20):
                 _ = X @ Wt; _ = op()
             torch.cuda.synchronize()

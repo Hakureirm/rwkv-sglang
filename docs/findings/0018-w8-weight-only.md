@@ -56,11 +56,19 @@ VRAM: peak serve 8,502 vs 9,152 MiB (bsz1); checkpoint 1.8 GB vs 2.9 GB fp16.
 The M>64 path currently falls back to **dequant→cuBLAS**: it saves weight VRAM but
 NOT bandwidth (weights are expanded to fp16 before the GEMM), so at bsz>64 w8 only
 ~matches fp16 — no quant speedup. bsz64 itself is 0.77× (the M=64 long-K ffn shapes).
-A true large-M w8 tensor-core GEMM (256-thread block rework, weight-stationary tiling so
-the int8 byte advantage survives weight reuse) is the open follow-up, together with
-serving-level A/B at bsz128–256 (only single-GEMM microbench exists today). Small-batch
-w8 (bsz≤32, lossless + faster) is solid; high-concurrency w8 is an explicit TODO, not a
-shipped capability.
+**Resolved (measured, negative result):** we implemented that large-M weight-stationary
+tensor-core GEMM (`gemm_w8_tc_large`, 64³ tile / 256 threads / dequant-once-per-K-tile,
+verified rel 2.9e-4). It does **not** beat fp16 cuBLAS at large M — measured 0.53–0.85× at
+M=96/128/192/256 (RTX 3090), i.e. **slower than the dequant→cuBLAS fallback (~fp16 parity)**.
+Reason: high concurrency is compute-bound, the TC MMAs run in fp16 either way (we dequant to
+fp16), so weight-only int8 has no FLOP advantage and the dequant is pure overhead; int8's win
+is purely bandwidth, which only helps at small batch. **A genuine high-concurrency int8
+speedup requires w8a8 (int8 activations → int8 MMAs, 2× TC throughput)** — that's sglang's
+existing cutlass path (sm80–90). So the honest positioning: **w8a16 = small-batch (bsz≤32)
+lossless speedup + all-arch + VRAM cut**; at bsz>32 it runs at ~fp16 parity via dequant→cuBLAS
+(VRAM still saved), and high-concurrency int8 *throughput* is w8a8's job. `gemm_w8_tc_large`
+stays in the tree (correct, may win on future arches / different shapes) but is not dispatched.
+Model routes bsz>32 → dequant→cuBLAS.
 
 ## Positioning (three quant modes, honest)
 | mode | accuracy | speed sweet spot | arch coverage |

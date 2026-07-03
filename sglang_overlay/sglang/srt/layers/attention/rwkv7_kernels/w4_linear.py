@@ -135,6 +135,10 @@ def _ensure_w8_loaded():
             def _gemm_w8_tc_fake(x, qweight, scale):
                 return x.new_empty((x.shape[0], qweight.shape[0]))
 
+            @torch.library.register_fake("rwkv7_w8::gemm_w8_tc_large")
+            def _gemm_w8_tc_large_fake(x, qweight, scale):
+                return x.new_empty((x.shape[0], qweight.shape[0]))
+
             @torch.library.register_fake("rwkv7_w8::dequant_w8")
             def _dequant_w8_fake(qweight, scale):
                 return scale.new_empty((qweight.shape[0], qweight.shape[1]))
@@ -179,6 +183,18 @@ def gemm_w8_small(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -
 
 def gemm_w8_tc(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
     return torch.ops.rwkv7_w8.gemm_w8_tc(x.contiguous(), qweight, scale)
+
+
+def gemm_w8_tc_large(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    """y[M,N] for the high-concurrency regime (64<M<=~256) via tensor cores with a 2-D
+    (M x N) block grid: 64x64x64 tile, 256 threads / 8 warps (4(M)x2(N)), weight-stationary
+    — the int8 weight tile is dequanted to fp16 in shared memory ONCE per K-step and reused
+    across all 64 M-rows, so weight HBM traffic stays 1/2 of a cuBLAS fp16 GEMM even at large
+    M (the amortization the M<=64 gemm_w8_tc cannot reach). 2-stage cp.async on sm80+, sync
+    fallback on sm70-75, no split-K. Deterministic ascending-K fp32 accum -> same numerical
+    class as gemm_w8_tc (~2.9e-4 rel vs dequant ref). Caller guards fp16 + N%64==0 + K%64==0
+    + tc_supported()."""
+    return torch.ops.rwkv7_w8.gemm_w8_tc_large(x.contiguous(), qweight, scale)
 
 
 def dequant_w8(qweight: torch.Tensor, scale: torch.Tensor, group: int = GROUP) -> torch.Tensor:
