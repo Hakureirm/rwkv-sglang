@@ -48,7 +48,7 @@ End-to-end decode:
 | 8 | 1112.9 | **1180.5** | **1.06×** |
 | 16 | 2243.3 | **2522.9** | **1.13×** (gemm_w8_tc, cp.async pipelined) |
 | 32 | 3872.6 | **3961.6** | **1.02×** (gemm_w8_tc, cp.async pipelined) |
-| 64 | 6574.4 | 5045.0 | 0.77× (was 0.74× pre-pipeline; M=64 long-K ffn shapes — same crossover as int4's 0.80×; honest) |
+| 64 | 6574.4 | 5525.8 | 0.84× — **shipped path is dequant→cuBLAS** (bsz>32); the old gemm_w8_tc-at-64 was 5045/0.77×. Both < fp16: weight-only int8 can't win compute-bound large-M (see gap note above). VRAM still saved. |
 
 VRAM: peak serve 8,502 vs 9,152 MiB (bsz1); checkpoint 1.8 GB vs 2.9 GB fp16.
 
