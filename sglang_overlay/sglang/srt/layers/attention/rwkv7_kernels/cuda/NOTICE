@@ -1,6 +1,11 @@
 RWKV-7 x sglang — vendored CUDA kernels in this directory
 =========================================================
 
+Performance baseline note: all "vs Albatross" numbers in this repo compare against
+the FAST inference line — Albatross `faster3a_2605/rwkv7_fast_v3a.py` (and RWKV-LM
+`RWKV-v7/train_temp/cuda` for the training-side WKV) — NOT the older, slower
+`RWKV-CUDA` repo. Baseline pinned in bench/results/comparison_clean.md.
+
 Both .cu files here contain code derived from BlinkDL / Albatross
 (https://github.com/BlinkDL/Albatross), Copyright (c) BlinkDL / Bo Peng, licensed
 under the Apache License, Version 2.0 (see ALBATROSS_LICENSE). Per Apache-2.0 §4(b),
