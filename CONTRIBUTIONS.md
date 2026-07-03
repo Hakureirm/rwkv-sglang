@@ -16,9 +16,9 @@ generations. Entry points: [README.md](README.md) ·
 | 2. HF PEFT/RL trainability | n/a | training-track scope; this repo is the inference/serving adaptation (README design-goals table) |
 | 3. Dynamic batching + chunked prefill + state cache | ◑ | batching/chunked-prefill greedy-EXACT: `bench/verify_batch.py`, `bench/verify_chunked_prefill.py`; radix-off is a **correctness decision** ([`radix_correctness.md`](bench/results/radix_correctness.md)); state-aware prefix cache = designed follow-up |
 | 4. Pascal+ / AMD; PP + TP inference | ◑ | TP 2/4/8 + PP 2/4/8 + mixed, all greedy-EXACT: [`bench/results/parallel/`](bench/results/parallel/) (+`raw/` transcripts), F0019; 10-GPU grid [`multigpu.md`](bench/results/multigpu.md) + `bench/results/allcards.json`; Pascal routing guard `42fd6fa`; Pascal/AMD hardware runs pending |
-| 5. w8/w4 quant: VRAM ↓, ≥ w16 speed, near Q*_K_M accuracy | ✅ speed+VRAM / ◑ Q*_K_M cmp | [`bench/results/w4/`](bench/results/w4/) (+`raw/`), F0017/F0018; w4 ≥fp16 at every bsz≤32 (3090, 1.5B), 7.2B w4 on a real 16 GB T4 |
+| 5. w8/w4 quant: VRAM ↓, ≥ w16 speed, near Q*_K_M accuracy | ✅ speed+VRAM+acc / ◑ Q*_K_M cmp | [`bench/results/w4/`](bench/results/w4/) (+`raw/`), F0017/F0018; w4 ≥fp16 at every bsz≤32 (3090, 1.5B); **7.2B GPTQ lambada 0.7297 vs bf16 0.7425 (−1.28pt), 192/192 GPTQ, 4.6 GB, on a real 16 GB T4**; w8 uncheatable-lossless. Published: ModelScope `Hakureirm/rwkv7-g1-{1.5b-w8g64,1.5b-w4gptq,7.2b-w4gptq}` |
 | 6. Speculative decoding (preliminary) | ⬜ | designed (state checkpoint/rollback plan), not yet implemented |
-| Decreed: uncheatable compression (+position curve) | harness ✅ / numbers pending | [`bench/uncheatable_eval.py`](bench/uncheatable_eval.py) (formulas replicated from the reference evaluator with line citations), data recipe `bench/data/README.md` |
+| Decreed: uncheatable compression (+position curve) | ✅ | [`bench/uncheatable_eval.py`](bench/uncheatable_eval.py) + [`bench/results/uncheatable/`](bench/results/uncheatable/): 1.5B full-corpus POOLED compression fp16 **0.6085** / w8 **0.6086 (lossless, +0.0001)** / w4-GPTQ 0.6514; position curve CSVs |
 | Decreed: MATH500 avg@64 + best-bsz speed | harness ✅ / numbers pending | [`bench/math500_avg64.py`](bench/math500_avg64.py) (prompt/sampling/grader ported verbatim from the reference) |
 
 ## §2 Original contributions (the scoring core)

@@ -90,6 +90,11 @@ and **verified live on a real 16 GB T4**: greedy 8/8 exact, 32.9 tok/s bsz1, pea
 **6.7 GB**. Off the 3090 the verified int4 advantage is bsz1
 ([`multigpu.md`](bench/results/multigpu.md)). Details: [`bench/results/w4/`](bench/results/w4/).
 
+**3d. Accuracy on BlinkDL's decreed metric (uncheatable compression) confirms lossless int8** —
+1.5B full-corpus (15 cats × 500 docs) POOLED bits/byte compression: fp16 **0.6085**, w8 **0.6086**
+(+0.0001, lossless), w4-GPTQ 0.6514; 7.2B int4-GPTQ lambada **0.7297 vs 0.7425 bf16 (−1.28pt)**.
+Quantized weights published: [ModelScope `Hakureirm/rwkv7-g1-{1.5b-w8g64, 1.5b-w4gptq, 7.2b-w4gptq}`](https://modelscope.cn/models/Hakureirm/rwkv7-g1-1.5b-w8g64).
+
 **4. Accuracy is EXACT** — greedy token-for-token match to the rwkv-lm numpy oracle at
 0.1B / 1.5B / 7.2B (fp16 + bf16, cuda-graph); lm-eval **ties** rwkv-lm (1.5B lambada 0.673 vs
 0.671, MMLU 0.524 vs 0.511).
