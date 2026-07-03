@@ -78,8 +78,12 @@ cp.async pipelining on sm80+) is the remaining lever. M>64 (prefill) stays dequa
 **65.3** bsz4, peak VRAM **6,735 MiB** of 14,913 — 7.2B serves on a 16 GB Turing card with more
 than half the VRAM free (raw: `bench/results/allcards.json` entry `T4-72b-w4`).
 
-7.2B GPTQ is deferred: the `RWKV_CALIB` hook accumulates fp32 Hessians on-GPU and the ffn.value
-input dim is 16384 → 1 GB/layer × 32 layers won't fit 24 GB; needs streamed/CPU accumulation.
+7.2B GPTQ **DONE** (2026-07-03): the `RWKV_CALIB` hook now streams the ffn.value Hessian to CPU
+(input dim 16384 → 1 GB/layer × 32 won't fit 24 GB) and calibrates in per-projection passes
+(`RWKV_CALIB_FILTER`), one shard per matrix. Result: **192/192 projections GPTQ-quantized** (no
+RTN fallback), greedy **8/8 EXACT**, **lambada 0.7297 vs bf16 0.7425 (−1.28pt)** — vs RTN 0.7161
+(−2.64pt), i.e. GPTQ recovers **+1.36pt** at 7.2B. Checkpoint 4.6 GB. Published:
+ModelScope `Hakureirm/rwkv7-g1-7.2b-w4gptq`.
 
 - **Correctness**: w4 greedy on the oracle fixture = **14/24, first-div @14 — bit-identical to
   the offline fake-quant reference**, confirming the kernel path == dequant (as verify_w4 predicts).
