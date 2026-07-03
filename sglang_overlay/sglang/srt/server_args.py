@@ -1914,15 +1914,20 @@ class ServerArgs:
         elif model_arch in [
             "KimiLinearForCausalLM",
             "BailingMoeV2_5ForCausalLM",
-            # RWKV-7: pure-recurrent; per-request WKV state is NOT prefix-cacheable,
-            # so the token radix cache corrupts shared-prefix batches. Force it off
-            # until a state-aware MambaRadixCache is wired. (ADR-0004/F0008)
+            # RWKV-7: pure-recurrent. The plain token radix cache corrupts
+            # shared-prefix batches (F0008), but the STATE-aware MambaRadixCache is
+            # correct — it snapshots the recurrent state at prefix boundaries and
+            # restores it, which is exactly right for an RNN. RWKV-7's state
+            # (2 conv token-shift + 1 temporal WKV) is natively MambaPool-shaped, so
+            # we route through it (needs the is_hybrid_ssm patch for rwkv7_config;
+            # see scripts/deploy.sh). Gate: bench/verify_batch.py --radix-on greedy EXACT.
             "RWKV7ForCausalLM",
             "Rwkv7ForCausalLM",
         ]:
             self._handle_mamba_radix_cache(
                 model_arch=model_arch,
-                support_mamba_cache=False,
+                support_mamba_cache=True,
+                support_mamba_cache_extra_buffer=False,
             )
         elif model_arch in ["NemotronHForCausalLM"]:
             model_config = self.get_model_config()
