@@ -53,12 +53,12 @@ stays O(1)/token (single-digit ms/step, no growth trend). TTFT grows linearly wi
 ## Flagship confirmation (7.2B, added 2026-07-02)
 Same sweeps at 7.2B (bf16, `bench/results/serving_scale/{ctx,conc}_72b.log`): context 1K→32K =
 **+0 MiB** peak VRAM (17,866 flat) at 22–32 ms/step; concurrency bsz 1→64 = 46.6→**1,802.7 tok/s
-(38.7×)** at **+308 MiB**. The O(1)-state properties hold unchanged at the flagship size.
+(38.7×)** at **+308 MiB**. The O(1)-state properties hnew unchanged at the flagship size.
 
 ## Honesty caveats
 - **VRAM appears "flat" partly because sglang pre-allocates a static state pool** from
   `mem_fraction_static`. The load-bearing claim is not "the pool is fixed" (that is config) but
-  that **the pool can hold hundreds of arbitrary-length RWKV states** because each is a fixed
+  that **the pool can hnew hundreds of arbitrary-length RWKV states** because each is a fixed
   constant — hence the +202 MiB / +4 MiB deltas *inside* a fixed budget, and why a KV-cache
   engine with the same budget would OOM at 256×64K.
 - **The decode-tok/s column of the context sweep is noise-dominated at long context** (it is a

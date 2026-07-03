@@ -15,7 +15,7 @@ generations. Entry points: [README.md](README.md) ·
 | 1. Match RWKV-LM / Albatross accuracy, speed, VRAM (across bsz) | ✅ 1.5B full / ◑ 7.2B | [`bench/results/comparison_clean.md`](bench/results/comparison_clean.md) + `clean/` raw, [`lm_eval.md`](bench/results/lm_eval.md) (lambada 0.673 vs ref 0.671, MMLU 0.524 vs 0.511) |
 | 2. HF PEFT/RL trainability | n/a | training-track scope; this repo is the inference/serving adaptation (README design-goals table) |
 | 3. Dynamic batching + chunked prefill + state cache | ◑ | batching/chunked-prefill greedy-EXACT: `bench/verify_batch.py`, `bench/verify_chunked_prefill.py`; radix-off is a **correctness decision** ([`radix_correctness.md`](bench/results/radix_correctness.md)); state-aware prefix cache = designed follow-up |
-| 4. Pascal+ / AMD; PP + TP inference | ◑ | TP 2/4/8 + PP 2/4/8 + mixed, all greedy-EXACT: [`bench/results/parallel/`](bench/results/parallel/) (+`raw/` transcripts), F0019; 10-GPU grid [`multigpu.md`](bench/results/multigpu.md) + `bench/results/allcards.json`; Pascal routing guard `46754ab`; Pascal/AMD hardware runs pending |
+| 4. Pascal+ / AMD; PP + TP inference | ◑ | TP 2/4/8 + PP 2/4/8 + mixed, all greedy-EXACT: [`bench/results/parallel/`](bench/results/parallel/) (+`raw/` transcripts), F0019; 10-GPU grid [`multigpu.md`](bench/results/multigpu.md) + `bench/results/allcards.json`; Pascal routing guard `42fd6fa`; Pascal/AMD hardware runs pending |
 | 5. w8/w4 quant: VRAM ↓, ≥ w16 speed, near Q*_K_M accuracy | ✅ speed+VRAM / ◑ Q*_K_M cmp | [`bench/results/w4/`](bench/results/w4/) (+`raw/`), F0017/F0018; w4 ≥fp16 at every bsz≤32 (3090, 1.5B), 7.2B w4 on a real 16 GB T4 |
 | 6. Speculative decoding (preliminary) | ⬜ | designed (state checkpoint/rollback plan), not yet implemented |
 | Decreed: uncheatable compression (+position curve) | harness ✅ / numbers pending | [`bench/uncheatable_eval.py`](bench/uncheatable_eval.py) (formulas replicated from the reference evaluator with line citations), data recipe `bench/data/README.md` |
@@ -27,34 +27,34 @@ Each line: what + where + key number (with baseline) + verification gate + commi
 
 - **FLA-free WKV recurrence kernel** (decode + varlen prefill, in-place indexed
   state I/O) — `rwkv7_kernels/wkv_recurrent.py`; greedy-EXACT at 0.1B/1.5B/7.2B;
-  initial release `9a24433`, in-place variant in the M6 line.
+  initial release `b3e1c86`, in-place variant in the M6 line.
 - **Weight-only int4 family** `gemv_w4_m1` / `gemm_w4_small` (rows bit-identical
   to M=1) / `gemm_w4_tc` (wmma, in-smem dequant, deterministic split-K, sm80+
   cp.async pipeline) — `cuda/rwkv7_w4.cu`, F0017; 1.5B bsz1 **259.1 vs fp16
   166.5 (1.56×)**, ≥fp16 at every bsz≤32 (3090); gate `bench/verify_w4.py`;
-  `47494bb`, `0bf8a45`, `767113f`.
+  `0687e8c`, `bf553de`, `cbf3c07`.
 - **Weight-only int8 (w8a16) family** — `cuda/rwkv7_w8.cu`, F0018; greedy
   **24/24 EXACT** (lossless in practice), **227.4 vs 166.5** at bsz1, ≥fp16 at
-  every bsz≤32; gate `bench/verify_w8.py`; `1981fd1`, `66ceafd`.
+  every bsz≤32; gate `bench/verify_w8.py`; `f00d1aa`, `9f100a7`.
 - **Fused 4-chain LoRA kernel** (~12 launches → 2) — `cuda/rwkv7_lora.cu`,
   F0020; fp16 bsz1 **203.0 → 226.5 (+11.6%)**, greedy 24/24 EXACT; raw
-  transcript `bench/results/headline/raw/`; `76286f7`.
+  transcript `bench/results/headline/raw/`; `edcd8a3`.
 - **Head-parallel TP + layer-partition PP** with `v_first` cross-stage plumbing,
   incl. root-causing an upstream pitfall (PP tensor transfer chunk-send is
-  lossless only for tp-replicated tensors) — F0019, fix `767113f`; full matrix
+  lossless only for tp-replicated tensors) — F0019, fix `cbf3c07`; full matrix
   greedy-EXACT (tp 2/4/8, pp 2/4/8, mixed), transcripts in
-  `bench/results/parallel/raw/`; `66ceafd`, `1c00d2b`.
+  `bench/results/parallel/raw/`; `9f100a7`, `1f775c6`.
 - **GPTQ for RWKV-7** (activation-aware, Hessian capture hook + streamed/
   sharded accumulation for models whose Hessian set exceeds GPU+RAM) —
   `bench/{calib_run,gptq_w4}.py`; 1.5B lambada −3.34pt (vs RTN −4.95);
-  `90f1d92`, `ff21424`, `4878b0b`.
+  `197c051`, `380cfb5`, `ad59947`.
 - **Hand-written sparse sqrelu FFN + fused fp16 GEMV + fused elementwise**
   (M6 line) — `cuda/rwkv7_sparse_cmix.cu` (adapted, see §3), `fused.py`;
   fp16 single-stream 0.66→0.73× of the albatross mega-kernel at 1.5B bsz1.
 - **SGLang `main` port** — verified greedy-EXACT (0.1B+1.5B) on main @a3f6680;
-  patch + apply guide in [`sglang_main_port/`](sglang_main_port/); `d539d07`.
+  patch + apply guide in [`sglang_main_port/`](sglang_main_port/); `85b45b5`.
 - **Official-metric harnesses** (uncheatable compression, MATH500 avg@64) —
-  `acc2ae4`.
+  `f19a953`.
 
 ## §3 Adapted code (full disclosure)
 
@@ -75,7 +75,7 @@ gates + scored lm-eval; every README claim carries its number and its baseline.
 ## §5 Release model
 
 Milestones M0–M6 were developed on a private dev box and published as a clean
-initial release (`9a24433`) followed by incremental commits; each pre-release
+initial release (`b3e1c86`) followed by incremental commits; each pre-release
 milestone's evidence triple = initial-release content + its finding doc
 (F0001–F0016) + its `bench/results/` artifact.
 

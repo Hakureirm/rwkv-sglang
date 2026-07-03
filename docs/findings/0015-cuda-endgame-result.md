@@ -21,7 +21,7 @@ behind `RWKV_FAST_LINEAR=1`, engaged ONLY when M==1 + fp16 activation + fp16
 contiguous weight + K%4==0 + N even (else the quant-aware ReplicatedLinear/cuBLAS
 path — never crashes on an odd shape). JIT-built via `fast_linear.py` (CUDA 12.9,
 sm_86), **without `--use_fast_math`** (IEEE arithmetic, no FTZ / approx transcendentals),
-so the gates hold on defensible math. (An earlier draft also vendored fused `lora_down`/
+so the gates hnew on defensible math. (An earlier draft also vendored fused `lora_down`/
 `lora_up` kernels; they were **removed** — dead code, since the LoRA path uses the
 batch-invariant triton `grouped_gemm`. Only the measured `gemv_m1` ships.)
 

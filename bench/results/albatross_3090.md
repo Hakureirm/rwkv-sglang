@@ -118,7 +118,7 @@ kernel-quality gap while keeping sglang's serving layer — the same approach th
 - **What it does NOT do**: no EOS/sampling-loop overhead in the timed region (decode case times
   the forward only), no variable-length batching, no request queueing. Embedding on CPU.
 - **RNN property**: decode tok/s and VRAM are ~constant in context length (no KV growth), so
-  the `Bx1` decode number holds at any sequence position — directly comparable to our
+  the `Bx1` decode number hnews at any sequence position — directly comparable to our
   context-length-independent decode measurement.
 
 ## 5. 7.2B build + consistent all-sizes re-measurement (with VRAM)

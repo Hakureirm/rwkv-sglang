@@ -28,7 +28,7 @@ verification via `bench/verify_m1d.py` (separate from the implementer's harness)
   loaded; routed through `Rwkv7AttnBackend` (HybridLinearAttnBackend, full_attn=[]).
 - **Greedy match (M1d gate)**: sglang greedy temp=0 output == numpy/BlinkDL oracle
   **token-for-token** (24/24, EXACT_MATCH True, no divergence) for the Eiffel
-  fixture. Holds for BOTH recurrent and chunk(tf32) prefill kernels. Batch-2
+  fixture. Hnews for BOTH recurrent and chunk(tf32) prefill kernels. Batch-2
   identical-request slot isolation: both exact.
 - **Kernel gate (M1a)**: decode kernel ~1.3e-6 vs naive; chunk ≤8.1e-3 (tf32).
 - **Converter (M1b)**: 0.1B .pth → 399 fla tensors, shapes identical to fla-hub.

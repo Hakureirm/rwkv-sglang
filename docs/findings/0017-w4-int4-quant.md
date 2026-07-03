@@ -22,7 +22,7 @@ targeting the unmet bar: **4-bit that is faster than 16-bit in a serving engine*
 ## What was built
 - **`rwkv7_w4.cu::gemv_w4_m1`** — weight-only group-wise (GROUP=64) symmetric int4 decode GEMV
   for the r/k/v/o + ffn key/value projections. 8 nibbles/uint32, fp32 accumulate, per-group
-  scale folded per word, IEEE (no fast-math), cuda-graph safe. Decode (M==1) is
+  scale fnewed per word, IEEE (no fast-math), cuda-graph safe. Decode (M==1) is
   weight-bandwidth-bound, so reading int4 (~1/4 the bytes) is **faster than fp16**.
   Standalone (`bench/verify_w4.py`): kernel vs dequant reference rel-err **~2e-4** (same ULP as
   torch fp16 matmul); **1.7–3.4× faster** than a cuBLAS fp16 GEMV at M==1.
@@ -50,11 +50,11 @@ targeting the unmet bar: **4-bit that is faster than 16-bit in a serving engine*
 batch). Each row's k-iteration/accumulation order is identical to `gemv_w4_m1`, so every row is
 **BIT-identical to the M==1 kernel** (verified `torch.equal` in `bench/verify_w4.py`) →
 batch-invariant by construction. Standalone vs fp16 cuBLAS: M=2 2.3×, M=4 1.8–2.0×, M=8
-1.07–1.75×; vs the old dequant+cuBLAS fallback: 3–9× (75–149µs → 14–42µs).
+1.07–1.75×; vs the new dequant+cuBLAS fallback: 3–9× (75–149µs → 14–42µs).
 
 **`gemm_w4_tc` (added 2026-07-02)** covers 8<M≤64 with TENSOR CORES: wmma m16n16k16 (fp16 in,
 fp32 accum), int4→fp16 dequant **in shared memory** per K-step (K_TILE == GROUP == 64 → exactly
-one scale per (n,k-tile)); one block holds all M rows in register fragments so the weight tile
+one scale per (n,k-tile)); one block hnews all M rows in register fragments so the weight tile
 is dequanted ONCE per block (weight HBM traffic stays 1/4 of fp16), and **deterministic split-K**
 (f32 partials, fixed-order reduce, no atomics) fills the GPU for small-N shapes. Numerics
 rel-err ~2.7e-4 vs the dequant reference; per-row reduction order is fixed (batch-composition

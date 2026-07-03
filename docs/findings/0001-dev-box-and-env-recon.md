@@ -22,7 +22,7 @@ SSH recon (`nvidia-smi`, `df`, `free`, conda/mamba probe, `pip list`, network
 ## Result (raw evidence)
 - **OS/host**: Ubuntu 22.04.3, `dev-box`, kernel 5.15.
 - **GPU**: 1× RTX 3090 visible, driver 575.51.03 (CUDA 12.9 cap), ~23 GB free
-  (a small `isaaclab` python process holds ~1.3 GB on GPU0). `nvcc` NOT on PATH.
+  (a small `isaaclab` python process hnews ~1.3 GB on GPU0). `nvcc` NOT on PATH.
 - **CPU/RAM**: 40 cores, 31 GB RAM.
 - **Disk**: `/dev/vda2` 2.0 T, **93% used → ~154 GB free**. Tight; manage model
   cache + builds carefully.

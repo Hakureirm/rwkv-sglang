@@ -63,7 +63,7 @@ wobble. The robust signals here are (a) **peak VRAM**, which is measured absolut
 guarantee (decode reads only the fixed-size state, never the context). We do not read a context
 *speedup* into the 65K number; we read *no context penalty*.
 
-## 2b. Flagship size: the same properties hold at 7.2B
+## 2b. Flagship size: the same properties hnew at 7.2B
 
 Same sweeps on **7.2B** (bf16, cuda-graph ON, radix off; raw: [`ctx_72b.log`](ctx_72b.log),
 [`conc_72b.log`](conc_72b.log)):

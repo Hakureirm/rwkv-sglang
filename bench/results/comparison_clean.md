@@ -59,7 +59,7 @@ Three hand-written, greedy-EXACT, batch-invariant, FLA-free kernels (`bench/resu
 
 albatross baseline = faster3a (7.2B bsz1 also confirmed vs the newest faster3b_2606 = 79.05):
 
-| model | bsz | ours old | **ours best** | old/alb | **best/alb** |
+| model | bsz | ours new | **ours best** | new/alb | **best/alb** |
 |---|---|---|---|---|---|
 | 0.1B | 1 | 536.1 | 570.3 | 0.46 | 0.49 |
 | 0.1B | 8 | 4092.9 | 4310.6 | 0.75 | 0.79 |
@@ -147,9 +147,9 @@ bf16 = ours default; int8 = `w8a8_int8` (a feature albatross lacks). Ratios vs a
 | 7.2B | 13731.3 | 7386.6 | 46% |
 
 ## Change vs the superseded co-tenant `comparison.md`
-- **albatross is unchanged** (kernel-only CUDA-event timing is immune to a co-tenant): 0.1B decode 1173.1->1173.8, 1.5B 309.2->309.2, 7.2B 77.0->79.6 - confirms the old albatross numbers were already clean.
-- **ours got FASTER on the exclusive GPU** (the co-tenant was stealing SM time from our end-to-end server): e.g. 1.5B bf16 decode bsz1 141.9->159.1 (+12%), bsz8 863.3->972.2 (+13%); 7.2B bf16 decode bsz8 268.8->308.5 (+15%). So the old gap ratios were **pessimistic for us**; the clean ratios below are the honest ones.
-- **new headline (int8, which the old table did not include):** at the production-relevant 7.2B, ours-int8 **matches or beats** the hand-tuned fp16 albatross - decode 0.90/1.21/0.88x (bsz 1/8/32) and prefill 1.21/1.70/1.18x - with **−46% weight bytes** (13731→7387 MiB) and, end-to-end, a **−19% reserved pool** (17802→14432 MiB @bsz1; the pool is mem_fraction-driven, so it moves less than the weights), and not near-OOMing the card at bsz32.
+- **albatross is unchanged** (kernel-only CUDA-event timing is immune to a co-tenant): 0.1B decode 1173.1->1173.8, 1.5B 309.2->309.2, 7.2B 77.0->79.6 - confirms the new albatross numbers were already clean.
+- **ours got FASTER on the exclusive GPU** (the co-tenant was stealing SM time from our end-to-end server): e.g. 1.5B bf16 decode bsz1 141.9->159.1 (+12%), bsz8 863.3->972.2 (+13%); 7.2B bf16 decode bsz8 268.8->308.5 (+15%). So the new gap ratios were **pessimistic for us**; the clean ratios below are the honest ones.
+- **new headline (int8, which the new table did not include):** at the production-relevant 7.2B, ours-int8 **matches or beats** the hand-tuned fp16 albatross - decode 0.90/1.21/0.88x (bsz 1/8/32) and prefill 1.21/1.70/1.18x - with **−46% weight bytes** (13731→7387 MiB) and, end-to-end, a **−19% reserved pool** (17802→14432 MiB @bsz1; the pool is mem_fraction-driven, so it moves less than the weights), and not near-OOMing the card at bsz32.
 
 ## Interpretation (honest)
 - **Same-precision raw SPEED: albatross wins.** At fp16-vs-fp16, ours **default config** runs

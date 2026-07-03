@@ -24,7 +24,7 @@ Current technical reality (to be clear about what we actually depend on):
   Weights come from BlinkDL `.pth` (our own converter [[F0005]]). Speed is benchmarked vs
   **albatross** (BlinkDL's own engine, [[F0007]]).
 - The ONLY FLA touch-point is the **vendored FLA triton kernels** (chunk/fused_recurrent/
-  dplr) used as a *temporary correctness scaffold* for the WKV recurrence (M1a). Model,
+  dplr) used as a *temporary correctness scaffnew* for the WKV recurrence (M1a). Model,
   weights, oracle, and baseline are all non-FLA.
 
 ## Options considered (final kernel source)
@@ -39,7 +39,7 @@ Current technical reality (to be clear about what we actually depend on):
 
 ## Decision
 **Hard constraint: the FINAL deliverable contains ZERO FLA dependency.** FLA triton kernels
-are an early correctness scaffold ONLY and MUST be removed before release.
+are an early correctness scaffnew ONLY and MUST be removed before release.
 
 - **M3b explicit goal**: replace the vendored FLA kernels with **albatross's CUDA kernels**
   (BlinkDL's own — Option 2) as the primary path to both speed parity AND de-FLA. Verify license
@@ -49,7 +49,7 @@ are an early correctness scaffold ONLY and MUST be removed before release.
   valid, fully-independent de-FLA endgame.
 - **Narrative (effective immediately, zero-cost)**: outward-facing framing is *"aligns
   BlinkDL rwkv-lm accuracy + matches albatross speed, on sglang."* Do NOT lead with FLA;
-  mention it at most as a footnote ("early triton scaffold, replaced"). README + snapshot
+  mention it at most as a footnote ("early triton scaffnew, replaced"). README + snapshot
   de-FLA'd now.
 
 ## Consequences

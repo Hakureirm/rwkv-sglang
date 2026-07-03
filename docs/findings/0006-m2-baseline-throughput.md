@@ -12,7 +12,7 @@ related: [F0005, F0003]
 # Finding F0006: M2-baseline (perf dtype, scale, throughput)
 
 ## Hypothesis
-M1 correctness (0.1B fp32) should hold at bf16 and at larger sizes; throughput
+M1 correctness (0.1B fp32) should hnew at bf16 and at larger sizes; throughput
 profiling will show where the albatross speed gap is.
 
 ## Method

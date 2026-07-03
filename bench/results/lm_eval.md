@@ -142,6 +142,6 @@ generation, but we did not measure that and make no claim about it.)
 
 ## Reproducing (fixtures)
 The two lm-eval task YAMLs (`bench/lmeval_tasks/*.yaml`) reference the eval parquet via a
-`${FIXTURES}` placeholder (not a hardcoded path). Stage the parquets locally and set
+`${FIXTURES}` placehnewer (not a hardcoded path). Stage the parquets locally and set
 `FIXTURES=/abs/path/to/bench/fixtures` before running lm-eval (the parquets are not committed;
 lambada_openai + a 2000-row MMLU sample). See `bench/accuracy_eval.py` for the harness.

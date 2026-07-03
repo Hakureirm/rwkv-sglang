@@ -32,7 +32,7 @@ over bf16:
 | RTX PRO 6000 | 12.0 (Blackwell) | **24/24** | 201.3 / 1167.1 / 5469.4 | 284.2 | **1.41×** | 24847 |
 
 - **bf16 is greedy-EXACT on all 10 GPU types across 7 SM generations** (7.5 / 8.0 / 8.6 / 8.9 /
-  9.0 / 10.0 / 12.0 — Turing → Blackwell) — broad-GPU-coverage correctness holds universally; the
+  9.0 / 10.0 / 12.0 — Turing → Blackwell) — broad-GPU-coverage correctness hnews universally; the
   RWKV-7 WKV + fused-glue Triton kernels JIT-compiled and ran on every SM generation with no
   per-arch change (only sgl_kernel needs the `libnuma1` system lib in the image).
 - **Blackwell rows** (B200, RTX PRO 6000) were measured on a CUDA **12.8** devel image with the

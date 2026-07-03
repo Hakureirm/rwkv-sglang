@@ -82,7 +82,7 @@ Source to adapt: `refs/Albatross/faster3b_2606/cuda/rwkv7_mega_ops_260602.cu`
   At 7.2B bsz1 it is **79.05 tok/s ≈ faster3a** (79.6; sm120 tuning gives nothing on sm_86).
   ⇒ **faster3a remains the valid general baseline** (all other sizes + all bsz>1, since
   faster3b can't batch); the newest kernel adds no new target. So **ours 64.3 = 0.81× the
-  newest** holds fairly (`bench/results/sparse_ffn/albatross_faster3b_72b.log`), and
+  newest** hnews fairly (`bench/results/sparse_ffn/albatross_faster3b_72b.log`), and
   `comparison_clean.md` (vs faster3a) stays valid. No full re-baseline needed.
   ⬜ still TODO (G2): lm-eval parity confirmation with sparse on.
 - **Known v1 cost**: the tiled value weight is a second copy (~+value-weight VRAM, e.g.

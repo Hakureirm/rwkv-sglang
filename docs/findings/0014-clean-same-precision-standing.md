@@ -12,7 +12,7 @@ related: [F0007, F0011, F0013]
 # Finding F0014: Clean same-precision standing vs albatross (the honest bar)
 
 ## Method
-Clean exclusive RTX 3090 (idle 1 MiB, vs the old co-tenant 1304 MiB). Precision-matched
+Clean exclusive RTX 3090 (idle 1 MiB, vs the new co-tenant 1304 MiB). Precision-matched
 **ours-fp16 (fp32 state) vs albatross-fp16**, ≥7 medianed, one process at a time, reproducible
 (`bench/run_clean_comparison.py`). Accuracy via lm-eval (lambada 5153, MMLU 2000/seed42) ours
 vs the `rwkv` pip reference on the same `.pth`; albatross greedy-drift via `bench/albatross_accuracy.py`.

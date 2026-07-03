@@ -4,7 +4,7 @@ project: rwkv-sglang
 title: "RWKV-7 × sglang adaptation — canonical state"
 date: 2026-07-02
 status: active
-last_verified_commit: 13eef84
+last_verified_commit: 45f21f4
 schema_invariant: |
   - Every ADR referenced anywhere MUST appear once in §"ADR roster".
   - Every finding referenced anywhere MUST appear once in §"Findings ledger".
@@ -68,7 +68,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
   - ✅ **M2-baseline** [[F0006]]: bf16 0.1B + **1.5B EXACT**, fits 3090; throughput profiled.
   - ✅ **M2b cuda-graph** [[F0008]]: decode **7.5-21× faster than eager**, still EXACT (lead-verified);
     no code change (inherited capture hooks); launch w/o `--disable-cuda-graph`. (vs-albatross ratios:
-    see the clean fp16 table in [[F0014]], NOT the old co-tenant numbers.)
+    see the clean fp16 table in [[F0014]], NOT the new co-tenant numbers.)
   - ✅ **radix-cache auto-off** [[F0009]]: `server_args.py` registers RWKV7 →
     `_handle_mamba_radix_cache(support_mamba_cache=False)` (mirrors KimiLinear); dynamic-batch
     correctness EXACT (identical/shared-prefix/mixed), lead-verified. Safe-by-default.
@@ -133,7 +133,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
   (T4: cutlass Error Internal; Blackwell: explicit NotImplementedError — upstream sgl-kernel).
   7.2B full lambada **0.742** (`out/lmeval_72b-lambada`). Chunked-prefill gate 48/48 exact
   (`bench/verify_chunked_prefill.py`).
-- ✅ **published**: single clean commit `9a24433` → github.com/Hakureirm/rwkv-sglang (PUBLIC);
+- ✅ **published**: single clean commit `b3e1c86` → github.com/Hakureirm/rwkv-sglang (PUBLIC);
   docs carry a human track (`docs/human/`, 中文+mermaid) + this dense agent track.
 - ✅ (2026-07-02, post-audit fixes): small-M int4 kernel `gemm_w4_small` (bsz≤8 all faster than
   fp16) · 7.2B int4 measured (102.8 tok/s bsz1, EXACT 8/8, lambada 0.7161, 9.8 GB — and verified
@@ -146,7 +146,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
   — **≥fp16 at every bsz≤32**; bsz64 0.74× (same M=64 long-K crossover as int4); VRAM 8502 vs
   9152; checkpoint 1.8 vs 2.9 GB; runs on EVERY arch (JIT), unlike cutlass w8a8 (sm80–90).
   `RWKV_W8=1`, quantizer `bench/quant_w4.py --bits 8`.
-- ✅ **M9 sglang-main port + TP** (2026-07-02, commits 66ceafd+d539d07): overlay verified on
+- ✅ **M9 sglang-main port + TP** (2026-07-02, commits 9f100a7+85b45b5): overlay verified on
   **sglang main @a3f6680** (official `dev-cu12` CUDA-12.9 container on the 3090; GeForce can't
   run CUDA-13 containers — forward-compat excludes it; the image's `/usr/local/cuda/compat`
   libcuda must be shadowed via `LD_LIBRARY_PATH=`): **0.1B + 1.5B greedy 24/24 EXACT on main**,
@@ -172,7 +172,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 > Dev model: `sglang_overlay/` (new+edited files) → `scripts/deploy.sh` rsyncs into the
 > box's wheel sglang site-packages (no editable build). Head config = 12×64 (from r_k).
 
-> ✅ **BENCHMARK RIGOR (DONE)**: the old shared-GPU numbers (F0006/F0008/F0009 +
+> ✅ **BENCHMARK RIGOR (DONE)**: the new shared-GPU numbers (F0006/F0008/F0009 +
 > `bench/results/{comparison,albatross_3090,profile}.md`, measured with a ~1.3GB isaaclab
 > co-tenant) are **superseded**. All headline ours-vs-albatross numbers were RE-RUN on the
 > **exclusive** 3090 in one controlled session (both engines, same GPU/prompts/bsz, ≥7 medianed,

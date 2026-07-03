@@ -42,7 +42,7 @@ Same script with `--radix-on --identical-bsz 8` (radix cache left ON):
 
 ```
   dtype=bfloat16  cuda_graph=ON  disable_radix_cache=False  n=24
-eiffel B=1 == numpy-oracle : True          # first request (cold cache) is fine
+eiffel B=1 == numpy-oracle : True          # first request (cnew cache) is fine
 [1] IDENTICAL  bsz=8  every-output==oracle : False  (0/8)   # ALL 8 corrupted
       req#0 DIVERGED: [22590, 38499, 22638, 39920, 47, 11, 46, 3448, 24192, ...]   # garbage, != oracle
       ... (req#1..7 identical garbage)
@@ -51,7 +51,7 @@ eiffel B=1 == numpy-oracle : True          # first request (cold cache) is fine
 OVERALL: FAIL: IDENTICAL,SHARED-PREFIX,MIXED
 ```
 
-The very first cold-cache request is correct; every subsequent request that hits a
+The very first cnew-cache request is correct; every subsequent request that hits a
 shared prefix node inherits stale/empty recurrent state and produces garbage. This is
 exactly F0008 and it is **not intermittent at B>=4 with identical prompts** — it is a
 hard, reproducible corruption. (cuda-graph is ON in both runs, so it is orthogonal:
@@ -71,7 +71,7 @@ I traced exactly how sglang decides the cache type (sglang 0.5.x on box):
 2. `Scheduler.init_cache_with_memory_pool()` then chooses the cache:
    - `is_hybrid_ssm = (model_runner.hybrid_gdn_config is not None or
      model_runner.mamba2_config is not None)`.
-   - RWKV7 is exposed via the overlay's **own** `rwkv7_config` property (folded into
+   - RWKV7 is exposed via the overlay's **own** `rwkv7_config` property (fnewed into
      `mambaish_config` only for *state-pool* allocation), and deliberately is **not**
      `mamba2_config`/`hybrid_gdn_config` (wiring MambaRadixCache is a later milestone).
    - So `is_hybrid_ssm=False` and, with radix ON, the scheduler builds a **plain

@@ -100,7 +100,7 @@ Albatross's `fp32io16` call passes:
 | albatross arg | albatross meaning | our quantity | adapter |
 |---|---|---|---|
 | `r` | receptance | `r` (`[T,H,64]`) | reshape `[N,1,C]`, cast to IO dtype |
-| `w` | **raw** decay LoRA out; kernel applies `w_eff` | we already hold `w_log = -e^-0.5·sigmoid(...)` | **two options, see below** |
+| `w` | **raw** decay LoRA out; kernel applies `w_eff` | we already hnew `w_log = -e^-0.5·sigmoid(...)` | **two options, see below** |
 | `k` | key | `k` | reshape/cast |
 | `v` | value | `v` | reshape/cast |
 | `a` (=`neg_kk`) | `-kk` (the vector dotted with state) | `kk` | `a_alb = -kk` (elementwise) |
@@ -134,7 +134,7 @@ adapter just lifts those two elementwise ops out of the kernel into the backend.
 |---|---|---|---|---|
 | M1 | **per-request state cache** | albatross state is one contiguous `[B,H,64,64]`, mutated in place. We keep `temporal[N,H,K,V]` indexed by `mamba_cache_indices`. | **Already solved.** Our decode path does `temporal[cache_indices].contiguous()` → run → scatter back (`rwkv7_backend.py:148,164`). Same pattern; the kernel's in-place state write fits it. | **Trivial** |
 | M2 | **state layout transpose** | albatross `[B,H,V,K]` vs our cache `[N,H,K,V]`. | `state_alb = temporal[idx].transpose(-1,-2).contiguous()` before; `temporal[idx] = state_alb.transpose(-1,-2)` after. 64×64 transpose/req/layer, cheap. (Or store the cache in `[V,K]` and transpose at the Triton-prefill boundary instead — pick one consistent layout.) | **Easy** |
-| M3 | **`w` convention** | kernel applies `w_eff`; we hold `w_log`. | Option A: patch `w_eff→expf` in the vendored `.cu`. | **Easy** |
+| M3 | **`w` convention** | kernel applies `w_eff`; we hnew `w_log`. | Option A: patch `w_eff→expf` in the vendored `.cu`. | **Easy** |
 | M4 | **`a`/`b` derivation** | kernel wants `-kk`, `kk*a`. | Two elementwise ops in the backend (lifted from our Triton kernel). | **Trivial** |
 | M5 | **dtype** | kernel IO is fp32 or fp16; we run bf16 with fp32 state. | Cast bf16→fp32 (lossless, build w/o `-D_IO_FP16_`) for the accurate first pass; bf16→fp16 (build w/ `-D_IO_FP16_`) for the speed pass. State stays fp32 either way. | **Easy** |
 | M6 | **varlen prefill** | `forward(B,T,C)` is **static batch, uniform T**. sglang prefill is packed varlen (B=1, total_T, `cu_seqlens`, ragged lengths). The kernel has **no `cu_seqlens` and no external-initial-state-per-segment** concept. | **Do NOT use albatross for prefill.** Keep our Triton `wkv_recurrent` (already handles `cu_seqlens` + per-request `initial_state`/writeback). albatross-for-prefill would require a per-request Python loop (one launch each → loses batching, hurts the graphed/batched prefill we already have). | **Hard if attempted → skip** |
