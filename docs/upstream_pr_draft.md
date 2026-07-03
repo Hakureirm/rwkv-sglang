@@ -72,5 +72,4 @@ H100 ShareGPT (bench_serving): peak 14,245 total tok/s, TTFT 69 ms @16 req/s.
 5. PR text from this draft; link accuracy/bench evidence from the public repo.
 
 ## Blockers / notes
-- None technical. Needs GitHub access from the Mac (box has no GitHub).
-
+- None technical.
