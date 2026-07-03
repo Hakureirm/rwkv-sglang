@@ -6,6 +6,10 @@ real multi-GPU hardware (L4 ×N), greedy fixture vs the numpy oracle
 functional-verification numbers, NOT tuned throughput (single L4 *with*
 cuda-graph does 76 tok/s bsz1; tuned multi-GPU throughput is a follow-up).
 Design + analysis: [`../../../docs/findings/0019-tp-pp-parallel.md`](../../../docs/findings/0019-tp-pp-parallel.md).
+**Raw transcripts** (engine logs + gate outputs + per-GPU memory, one file per run,
+scrubbed of infra-internal paths): [`raw/`](raw/) — tp2/pp2 (`tp2_…`, `pp2_…`),
+tp4+pp4+mixed (`tp4_pp4_tp2pp2_…`), tp8+pp8 (`tp8_pp8_…`), and the mixed-mode
+fix verification at 0.1B and 1.5B (`tp2pp2_*_fix_verify.log`).
 
 ## Baseline regressions (tp=1, pp=1 — RTX 3090)
 
