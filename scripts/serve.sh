@@ -1,12 +1,15 @@
 #!/bin/bash
 # Recommended production launch for the RWKV-7 SGLang overlay.
 #
-# Turns ON the full hand-written fast-path stack — every env below is verified
-# greedy-token-EXACT vs the numpy fp32 oracle, INCLUDING all-on together
-# (bench/verify_batch.py, OVERALL PASS with fast_linear + fused_lora + sparse_ffn
-# + fused_glue enabled simultaneously). The kernels self-gate (fp16 / M==1 /
-# decode as applicable) and fall back cleanly otherwise, so setting the envs is
-# safe for any dtype/shape.
+# Turns ON the full hand-written fast-path stack. Verification scope (precise):
+# every env below is greedy-token-EXACT vs the numpy fp32 oracle including all-on
+# together (bench/verify_batch.py OVERALL PASS), the glue/LoRA kernels are
+# byte-gated incl. pad-slot (-1) and duplicate-index cases (bench/test_glue.py,
+# bench/test_lora_mn.py), and GEMV autotune is restricted to the logits-invariant
+# OutTile axis by default (fast_linear.py NUMERICS DISCIPLINE; the full
+# threads-crossing space needs RWKV_GEMV_AUTOTUNE_FULL=1 + a greedy re-gate).
+# The kernels self-gate (fp16 / M-gate / decode as applicable) and fall back to
+# the stock torch path otherwise.
 #
 # Also applies the cuda_graph_max_bs fix (F0024): SGLang auto-caps it to 24 for
 # this RWKV/MambaPool config regardless of free memory, silently forcing eager

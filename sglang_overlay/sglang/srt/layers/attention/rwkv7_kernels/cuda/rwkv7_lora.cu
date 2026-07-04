@@ -296,6 +296,7 @@ at::Tensor lora4_mn(at::Tensor xs, at::Tensor d_cat, at::Tensor u_cat,
   TORCH_CHECK((H % 4) == 0, "lora4_mn requires H%4==0");
   TORCH_CHECK(C >= 1 && C <= 8, "lora4_mn: 1<=C<=8");
   TORCH_CHECK(M >= 1 && Rtot >= 1, "lora4_mn: empty M/rank");
+  TORCH_CHECK(M <= 65535, "lora4_mn: M exceeds gridDim.y limit (and the fused path is M-gated to tiny M anyway)");
   auto h = at::empty({M, Rtot}, xs.options().dtype(at::kFloat));
   auto y = at::empty({M, C, H}, xs.options());
   auto stream = at::cuda::getCurrentCUDAStream();

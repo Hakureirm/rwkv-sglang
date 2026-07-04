@@ -62,7 +62,7 @@ F0023 §5 established bsz1 GEMV is HBM-bandwidth-bound (~roofline), so the launc
 much *on the arch it happens to fit*. The autotune's real value is **cross-arch portability**: the
 same fixed `<128,2>` that is ~optimal on the 3090 mis-fits other archs (F0023 §5: 64-thread configs
 hit a 67% occupancy ceiling on sm_86/89, different sweet spots on sm_90/120), and albatross forces a
-manual per-GPU re-tune there while we auto-select. **B-segment** (task #14, cloud multi-GPU L4/A10G/H100/
+manual per-GPU re-tune there while we auto-select. **B-segment** (task #14, per-card L4/A10G/H100/
 RTX-PRO-6000) will seed + validate the other-arch rows and quantify the portability win.
 
 ## Part C — w8a8 large-M throughput (ADR-0005 R1): the high-concurrency int8 overtake

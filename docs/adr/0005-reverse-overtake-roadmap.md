@@ -4,7 +4,7 @@ adr_id: 0005
 title: "Reverse-overtake execution roadmap — the plan to make RWKV-7×SGLang beat albatross even on its home turf"
 status: accepted
 date: 2026-07-03
-last_verified_commit: "HEAD"
+last_verified_commit: "c4e58e0"
 supersedes: []
 superseded_by: []
 ---
@@ -123,7 +123,7 @@ of the (card×precision×bsz) autotune principle: the fused kernel is enabled on
 where it wins. Greedy-exact preserved on both paths (verify_batch bsz4=fused / bsz5-6=fallback PASS).
 
 ### R4 — Arch-aware GEMV autotune (F0023 #6)  [STATUS: A-seg done, F0025]
-`gemv_m1_cfg` + `_select_config` shipped + 3090-seeded (token-exact). B-seg = cloud cross-arch
+`gemv_m1_cfg` + `_select_config` shipped + 3090-seeded (token-exact). B-seg = cross-arch
 occupancy pass (task #14) seeds/validates other-arch rows → the portability overtake vs albatross's
 per-GPU hand-tune. **Gate**: per-arch best-config selected without manual tuning; no accuracy change.
 
@@ -138,7 +138,7 @@ scale. **Gate**: token-exact + speedup on a Turing (T4) card where cutlass w8a8 
 
 ## Sequencing decision
 R1 (measuring now) → R3 (medium risk, high confidence, closes a real gap) → R2 (biggest lever,
-staged/incremental because high risk) → R4-B DONE (F0027, $0.008) → R5 (small) → R6 (large,
+staged/incremental because high risk) → R4-B DONE (F0027) → R5 (small) → R6 (large,
 later). Every kernel gated greedy-token-EXACT vs the numpy oracle before it can be enabled by
 default — no accuracy regression is the non-negotiable invariant (per [[feedback-benchmark-rigor]],
 [[feedback-elegance-and-adversarial-review]]).

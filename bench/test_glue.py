@@ -71,5 +71,52 @@ for T in [1, 2, 4, 8, 32]:
     print(f"T={T:3d}: shift_lerp6 {'EXACT' if ok6 else 'FAIL'} | shift_lerp1 {'EXACT' if ok1 else 'FAIL'}")
     all_ok = all_ok and ok6 and ok1
 
-print("\nRESULT:", "ALL EXACT — R2 kernels byte-match token_shift+lerp" if all_ok else "FAILED")
+# --- pad-slot cases: padded cuda-graph replay fills the tail of cache_indices
+# with PAD_SLOT_ID = -1 (possibly MANY -1 entries). Pad rows must (a) not touch
+# conv at all, (b) come out zeroed, (c) leave valid rows byte-exact.
+for T, n_pad in [(4, 1), (8, 5), (3, 3)]:  # incl. all-pad batch
+    n_valid = T - n_pad
+    ci = torch.full((T,), -1, dtype=torch.int32, device=dev)
+    if n_valid:
+        ci[:n_valid] = torch.randperm(S, device=dev)[:n_valid].to(torch.int32)
+    normed = (torch.randn(T, H, dtype=torch.float16, device=dev) * 0.5)
+    mix6 = (torch.randn(6, H, dtype=torch.float16, device=dev) * 0.3)
+    x_k = (torch.randn(H, dtype=torch.float16, device=dev) * 0.3)
+    conv0 = torch.randn(S, H, 1, dtype=torch.float32, device=dev) * 0.4
+
+    v = ci[:n_valid].long()
+    conv_ref = conv0.clone()
+    if n_valid:
+        conv_ref[v, :, 0] = normed[:n_valid].float()
+
+    conv_k = conv0.clone()
+    out6 = torch.ops.rwkv7_glue.shift_lerp6(normed, mix6, ci, conv_k)
+    ok6 = torch.equal(conv_k, conv_ref) and torch.equal(out6[:, n_valid:], torch.zeros_like(out6[:, n_valid:]))
+    if n_valid:
+        prev = conv0[v, :, 0].to(torch.float16)
+        ok6 = ok6 and torch.equal(out6[:, :n_valid], ref_lerp6(normed[:n_valid], prev, mix6))
+
+    conv_k1 = conv0.clone()
+    out1 = torch.ops.rwkv7_glue.shift_lerp1(normed, x_k, ci, conv_k1)
+    ok1 = torch.equal(conv_k1, conv_ref) and torch.equal(out1[n_valid:], torch.zeros_like(out1[n_valid:]))
+    if n_valid:
+        prev1 = conv0[v, :, 0].to(torch.float16)
+        ok1 = ok1 and torch.equal(out1[:n_valid], ref_lerp1(normed[:n_valid], prev1, x_k))
+
+    print(f"T={T:3d} pads={n_pad}: shift_lerp6 {'EXACT' if ok6 else 'FAIL'} | shift_lerp1 {'EXACT' if ok1 else 'FAIL'} (pad rows zeroed, conv untouched)")
+    all_ok = all_ok and ok6 and ok1
+
+# out-of-range index (>= S) must also be treated as a pad, not an OOB write
+ci = torch.tensor([0, S, 2 * S], dtype=torch.int32, device=dev)
+normed = torch.randn(3, H, dtype=torch.float16, device=dev)
+mix6 = torch.randn(6, H, dtype=torch.float16, device=dev)
+conv0 = torch.randn(S, H, 1, dtype=torch.float32, device=dev)
+conv_k = conv0.clone()
+out6 = torch.ops.rwkv7_glue.shift_lerp6(normed, mix6, ci, conv_k)
+conv_ref = conv0.clone(); conv_ref[0, :, 0] = normed[0].float()
+ok_oob = torch.equal(conv_k, conv_ref) and torch.equal(out6[:, 1:], torch.zeros_like(out6[:, 1:]))
+print(f"out-of-range idx: {'EXACT' if ok_oob else 'FAIL'} (rows >= S treated as pad)")
+all_ok = all_ok and ok_oob
+
+print("\nRESULT:", "ALL EXACT — R2 kernels byte-match token_shift+lerp (incl. pad slots)" if all_ok else "FAILED")
 sys.exit(0 if all_ok else 1)

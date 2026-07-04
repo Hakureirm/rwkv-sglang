@@ -4,9 +4,13 @@
 
 Fuses the paged token-shift (gather prev conv + scatter current, dropping the
 `.clone()`) with the lerp, keeping the shifted intermediate on-chip. Decode path,
-fp16 conv only (guarded by the caller: rwkv7_backend.try_fused_shift_lerp*). Gated
-by RWKV_FUSED_GLUE (default off). Byte-exact vs token_shift + fused_lerp6/lerp1
-(bench/test_glue.py). cuda-graph safe; fakes registered for piecewise capture.
+fp16 normed + fp32 conv state (guarded by the caller:
+rwkv7_backend.try_fused_shift_lerp*). Gated by RWKV_FUSED_GLUE (default off).
+Byte-exact vs token_shift + fused_lerp6/lerp1 (bench/test_glue.py). Pad slots
+(PAD_SLOT_ID = -1 from padded cuda-graph replay) are guarded in-kernel: no conv
+access, zeroed output rows. conv is declared mutable ((a!)) in the op schema so
+functionalization sees the in-place scatter. cuda-graph safe; fakes registered
+for piecewise capture.
 """
 from pathlib import Path
 

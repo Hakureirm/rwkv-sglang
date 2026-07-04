@@ -17,9 +17,9 @@ generations. Entry points: [README.md](README.md) ·
 | 3. Dynamic batching + chunked prefill + state cache | ✅ | batching/chunked-prefill greedy-EXACT (`bench/verify_batch.py`, `bench/verify_chunked_prefill.py`); **state prefix cache via MambaRadixCache now ENABLED** (`server_args` support_mamba_cache=True + `scripts/deploy.sh` is_hybrid_ssm patch) — `verify_batch.py --radix-on` greedy EXACT at 0.1B+1.5B (shared-prefix 5/5, mixed 6/6), where the plain token radix corrupted ([`radix_correctness.md`](bench/results/radix_correctness.md)/F0008); **~98% cache hit rate on a realistic high-reuse load (2048-tok shared prefix), TTFT 784→200ms** (the earlier 30% was a cold-start-worst-case test artifact); the only RWKV serving stack with a state prefix cache at all — F0022 |
 | 4. Pascal+ / AMD; PP + TP inference | ◑ | TP 2/4/8 + PP 2/4/8 + mixed, all greedy-EXACT: [`bench/results/parallel/`](bench/results/parallel/) (+`raw/` transcripts), F0019; 10-GPU grid [`multigpu.md`](bench/results/multigpu.md) + `bench/results/allcards.json`; Pascal routing guard `42fd6fa`; Pascal/AMD hardware runs pending |
 | 5. w8/w4 quant: VRAM ↓, ≥ w16 speed, near Q*_K_M accuracy | ✅ speed+VRAM+acc / ◑ Q*_K_M cmp | [`bench/results/w4/`](bench/results/w4/) (+`raw/`), F0017/F0018; w4 ≥fp16 at every bsz≤32 (3090, 1.5B); **7.2B GPTQ lambada 0.7297 vs bf16 0.7425 (−1.28pt), 192/192 GPTQ, 4.6 GB, on a real 16 GB T4**; w8 uncheatable-lossless. Published: ModelScope `Hakureirm/rwkv7-g1-{1.5b-w8g64,1.5b-w4gptq,7.2b-w4gptq}` |
-| 6. Speculative decoding (preliminary) | ⬜ | designed (state checkpoint/rollback plan), not yet implemented |
+| 6. Speculative decoding (preliminary) | ◑ | viability MEASURED: 0.191B draft vs 1.5B target greedy acceptance α=0.738 (n=603) → est. ~2.0×(1.5B)/~2.7×(7.2B) bsz1 (F0029, `bench/spec_accept.py`); design ADR-0006 (recurrent chain-verify + O(1) rollback); build queued behind the large-batch front |
 | Decreed: uncheatable compression (+position curve) | ✅ | [`bench/uncheatable_eval.py`](bench/uncheatable_eval.py) + [`bench/results/uncheatable/`](bench/results/uncheatable/): 1.5B full-corpus POOLED compression fp16 **0.6085** / w8 **0.6086 (lossless, +0.0001)** / w4-GPTQ 0.6514; position curve CSVs |
-| Decreed: MATH500 avg@64 + best-bsz speed | harness ✅ / numbers pending | [`bench/math500_avg64.py`](bench/math500_avg64.py) (prompt/sampling/grader ported verbatim from the reference) |
+| Decreed: MATH500 avg@64 + best-bsz speed | ✅ | [`bench/math500_avg64.py`](bench/math500_avg64.py) (prompt/sampling/grader ported verbatim); 1.5B **avg@64 = 40.60%** (32k rollouts; pass@64 69.8%), greedy 39.2% — F0024, `bench/results/math500_avg64_1.5b.json`; best-bsz speed = F0024/F0028 sweeps |
 
 ## §2 Original contributions (the scoring core)
 
@@ -42,8 +42,18 @@ Each line: what + where + key number (with baseline) + verification gate + commi
 - **Head-parallel TP + layer-partition PP** with `v_first` cross-stage plumbing,
   incl. root-causing an upstream pitfall (PP tensor transfer chunk-send is
   lossless only for tp-replicated tensors) — F0019, fix `cbf3c07`; full matrix
-  greedy-EXACT (tp 2/4/8, pp 2/4/8, mixed), transcripts in
-  `bench/results/parallel/raw/`; `9f100a7`, `1f775c6`.
+  greedy-EXACT (tp 2/4/8, pp 2/4/8, mixed), full matrix in
+  `bench/results/parallel/` + `bench/results/multigpu.md`; `9f100a7`, `1f775c6`.
+  **Upstream impact:** reported as sglang issue
+  [#30015](https://github.com/sgl-project/sglang/issues/30015) (2026-07-03,
+  model-independent tp2pp2 repro + root cause + two fix options,
+  `docs/upstream_pp_allgather_issue.md`). Upstream PR
+  [#30058](https://github.com/sgl-project/sglang/pull/30058) ("Fixes #30015",
+  credits our repro) later implemented our option 1 (the `all_gather_exclude`
+  primitive) but explicitly left the model-side wiring — declaring which proxy
+  keys are TP-sharded (RWKV's `v_first`) through `scheduler_pp_mixin` — as a
+  follow-up; our shipped `v_first` full-width-transit fix already closes that
+  end-to-end for RWKV-7.
 - **GPTQ for RWKV-7** (activation-aware, Hessian capture hook + streamed/
   sharded accumulation for models whose Hessian set exceeds GPU+RAM) —
   `bench/{calib_run,gptq_w4}.py`; 1.5B lambada −3.34pt (vs RTN −4.95);

@@ -34,6 +34,16 @@ _LOAD_FAILED = False
 # via a one-time warmup autotune, cached in-process + on disk. Occupancy of these
 # kernels is compile-time (regs/smem), so (sm_arch, N, K) is the full key.
 #
+# NUMERICS DISCIPLINE (the autotune rule: a config knob may change speed, never
+# logits). In gemv_m1_kernel each output's fp32 accumulation order depends ONLY
+# on Threads (per-thread k-stride = Threads*4, then a fixed warp-shuffle tree +
+# serial warp sum); OutTile changes which block computes a row but not the
+# order. So: OutTile is logits-invariant (tuned freely), while crossing a
+# Threads class CAN change logits by ulp-level reassociation. Default autotune
+# therefore searches OutTile at the heuristic's fixed Threads. The full
+# (threads x out_tile) space needs RWKV_GEMV_AUTOTUNE_FULL=1, whose contract is
+# an explicit greedy-oracle re-gate (bench/autotune_gemv.py --full does both).
+#
 # cuda-graph safety: we NEVER benchmark while a graph is capturing (host sync
 # would corrupt capture) — under capture we fall back to the heuristic. Autotune
 # runs during sglang's eager warmup forwards, freezing the choice before capture.
@@ -43,6 +53,7 @@ _CFG_DISK_LOADED = False
 _CANDIDATE_THREADS = (64, 128, 256)
 _CANDIDATE_OUTTILE = (4, 2, 1)  # prefer larger tile (fewer blocks) when valid
 _AUTOTUNE = os.environ.get("RWKV_GEMV_AUTOTUNE", "0") == "1"
+_AUTOTUNE_FULL = os.environ.get("RWKV_GEMV_AUTOTUNE_FULL", "0") == "1"
 
 
 def _arch_key() -> int:
@@ -55,7 +66,8 @@ def _arch_key() -> int:
 def _cache_path() -> Path:
     name = "cpu"
     if torch.cuda.is_available():
-        name = torch.cuda.get_device_name(0).replace(" ", "_").replace("/", "_")
+        name = torch.cuda.get_device_name(torch.cuda.current_device())
+        name = name.replace(" ", "_").replace("/", "_")
     d = Path(os.path.expanduser("~/.cache/rwkv7_fast"))
     d.mkdir(parents=True, exist_ok=True)
     return d / f"gemv_autotune_{name}.json"
@@ -79,7 +91,11 @@ def _load_disk_cache():
 def _save_disk_cache():
     try:
         out = {f"{a},{n},{k}": list(v) for (a, n, k), v in _CFG_CACHE.items()}
-        json.dump(out, open(_cache_path(), "w"))
+        p = _cache_path()
+        tmp = p.with_suffix(f".tmp.{os.getpid()}")
+        with open(tmp, "w") as f:
+            json.dump(out, f)
+        os.replace(tmp, p)  # atomic: concurrent TP workers can't tear the file
     except Exception:
         pass
 
@@ -91,7 +107,7 @@ def _heuristic_config(N: int, K: int) -> tuple:
     N while keeping grid = N/out_tile >= ~2*numSM to bury the wave tail."""
     numsm = 82
     try:
-        numsm = torch.cuda.get_device_properties(0).multi_processor_count
+        numsm = torch.cuda.get_device_properties(torch.cuda.current_device()).multi_processor_count
     except Exception:
         pass
     threads = 128
@@ -114,21 +130,30 @@ def _heuristic_config(N: int, K: int) -> tuple:
     return (threads, out_tile)
 
 
-def _valid_configs(N: int):
-    for t in _CANDIDATE_THREADS:
+def _valid_configs(N: int, threads: int = None):
+    """Candidate (threads, out_tile) pairs. With `threads` set, the search is
+    restricted to that single Threads class — the logits-invariant subspace
+    (see NUMERICS DISCIPLINE above). threads=None = the full space (needs the
+    RWKV_GEMV_AUTOTUNE_FULL greedy-re-gate contract)."""
+    classes = _CANDIDATE_THREADS if threads is None else (threads,)
+    for t in classes:
         for ot in _CANDIDATE_OUTTILE:
             if N % ot == 0:
                 yield (t, ot)
 
 
 def _autotune_config(N: int, K: int) -> tuple:
-    """Micro-benchmark the valid (threads,out_tile) for this (N,K) with CUDA
-    events; return the fastest. Only called outside graph capture (warmup)."""
+    """Micro-benchmark candidate (threads,out_tile) for this (N,K) with CUDA
+    events; return the fastest. Only called outside graph capture (warmup).
+    Default: OutTile-only at the heuristic Threads (logits-invariant); the full
+    space only under RWKV_GEMV_AUTOTUNE_FULL=1."""
     dev = torch.device("cuda")
     x = torch.randn(1, K, dtype=torch.float16, device=dev)
     w = torch.randn(N, K, dtype=torch.float16, device=dev)
-    best, best_t = _heuristic_config(N, K), float("inf")
-    for (t, ot) in _valid_configs(N):
+    best = _heuristic_config(N, K)
+    best_t = float("inf")
+    t_lock = None if _AUTOTUNE_FULL else best[0]
+    for (t, ot) in _valid_configs(N, threads=t_lock):
         try:
             for _ in range(5):  # warm
                 torch.ops.rwkv7_fast.gemv_m1_cfg(x, w, t, ot)
@@ -148,17 +173,31 @@ def _autotune_config(N: int, K: int) -> tuple:
 
 
 def _select_config(N: int, K: int) -> tuple:
+    heur = _heuristic_config(N, K)
+    if not _AUTOTUNE:
+        # autotune off: pure closed-form, and do NOT consult the disk cache —
+        # numerics/perf must not depend on hidden per-machine state.
+        return heur
     _load_disk_cache()
     key = (_arch_key(), int(N), int(K))
     if key in _CFG_CACHE:
-        return _CFG_CACHE[key]
+        cfg = _CFG_CACHE[key]
+        # a cached config from a FULL (threads-crossing) tune is only honored
+        # when the full-tune contract is active; otherwise stay in the
+        # heuristic's logits-invariant Threads class.
+        if cfg[0] == heur[0] or _AUTOTUNE_FULL:
+            return cfg
     # never benchmark (host sync) while capturing a cuda graph
     try:
         capturing = torch.cuda.is_current_stream_capturing()
     except Exception:
         capturing = False
-    if capturing or not _AUTOTUNE:
-        return _heuristic_config(N, K)
+    if capturing:
+        if _AUTOTUNE_FULL:
+            # pin for process-lifetime consistency: a later eager autotune must
+            # not switch Threads class between the captured graph and eager path
+            _CFG_CACHE[key] = heur
+        return heur
     cfg = _autotune_config(N, K)
     _CFG_CACHE[key] = cfg
     _save_disk_cache()
@@ -184,12 +223,28 @@ def _ensure_loaded():
             extra_cflags=["-O3"],
             extra_cuda_cflags=["-O3", "-Xptxas", "-O3"],
         )
+        _register_fakes()
         _EXT_LOADED = True
         return True
     except Exception as e:  # pragma: no cover - build env dependent
         print(f"[rwkv7_fast] JIT load failed, falling back to torch: {e}")
         _LOAD_FAILED = True
         return False
+
+
+def _register_fakes():
+    """Fake impls so torch.compile / piecewise cuda-graph tracing doesn't graph-
+    break on the custom ops (mirrors glue.py/lora_fused.py)."""
+    try:
+        @torch.library.register_fake("rwkv7_fast::gemv_m1")
+        def _fm1(x, weight):
+            return x.new_empty((1, weight.shape[0]))
+
+        @torch.library.register_fake("rwkv7_fast::gemv_m1_cfg")
+        def _fm1c(x, weight, threads, out_tile):
+            return x.new_empty((1, weight.shape[0]))
+    except Exception:
+        pass  # older torch without register_fake -> caller disables piecewise cuda graph
 
 
 def available() -> bool:

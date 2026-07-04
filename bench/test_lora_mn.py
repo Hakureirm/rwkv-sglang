@@ -36,20 +36,50 @@ d_cat = torch.randn(Rtot, H, dtype=torch.float16, device=dev) * 0.1
 u_cat = torch.randn(H, Rtot, dtype=torch.float16, device=dev) * 0.1
 bias_cat = torch.randn(C, H, dtype=torch.float16, device=dev) * 0.1
 
-all_ok = True
-for M in [1, 2, 4, 8, 16, 32]:
+def bit_equal(a, b):
+    """BITWISE identity (distinguishes +0.0/-0.0, exact NaN payloads), stronger
+    than torch.equal's value equality."""
+    return torch.equal(a.view(torch.int16), b.view(torch.int16))
+
+
+def run_case(label, ranks, acts, M):
+    C = len(ranks)
+    Rtot = sum(ranks)
+    meta = torch.zeros(C, 3, dtype=torch.int32)
+    off = 0
+    for c in range(C):
+        meta[c, 0] = off; meta[c, 1] = ranks[c]; meta[c, 2] = acts[c]; off += ranks[c]
+    meta = meta.to(dev)
+    d_cat = torch.randn(Rtot, H, dtype=torch.float16, device=dev) * 0.1
+    u_cat = torch.randn(H, Rtot, dtype=torch.float16, device=dev) * 0.1
+    bias_cat = torch.randn(C, H, dtype=torch.float16, device=dev) * 0.1
     xs = torch.randn(M, C, H, dtype=torch.float16, device=dev) * 0.5
     ymn = torch.ops.rwkv7_lora.lora4_mn(xs, d_cat, u_cat, bias_cat, meta)  # [M,C,H]
     ok_all_m = True
     max_m_diff = 0
     for m in range(M):
         y1 = torch.ops.rwkv7_lora.lora4_m1(xs[m].contiguous(), d_cat, u_cat, bias_cat, meta)  # [C,H]
-        if not torch.equal(ymn[m], y1):
+        if not bit_equal(ymn[m], y1):
             ok_all_m = False
             max_m_diff = max(max_m_diff, (ymn[m].float() - y1.float()).abs().max().item())
     tag = "EXACT" if ok_all_m else f"MISMATCH(max={max_m_diff:.2e})"
-    print(f"M={M:3d}: lora4_mn[m] == lora4_m1(xs[m]) for all m -> {tag}")
-    all_ok = all_ok and ok_all_m
+    print(f"{label} M={M:3d}: lora4_mn[m] ==bit== lora4_m1(xs[m]) for all m -> {tag}")
+    return ok_all_m
 
-print("\nRESULT:", "ALL EXACT — R3 correct (batched-M == M==1 per token)" if all_ok else "FAILED")
+
+all_ok = True
+# standard 4-chain shape (even ranks/offsets -> the __half2 vectorized stage2 path),
+# incl. odd M and the M-gate boundary M=4/5
+for M in [1, 2, 3, 4, 5, 7, 8, 16, 32]:
+    all_ok = run_case("std C=4", RANKS, ACTS, M) and all_ok
+
+# layer-0 shape: only 3 chains (no v-lora on layer 0)
+for M in [1, 3, 4, 8]:
+    all_ok = run_case("layer0 C=3", [96, 96, 256], [1, 2, 2], M) and all_ok
+
+# ODD ranks/offsets: forces the scalar (non-__half2) stage2 branch
+for M in [1, 2, 5]:
+    all_ok = run_case("odd-rank C=4", [95, 97, 63, 255], [1, 2, 0, 2], M) and all_ok
+
+print("\nRESULT:", "ALL EXACT — R3 correct (batched-M ==bit== M==1 per token, incl. C=3 / odd M / scalar branch)" if all_ok else "FAILED")
 sys.exit(0 if all_ok else 1)

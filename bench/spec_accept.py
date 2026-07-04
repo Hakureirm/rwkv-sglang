@@ -6,11 +6,13 @@ spec-decode speedup ceiling. Cheap: /generate return_logprob top-1, no rollback 
 
 Two phases (two sglang servers can't cleanly share one GPU, so run sequentially):
   --mode target --dump D.json : target greedy → (prompt_ids, T) per prompt, saved to D.
-  --mode draft  --dump D.json : feed draft (prompt+T), logprob_start_len=len(prompt)-1,
+  --mode draft  --dump D.json : feed draft (prompt+T), logprob_start_len=len(prompt),
       input_top_logprobs[j][0][1] = draft argmax predicting T[j]; α = mean(argmax==T[j]).
 
-Confirmed API: input_top_logprobs[i] = [[logprob, token_id, _], ...] (top-k at position i,
-predicting token i+1); token_id at index 1.
+Confirmed API (sglang logits_processor prunes rows [S..L-1], output processor prepends
+None and pops the sampled position): with logprob_start_len=S, input_top_logprobs[i] is
+the model's top-k FOR full-position S+i given prefix[0..S+i-1]; entry 0 is None, so the
+first target token per prompt is unscored. token_id at index 1.
 
 Usage:
   python bench/spec_accept.py --mode target --port 30070 --dump /tmp/spec.json --gen-len 128

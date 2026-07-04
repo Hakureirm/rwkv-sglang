@@ -192,6 +192,8 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 | 0002 | sglang integration approach for RWKV-7 | accepted | 2026-06-30 |
 | 0003 | M1 scope & slicing into gated increments | accepted | 2026-06-30 |
 | 0004 | No FLA dependency in deliverable (kernel endgame = albatross/own) | accepted | 2026-06-30 |
+| 0005 | Reverse-overtake roadmap (R1 w8a8 large-M … R6 all-arch w8) | accepted (R1-R4 done) | 2026-07-03 |
+| 0006 | Speculative decoding: recurrent chain-verify + O(1) state rollback (NOT EAGLE) | proposed (viability measured, F0029) | 2026-07-04 |
 
 ## Findings ledger
 
@@ -214,6 +216,13 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 | F0015 | CUDA endgame result — fused fp16 GEMV greedy-EXACT, +5-9% bsz1 decode @1.5B/7.2B; cuda-graph amortizes the eager win; mega-kernel to match albatross DECLINED | info | open |
 | F0016 | Serving-scale measured — ~50× concurrency throughput at flat VRAM; context-invariant memory (O(1)-state wedge) | info | open |
 | F0022 | State prefix cache via MambaRadixCache (req#3) — greedy-EXACT shared-prefix at 0.1B+1.5B; ~98% cache hit rate on a high-reuse load (was 0, radix forced off); only RWKV serving stack with a state cache | info | open |
+| F0023 | Albatross-vs-ours kernel audit (GEMV/GEMM/LoRA/glue): Bo's hypothesis tested line-by-line | info | open |
+| F0024 | MATH500 avg@64 = 40.60% (greedy 39.2%) + cuda_graph_max_bs=24 default trap + best-bsz speed | info | open |
+| F0025 | PD-mixed serving + w8a8 large-M (peak 9152 @512, +33%) + GEMV launch autotune | info | open |
+| F0026 | R2 fused paged glue (shift+lerp on-chip), byte-exact, bsz1 +4.6% | info | open |
+| F0027 | Cross-arch occupancy: 64-thread cap is sm_86-specific (66.7%), not all-Ada; heuristic seeded | info | open |
+| F0028 | Full-stack composition greedy-EXACT + LoRA M-gate (≤4); best at every bsz; peak 7326 | info | open |
+| F0029 | Spec-decode viability: α=0.738 → ~2.0×/~2.7× bsz1 estimate; gate PASSES (req#6 step 1) | info | open |
 | F0021 | Uncheatable compression (BlinkDL's decreed metric) — 1.5B full-corpus POOLED fp16 0.6085 / w8 0.6086 (lossless) / w4-GPTQ 0.6514; + position curve. 7.2B GPTQ lambada 0.7297 (−1.28pt). Weights on ModelScope | info | open |
 | F0020 | Fused LoRA kernel — fp16 bsz1 226.5 tok/s (+11.6%), greedy EXACT; lm_head identified as 58.5% of the graphed step | info | open |
 | F0019 | TP+PP full matrix greedy-EXACT on real L4 fleets (tp 2/4/8, pp 2/4/8, mixed tp2×pp2 after the v_first full-width fix); PP-transfer chunk-send pitfall documented (upstream-relevant) | info | open |

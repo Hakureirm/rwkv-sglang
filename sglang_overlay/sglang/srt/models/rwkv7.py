@@ -117,14 +117,15 @@ _INV_SQRT_E = 0.6065306597126334
 # Gate: greedy-EXACT (verify_m1d) before it can be the default. Default OFF.
 _FAST_LINEAR = os.environ.get("RWKV_FAST_LINEAR", "0") == "1"
 
-# M9: fused 4-chain LoRA on the bsz1 fp16 decode path. Per layer the w/a/g[,v]
-# LoRA chains are ~12+ tiny launches (4x down-GEMV + act + up-GEMV[+bias]) whose
-# LAUNCH LATENCY, not bandwidth, dominates; rwkv7_lora.lora4_m1 packs all chains
-# into one op with 2 kernels (fp32 accum, torch's fp16 intermediate roundings
-# reproduced -> matches the torch chain to ~1 fp16 ULP, same class as gemv_m1).
-# Eligible only fp16 + M==1 + quant_config None + tp=1 + plain fp16 LoRA weights;
-# everything else keeps the existing per-chain path untouched. Gate: greedy-EXACT
-# (verify_m1d) before it can be the default. Default OFF.
+# M9 + R3: fused 4-chain LoRA on the small-batch fp16 decode path. Per layer the
+# w/a/g[,v] LoRA chains are ~12+ tiny launches (4x down-GEMV + act + up-GEMV[+bias])
+# whose LAUNCH LATENCY, not bandwidth, dominates; rwkv7_lora.lora4_m1 (M==1) and
+# lora4_mn (batched M, byte-identical per token to lora4_m1) pack all chains into
+# one op with 2 kernels (fp32 accum, torch's fp16 intermediate roundings reproduced).
+# Eligible only fp16 + T <= _FUSED_LORA_MAX_BS + quant_config None + tp=1 + plain
+# fp16 LoRA weights; everything else keeps the per-chain path untouched (above the
+# M-gate cuBLAS wins - measured crossover, F0028). Gate: greedy-EXACT
+# (verify_m1d + verify_batch) before it can be the default. Default OFF.
 _FUSED_LORA = os.environ.get("RWKV_FUSED_LORA", "0") == "1"
 # Fused LoRA wins only at small batch (measured crossover ~M=4→8); above this it
 # loses to cuBLAS-batched ReplicatedLinear, so gate lora4_m1/lora4_mn to T<=this.

@@ -9,18 +9,29 @@
 // whole-layer mega-fusion (F0007 / F0023 §4).
 //
 // TWO ops (attn entry = 6-way lerp; ffn entry = 1-way lerp), decode path only
-// (one token per request, cache_indices[t] = the request's conv slot). The conv
-// state must be fp16 (guarded host-side; non-fp16 configs keep the torch path).
+// (one token per request, cache_indices[t] = the request's conv slot). normed
+// is fp16 and the conv state is fp32 (both guarded host-side; other configs
+// keep the torch path).
 //
 // GREEDY-EXACTNESS: replicates fused_lerp6's exact fp16 rounding
 // (fused.py:_lerp6_kernel): d = round_fp16(shifted - x); per output
 // prod = round_fp16(mix*d); o = round_fp16(x + prod). token_shift semantics
-// (rwkv7_backend.py:134-136): prev read as x.dtype (fp16), conv written = x
-// (fp16); both no-op casts when conv is fp16. So this is byte-identical to
-// token_shift + fused_lerp6 (see bench/test_glue.py).
+// (rwkv7_backend.py:134-136): prev is read as round_fp16(conv_fp32) (exactly
+// prev.to(x.dtype)) BEFORE the scatter, and conv <- float(normed_fp16) (exact
+// upcast). So this is byte-identical to token_shift + fused_lerp6
+// (see bench/test_glue.py).
 //
-// cuda-graph safe: static shapes, current stream, no host sync; conv scatter is
-// in-place at the per-request slot (distinct cache_indices -> no cross-token race).
+// PAD SLOTS: under padded cuda-graph decode replay sglang fills the tail of
+// mamba_cache_indices with PAD_SLOT_ID = -1 (see upstream mamba backends /
+// causal_conv1d). Pad rows must not touch the conv pool (ci = -1 would index
+// one H-row BEFORE the pool for layer 0, or the previous layer's row `size` -
+// an allocatable live slot - for later layers). We guard ci against [0, S)
+// and write zeros to the (discarded) pad output rows, mirroring
+// wkv_recurrent's s_mask. Valid indices are distinct per running request, so
+// the conv scatter has no cross-token race; pad rows write nothing.
+//
+// cuda-graph safe: static shapes, current stream, no host sync, no allocation
+// beyond the output.
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -38,17 +49,25 @@ using dtype = at::Half;
 // attn entry: out[6,T,H] = lerp6(normed, prev);  conv[ci] <- normed.
 template <int Threads>
 __global__ __launch_bounds__(Threads, 2) void shift_lerp6_kernel(
-    int T, int H,
+    int T, int H, int S,
     const dtype* __restrict__ normed,         // [T, H] fp16
     const dtype* __restrict__ mix6,           // [6, H] fp16 (xr,xk,xw,xa,xg,xv)
     const int* __restrict__ cache_indices,    // [T]
-    float* __restrict__ conv,                 // [S+1, H, 1] fp32, row stride H
+    float* __restrict__ conv,                 // [S, H, 1] fp32, row stride H
     dtype* __restrict__ out) {                // [6, T, H] fp16
   const int t = blockIdx.x;
   const int ci = cache_indices[t];
+  const int64_t obase = static_cast<int64_t>(t) * H;
+  if (ci < 0 || ci >= S) {  // PAD_SLOT_ID (-1) padded replay: no conv access, zero the discarded row
+    for (int k = threadIdx.x; k < H; k += Threads) {
+#pragma unroll
+      for (int j = 0; j < 6; ++j)
+        out[static_cast<int64_t>(j) * T * H + obase + k] = __float2half_rn(0.f);
+    }
+    return;
+  }
   const dtype* xr = normed + static_cast<int64_t>(t) * H;
   float* cr = conv + static_cast<int64_t>(ci) * H;
-  const int64_t obase = static_cast<int64_t>(t) * H;
   for (int k = threadIdx.x; k < H; k += Threads) {
     const float x = static_cast<float>(xr[k]);
     const float sh = __half2float(__float2half_rn(cr[k]));  // prev.to(fp16) BEFORE scatter
@@ -66,17 +85,21 @@ __global__ __launch_bounds__(Threads, 2) void shift_lerp6_kernel(
 // ffn entry: xk[T,H] = lerp1(normed, prev, x_k);  conv[ci] <- normed.
 template <int Threads>
 __global__ __launch_bounds__(Threads, 2) void shift_lerp1_kernel(
-    int T, int H,
+    int T, int H, int S,
     const dtype* __restrict__ normed,         // [T, H] fp16
     const dtype* __restrict__ x_k,            // [H] fp16
     const int* __restrict__ cache_indices,    // [T]
-    float* __restrict__ conv,                 // [S+1, H, 1] fp32
+    float* __restrict__ conv,                 // [S, H, 1] fp32
     dtype* __restrict__ out) {                // [T, H] fp16
   const int t = blockIdx.x;
   const int ci = cache_indices[t];
+  dtype* orow = out + static_cast<int64_t>(t) * H;
+  if (ci < 0 || ci >= S) {  // PAD_SLOT_ID (-1) padded replay: no conv access, zero the discarded row
+    for (int k = threadIdx.x; k < H; k += Threads) orow[k] = __float2half_rn(0.f);
+    return;
+  }
   const dtype* xr = normed + static_cast<int64_t>(t) * H;
   float* cr = conv + static_cast<int64_t>(ci) * H;
-  dtype* orow = out + static_cast<int64_t>(t) * H;
   for (int k = threadIdx.x; k < H; k += Threads) {
     const float x = static_cast<float>(xr[k]);
     const float sh = __half2float(__float2half_rn(cr[k]));
@@ -106,7 +129,8 @@ at::Tensor shift_lerp6(at::Tensor normed, at::Tensor mix6,
   auto stream = at::cuda::getCurrentCUDAStream();
   constexpr int kThreads = 256;
   shift_lerp6_kernel<kThreads><<<static_cast<int>(T), kThreads, 0, stream>>>(
-      static_cast<int>(T), static_cast<int>(H), normed.data_ptr<dtype>(),
+      static_cast<int>(T), static_cast<int>(H), static_cast<int>(conv.size(0)),
+      normed.data_ptr<dtype>(),
       mix6.data_ptr<dtype>(), cache_indices.data_ptr<int>(),
       conv.data_ptr<float>(), out.data_ptr<dtype>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -130,7 +154,8 @@ at::Tensor shift_lerp1(at::Tensor normed, at::Tensor x_k,
   auto stream = at::cuda::getCurrentCUDAStream();
   constexpr int kThreads = 256;
   shift_lerp1_kernel<kThreads><<<static_cast<int>(T), kThreads, 0, stream>>>(
-      static_cast<int>(T), static_cast<int>(H), normed.data_ptr<dtype>(),
+      static_cast<int>(T), static_cast<int>(H), static_cast<int>(conv.size(0)),
+      normed.data_ptr<dtype>(),
       x_k.data_ptr<dtype>(), cache_indices.data_ptr<int>(),
       conv.data_ptr<float>(), out.data_ptr<dtype>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -138,8 +163,10 @@ at::Tensor shift_lerp1(at::Tensor normed, at::Tensor x_k,
 }
 
 TORCH_LIBRARY(rwkv7_glue, m) {
-  m.def("shift_lerp6(Tensor normed, Tensor mix6, Tensor cache_indices, Tensor conv) -> Tensor");
-  m.def("shift_lerp1(Tensor normed, Tensor x_k, Tensor cache_indices, Tensor conv) -> Tensor");
+  // conv is mutated in-place (the token-shift scatter) - declare it (a!) so
+  // functionalization/compile passes (e.g. piecewise cuda graph) see the write.
+  m.def("shift_lerp6(Tensor normed, Tensor mix6, Tensor cache_indices, Tensor(a!) conv) -> Tensor");
+  m.def("shift_lerp1(Tensor normed, Tensor x_k, Tensor cache_indices, Tensor(a!) conv) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(rwkv7_glue, CUDA, m) {
   m.impl("shift_lerp6", &shift_lerp6);

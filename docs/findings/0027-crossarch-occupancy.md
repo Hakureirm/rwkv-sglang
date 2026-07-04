@@ -14,9 +14,9 @@ related: [F0023, F0025]
 ## Method
 `bench/cuda_probe/occupancy_probe.cu` (verbatim copies of our `gemv_m1` candidate configs +
 albatross's `row2_exact`/`rows_cfg` kernels) compiled per-arch and run via
-the cross-arch harness on cloud GPUs of each card, using
+the cross-arch harness on each card, using
 `cudaOccupancyMaxActiveBlocksPerMultiprocessor` (runtime API, **no profiler / no perf-counter
-perms** — robust on cloud). 5 real cards, **total run cost $0.008**. Raw:
+perms**). 5 real cards. Raw:
 `bench/results/occupancy_crossarch.json`.
 
 Device limits measured: T4 sm_75 (maxWarps/SM=32, maxBlocks/SM=16), A10G sm_86 (48, 16),
@@ -56,7 +56,7 @@ data albatross's hand-frozen table lacks — it would need a manual per-GPU re-t
 - Occupancy is necessary-not-sufficient for throughput; the warmup autotune (`fast_linear.py`
   `_autotune_config`) still measures wall-clock per shape. This finding bounds the *search* (which
   configs can even reach full occupancy) + proves the cross-arch mis-fit is real and measured.
-- Cloud-run output caveat: the live progress UI mangled interleaved per-GPU prints on the first two runs;
+- Output-capture caveat: interleaved per-GPU prints mangled the live console on the first two runs;
   fixed by collecting all results and writing `occupancy_crossarch.json` + a single end-of-run block.
 
 ## Cross-references

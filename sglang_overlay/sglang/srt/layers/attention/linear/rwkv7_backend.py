@@ -136,8 +136,14 @@ class Rwkv7AttnBackend(MambaAttnBackendBase):
 
         if forward_batch.forward_mode.is_decode_or_idle():
             # one token per request: shifted = stored prev; store current.
-            prev = conv[cache_indices, :, 0].clone()  # [n, hidden]
-            conv[cache_indices, :, 0] = x.to(conv.dtype)
+            # Padded cuda-graph replay fills the tail of mamba_cache_indices with
+            # PAD_SLOT_ID = -1; torch advanced indexing would WRAP -1 to row `size`
+            # (an allocatable live slot) and corrupt a real request's shift state.
+            # Route pads to row 0, the MambaPool's reserved never-allocated slot
+            # (free_slots = arange(1, size+1)); pad outputs are discarded anyway.
+            safe_idx = torch.clamp_min(cache_indices, 0)
+            prev = conv[safe_idx, :, 0].clone()  # [n, hidden]
+            conv[safe_idx, :, 0] = x.to(conv.dtype)
             return prev.to(x.dtype)
 
         # extend (packed B=1, varlen via query_start_loc)

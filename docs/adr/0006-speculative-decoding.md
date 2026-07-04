@@ -4,7 +4,7 @@ adr_id: 0006
 title: "RWKV-7 speculative decoding (req#6): recurrent-verify + O(1)-state rollback — a bespoke draft/target loop, NOT EAGLE"
 status: proposed
 date: 2026-07-04
-last_verified_commit: "HEAD"
+last_verified_commit: "924d0f8"
 supersedes: []
 superseded_by: []
 ---
@@ -39,9 +39,11 @@ Both are **O(1) per token** (do not grow with context) and small (1.5B: ~12.6 MB
 1. **Draft**: a smaller RWKV-7 (0.1B) — same tokenizer/vocab/family (high token agreement with the
    target ⇒ high acceptance) — greedily proposes K tokens (K≈4–8), advancing its own O(1) state.
 2. **Verify (target)**: run the target recurrence over the K draft tokens via the **extend path**
-   (`recurrence(...)` varlen branch already snapshots `init_state = temporal[cache_indices]` and only
-   writes `final_state` at the end — so verify runs on a *copy*, not in-place, and does not corrupt
-   the committed state). One target forward yields K logits.
+   (`recurrence(...)` varlen branch snapshots `init_state = temporal[cache_indices]` and computes on
+   that copy — but NOTE it writes `final_state` back to the pool at the end, so the verify call must
+   either pass a no-commit flag or snapshot-and-restore `temporal` + `conv` around it; that restore
+   is exactly the O(1) rollback below, so it is not extra machinery). One target forward yields K
+   logits.
 3. **Accept**: longest matching prefix — accept draft token j while `draft[j] == argmax(target_logits[j])`
    (greedy target; the standard spec-decode acceptance for temperature 0). Let J = #accepted (0..K);
    the target's own token at position J (its argmax) is always appended, so each round commits J+1
@@ -54,12 +56,13 @@ Both are **O(1) per token** (do not grow with context) and small (1.5B: ~12.6 MB
        first J+1 tokens to produce the committed state. Two forwards (verify K + commit J+1), no
        kernel change. Start here (simpler), move to (a) if the re-run cost matters.
 
-## Where it wins — VIABILITY MEASURED (F0029): α = 0.738 → ~2.3–2.8× bsz1
+## Where it wins — VIABILITY MEASURED (F0029): α = 0.738 → ~2.0–2.7× bsz1 (estimate)
 Payoff scales with **target size × acceptance rate**. Measured (F0029, `bench/spec_accept.py`): the
-0.1B draft's greedy argmax matches the target token **α = 0.738** of positions (n=603, 1.5B target,
-shared RWKV7-G1 family). At block K=4 that is ~2.98 target-tokens/forward → net bsz1 speedup **≈2.35×
-vs 1.5B target, ≈2.82× vs 7.2B target** (draft ≈1/70 the 7.2B FLOPs). The gate PASSES decisively —
-best on the **7.2B target**. Metric for the build: measured accepted-tokens/forward × target tok/s.
+0.191B draft's greedy argmax matches the target token **α = 0.738** of positions (n=603, 1.5B target,
+shared RWKV7-G1 family). At block K=4 that is ~2.98 target-tokens/forward → net bsz1 speedup estimate
+**≈1.99× vs 1.5B target, ≈2.69× vs 7.2B target** (true param ratios 1/8.0 and 1/37.7; the 7.2B row
+assumes the 1.5B-measured α — unmeasured there). The gate PASSES — best on the **7.2B target**.
+Metric for the build: measured accepted-tokens/forward × target tok/s.
 
 ## Integration + risk
 The sglang spec scheduler is EAGLE/tree-shaped; RWKV's chain-verify + state-rollback does not fit it,

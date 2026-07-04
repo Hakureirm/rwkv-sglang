@@ -91,7 +91,8 @@ at::Tensor gemv_m1(at::Tensor x, at::Tensor weight) {
   TORCH_CHECK(weight.size(1) == K, "gemv_m1 weight [N,K] mismatch");
   TORCH_CHECK((K % 4) == 0, "gemv_m1 requires K%4==0");
   auto y = at::empty({1, N}, x.options());
-  if (K == 0 || N == 0) return y;
+  if (N == 0) return y;
+  if (K == 0) return y.zero_();  // empty reduction = 0, not uninitialized memory
   auto stream = at::cuda::getCurrentCUDAStream();
   if ((N % 2) == 0) {
     gemv_m1_kernel<128, 2><<<N / 2, 128, 0, stream>>>(
@@ -126,18 +127,21 @@ at::Tensor gemv_m1_cfg(at::Tensor x, at::Tensor weight, int64_t threads,
   TORCH_CHECK((K % 4) == 0, "gemv_m1_cfg requires K%4==0");
   TORCH_CHECK((N % out_tile) == 0, "gemv_m1_cfg requires N % out_tile == 0");
   auto y = at::empty({1, N}, x.options());
-  if (K == 0 || N == 0) return y;
+  if (N == 0) return y;
+  if (K == 0) return y.zero_();  // empty reduction = 0, not uninitialized memory
   auto stream = at::cuda::getCurrentCUDAStream();
-  switch (threads * 10 + out_tile) {
-    case 64 * 10 + 1:  RWKV7_GEMV_LAUNCH(64, 1);  break;
-    case 64 * 10 + 2:  RWKV7_GEMV_LAUNCH(64, 2);  break;
-    case 64 * 10 + 4:  RWKV7_GEMV_LAUNCH(64, 4);  break;
-    case 128 * 10 + 1: RWKV7_GEMV_LAUNCH(128, 1); break;
-    case 128 * 10 + 2: RWKV7_GEMV_LAUNCH(128, 2); break;
-    case 128 * 10 + 4: RWKV7_GEMV_LAUNCH(128, 4); break;
-    case 256 * 10 + 1: RWKV7_GEMV_LAUNCH(256, 1); break;
-    case 256 * 10 + 2: RWKV7_GEMV_LAUNCH(256, 2); break;
-    case 256 * 10 + 4: RWKV7_GEMV_LAUNCH(256, 4); break;
+  // key = threads*100 + out_tile: out_tile < 100, so no (threads,out_tile)
+  // aliasing (threads*10+out_tile collided, e.g. (63,11) -> (64,1)).
+  switch (threads * 100 + out_tile) {
+    case 64 * 100 + 1:  RWKV7_GEMV_LAUNCH(64, 1);  break;
+    case 64 * 100 + 2:  RWKV7_GEMV_LAUNCH(64, 2);  break;
+    case 64 * 100 + 4:  RWKV7_GEMV_LAUNCH(64, 4);  break;
+    case 128 * 100 + 1: RWKV7_GEMV_LAUNCH(128, 1); break;
+    case 128 * 100 + 2: RWKV7_GEMV_LAUNCH(128, 2); break;
+    case 128 * 100 + 4: RWKV7_GEMV_LAUNCH(128, 4); break;
+    case 256 * 100 + 1: RWKV7_GEMV_LAUNCH(256, 1); break;
+    case 256 * 100 + 2: RWKV7_GEMV_LAUNCH(256, 2); break;
+    case 256 * 100 + 4: RWKV7_GEMV_LAUNCH(256, 4); break;
     default: TORCH_CHECK(false, "gemv_m1_cfg unsupported (threads,out_tile)=(",
                          threads, ",", out_tile, "); use {64,128,256}x{1,2,4}");
   }

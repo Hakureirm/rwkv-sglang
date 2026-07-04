@@ -72,6 +72,8 @@ def fused_lerp6(x, shifted, mix6):
     Rwkv7Attention._mix6_buf and the forward unpack).
     """
     T, H = x.shape
+    # flat pointer math below assumes contiguous rows (no-op when already so)
+    x, shifted, mix6 = x.contiguous(), shifted.contiguous(), mix6.contiguous()
     out = torch.empty(6, T, H, dtype=x.dtype, device=x.device)
     BLOCK = 1024
     grid = (T, triton.cdiv(H, BLOCK))
@@ -132,6 +134,8 @@ def fused_kk_kmix(k, a, kk_param, ka_param, num_heads):
     kk_norm is the L2-normalized (k·k_k); k_new is the a-gated k. Bit-identical to
     the deployed torch sequence.
     """
+    k, a = k.contiguous(), a.contiguous()
+    kk_param, ka_param = kk_param.contiguous(), ka_param.contiguous()
     T, H = k.shape
     HD = H // num_heads
     BK = triton.next_power_of_2(HD)
@@ -190,11 +194,16 @@ def fused_gate_corr(o_norm, r, k, r_k, v, g, num_heads):
     T, H = o_norm.shape
     HD = H // num_heads
     BK = triton.next_power_of_2(HD)
+    # flat pointer math assumes contiguous rows; .reshape() may return a strided
+    # view, and a strided o_norm/g would be silently mis-read (the F0028 g bug) —
+    # normalize here once (no-op when already contiguous).
+    o_norm, g = o_norm.contiguous(), g.contiguous()
     out = torch.empty(T, H, dtype=o_norm.dtype, device=o_norm.device)
     grid = (T, num_heads)
     _gate_corr_kernel[grid](
-        o_norm, r.reshape(T, H), k.reshape(T, H), r_k.reshape(-1),
-        v.reshape(T, H), g, out, T, H, num_heads, BK=BK, enable_fp_fusion=False,
+        o_norm, r.reshape(T, H).contiguous(), k.reshape(T, H).contiguous(),
+        r_k.reshape(-1).contiguous(),
+        v.reshape(T, H).contiguous(), g, out, T, H, num_heads, BK=BK, enable_fp_fusion=False,
     )
     return out
 

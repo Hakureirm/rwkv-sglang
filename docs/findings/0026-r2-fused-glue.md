@@ -2,7 +2,7 @@
 doc_kind: finding
 finding_id: F0026
 title: "R2 fused paged layer-boundary glue (shift_lerp6): fuses the paged token-shift (gather+scatter, dropping the .clone()) + 6-way lerp into one on-chip kernel — the albatross mega-fusion technique adapted to sglang's paged conv state. Byte-exact + greedy E2E PASS; +4.6% bsz1 decode (209.3→219.0, clean same-config A/B) on top of the full fast stack"
-last_verified_commit: "HEAD"
+last_verified_commit: "c4e58e0"
 discovered_by: lead (M13), 2026-07-04
 severity: info
 status: open
