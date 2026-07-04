@@ -102,6 +102,43 @@ w8a8-alone (same accuracy), while the glue's HBM-round-trip saving stacks on top
 174.5→195.1 (+12%). So the two techniques albatross structurally lacks — int8 tensor-core GEMM AND
 whole-layer paged mega-fusion — **compose**, and the composed ceiling is +41% over plain fp16.
 
+## Addendum (2026-07-05) — autotune on/off A/B quantified on the 3090 (task: per-card deltas)
+
+The question "how much does autotune buy per card" now has a clean measured answer for the
+tuning-baseline card. Method: identical full-stack serving (1.5B fp16, F0028 flags, cuda-graph
+max-bs 512, `bench/bsz_throughput.py` in64/out256), the ONLY variable `RWKV_GEMV_AUTOTUNE`
+(0 = closed-form heuristic; 1 = default OutTile-only scope, logits-invariant), disk cache cleared
+before the tuned side. THREE runs committed — off (cold), on, off again (hot) — because the first
+pass showed a consistent −2..−3.5% on the tuned side at mid/high concurrency, which is
+architecturally impossible for this kernel (M-gate routes c>1 decode GEMMs to cuBLAS; the tuned
+kernel only serves M==1). The hot re-run of OFF landed ABOVE the cold OFF (+3.5% @ c128),
+bracketing the tuned run from both sides:
+
+| c | off (cold) | on | off (hot) | verdict |
+|---|---|---|---|---|
+| 1 | 231.3 | 230.4 | — | par (−0.4%, in band) |
+| 4 | 568.8 | 557.6 | 571.4 | in noise |
+| 32 | 3386.5 | 3267.4 | 3443.4 | in noise |
+| 128 | 6698.0 | 6473.8 | 6934.9 | in noise (spread ±3.5%) |
+| 384 (peak) | 7425.8 | 7255.0 | 7788.5 | in noise |
+
+Raw: `bench/results/autotune_ab_3090_{off,on,off_hot}.json`. The harness's same-config run-to-run
+spread this session (±3.5% between the two OFF runs) exceeds every on/off delta, so the honest
+reading is **0% ± noise at every operating point on the 3090**.
+
+Kernel-level (default class-locked scope, `bench/autotune_gemv.py`): att_rkvo's apparent 1.10x is a
+measurement artifact — the "best" config IS the fixed reference (128,2), timed twice across a
+clock-state change; ffn_key 1.00x; ffn_value's 1.04x comes from a threads-crossing config (256,1)
+which sits OUTSIDE the default logits-invariant scope (citable only under the
+`RWKV_GEMV_AUTOTUNE_FULL=1` + greedy-re-gate contract).
+
+**Conclusion:** on the card our closed-form heuristic was derived on, autotune's measured value is
+confirmation, not speed — the heuristic is already optimal (and autotune has no room to inflate).
+The quantitative per-card story therefore rests where the cross-arch selection evidence already
+pointed (5 clouds picked different winners): the pending sm120 (RTX 5090, albatross's home-turf
+constants) and Modal L4/A10G/H100 on/off legs. Until those numbers exist, materials must cite the
+3090 result as "par by design on the baseline card" — never extrapolate a per-card gain.
+
 ## Cross-references
 [[F0023]] (§5 launch-tuning axis, the overtake design) · [[F0024]] (best-bsz peak + cuda_graph_max_bs)
 · [[F0016]] (serving-scale wedge) · ADR-0005 (roadmap) · `bench/pd_mixed.py` · `bench/autotune_gemv.py`

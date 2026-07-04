@@ -1,0 +1,102 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 8.89,
+      "out_tokens": 2048,
+      "out_tok_per_s": 230.4,
+      "req_per_s": 0.9,
+      "lat_p50_s": 1.112,
+      "lat_p99_s": 1.112,
+      "per_stream_tok_s": 230.4
+    },
+    {
+      "concurrency": 2,
+      "requests": 8,
+      "wall_s": 6.62,
+      "out_tokens": 2048,
+      "out_tok_per_s": 309.3,
+      "req_per_s": 1.208,
+      "lat_p50_s": 1.653,
+      "lat_p99_s": 1.659,
+      "per_stream_tok_s": 154.6
+    },
+    {
+      "concurrency": 4,
+      "requests": 16,
+      "wall_s": 7.35,
+      "out_tokens": 4096,
+      "out_tok_per_s": 557.6,
+      "req_per_s": 2.178,
+      "lat_p50_s": 1.832,
+      "lat_p99_s": 1.844,
+      "per_stream_tok_s": 139.4
+    },
+    {
+      "concurrency": 8,
+      "requests": 32,
+      "wall_s": 8.29,
+      "out_tokens": 8192,
+      "out_tok_per_s": 988.1,
+      "req_per_s": 3.86,
+      "lat_p50_s": 2.063,
+      "lat_p99_s": 2.08,
+      "per_stream_tok_s": 123.5
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 10.03,
+      "out_tokens": 32768,
+      "out_tok_per_s": 3267.4,
+      "req_per_s": 12.763,
+      "lat_p50_s": 2.45,
+      "lat_p99_s": 2.528,
+      "per_stream_tok_s": 102.1
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 20.25,
+      "out_tokens": 131072,
+      "out_tok_per_s": 6473.8,
+      "req_per_s": 25.288,
+      "lat_p50_s": 4.846,
+      "lat_p99_s": 5.167,
+      "per_stream_tok_s": 50.6
+    },
+    {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 54.2,
+      "out_tokens": 393216,
+      "out_tok_per_s": 7255.0,
+      "req_per_s": 28.34,
+      "lat_p50_s": 12.79,
+      "lat_p99_s": 13.579,
+      "per_stream_tok_s": 18.9
+    }
+  ],
+  "peak": {
+    "concurrency": 384,
+    "requests": 1536,
+    "wall_s": 54.2,
+    "out_tokens": 393216,
+    "out_tok_per_s": 7255.0,
+    "req_per_s": 28.34,
+    "lat_p50_s": 12.79,
+    "lat_p99_s": 13.579,
+    "per_stream_tok_s": 18.9
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 31050,
+    "concurrencies": "1,2,4,8,32,128,384",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "bench/results/autotune_ab_3090_on.json"
+  }
+}
