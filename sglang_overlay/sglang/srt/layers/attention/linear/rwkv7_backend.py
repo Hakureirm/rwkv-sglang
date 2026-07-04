@@ -19,9 +19,14 @@ is still driven through HybridLinearAttnBackend, so `self.forward_metadata`
 (query_start_loc + mamba_cache_indices) is populated normally.
 """
 
+import os
 from typing import Optional
 
 import torch
+
+# R2 (ADR-0005): fuse the paged token-shift + lerp into one kernel (shift_lerp*),
+# keeping the shifted intermediate on-chip. Default off until serving-validated.
+_FUSED_GLUE = os.environ.get("RWKV_FUSED_GLUE", "0") == "1"
 
 from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
 # M3b (ADR-0004): the WKV recurrence is now OUR own FLA-free triton kernel for
@@ -148,6 +153,44 @@ class Rwkv7AttnBackend(MambaAttnBackendBase):
         # store last token of each sequence for the next chunk / decode.
         conv[cache_indices, :, 0] = x[ends - 1].to(conv.dtype)
         return shifted
+
+    def _fused_glue_conv(self, layer_id, conv_idx, normed, forward_batch):
+        """Shared eligibility check for the fused shift+lerp glue (R2). Returns
+        (conv, cache_indices) when eligible (RWKV_FUSED_GLUE, decode, fp16 normed,
+        fp32 contiguous conv, int32 contiguous cache_indices, glue built), else
+        None so the caller falls back to token_shift + fused_lerp*."""
+        if not (_FUSED_GLUE and forward_batch.forward_mode.is_decode_or_idle()
+                and normed.dtype == torch.float16):
+            return None
+        conv = self.req_to_token_pool.mamba2_layer_cache(layer_id).conv[conv_idx]
+        if conv.dtype != torch.float32 or not conv.is_contiguous():
+            return None
+        ci = self.forward_metadata.mamba_cache_indices
+        if ci.dtype != torch.int32 or not ci.is_contiguous():
+            return None
+        from sglang.srt.layers.attention.rwkv7_kernels import glue
+        if not glue.available():
+            return None
+        return conv, ci
+
+    def try_fused_shift_lerp6(self, normed, layer_id, conv_idx, mix6, forward_batch):
+        """Fused paged token-shift + 6-way lerp -> lp6[6,T,H], or None (fallback).
+        Byte-exact vs token_shift + fused_lerp6 (bench/test_glue.py)."""
+        e = self._fused_glue_conv(layer_id, conv_idx, normed, forward_batch)
+        if e is None or mix6.dtype != torch.float16:
+            return None
+        conv, ci = e
+        from sglang.srt.layers.attention.rwkv7_kernels import glue
+        return glue.shift_lerp6(normed.contiguous(), mix6, ci, conv)
+
+    def try_fused_shift_lerp1(self, normed, layer_id, conv_idx, x_k, forward_batch):
+        """Fused paged token-shift + 1-way lerp -> xk[T,H], or None (fallback)."""
+        e = self._fused_glue_conv(layer_id, conv_idx, normed, forward_batch)
+        if e is None or x_k.dtype != torch.float16:
+            return None
+        conv, ci = e
+        from sglang.srt.layers.attention.rwkv7_kernels import glue
+        return glue.shift_lerp1(normed.contiguous(), x_k.reshape(-1).contiguous(), ci, conv)
 
     # ---- WKV recurrence (decode + extend both -> OUR wkv_recurrent kernel) ----
     def recurrence(

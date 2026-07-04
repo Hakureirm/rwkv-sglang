@@ -1,0 +1,106 @@
+---
+doc_kind: finding
+finding_id: F0025
+title: "Serving eval: PD-mixed (open-loop Poisson) tail latencies + arch-aware GEMV launch autotune (A-segment): gemv_m1_cfg parametrized {64,128,256}×{1,2,4} with (sm_arch,N,K) selection, token-exact vs the fixed kernel; 3090 gains small (1.01–1.05×, BW-bound as F0023 predicted) — the win is cross-arch portability (no per-GPU hand-tune)"
+last_verified_commit: "HEAD"
+discovered_by: lead (M13), 2026-07-03
+severity: info
+status: open
+related: [F0023, F0024, F0016]
+---
+
+# Finding F0025: PD-mixed serving tail latencies + arch-aware GEMV autotune (A-seg)
+
+## Part A — PD-mixed serving benchmark (prefill+decode mixed, open-loop)
+"PD-mixed" = requests arrive open-loop (Poisson at rate λ), so a new request's **prefill**
+interleaves with in-flight requests' **decode** in the same scheduler step — the realistic online
+regime that a closed-loop static batch hides. `bench/pd_mixed.py` (streaming `/generate`, TTFT =
+time-to-first-token, TPOT = (total−TTFT)/(tokens−1); direct client because the box is
+modelscope-only and sglang `bench_serving --dataset-name random` needs an HF corpus download).
+1.5B fp16, 512-in/256-out, 300 prompts, `--cuda-graph-max-bs 512`:
+
+| arrival rate | out tok/s | TTFT p50 / p99 | TPOT p50 / p99 |
+|---|---|---|---|
+| 2 req/s | 520 | 123 / 293 ms | 9.2 / 11.6 ms |
+| 4 req/s | 1023 | 178 / 340 ms | 13.7 / 19.7 ms |
+| 8 req/s | 1976 | 228 / 322 ms | 36.8 / 47.4 ms |
+| 16 req/s | 2610 | 302 / 1449 ms | 70.8 / 107.5 ms |
+| ∞ (burst) | 3195 | 6592 / 12539 ms | 66.2 / 91.1 ms |
+
+Clean latency-vs-load tradeoff: at ≤8 req/s TTFT p99 stays <350 ms and TPOT p99 ~12–47 ms; the
+tail grows with load; ∞ (all 300 arrive at once) blows the TTFT tail to 6.6 s (300 queued prefills,
+expected). Complements the best-bsz peak (F0024 §speed): F0024 reports peak throughput, this reports
+tail latency under realistic arrival. `bench/results/pd_mixed.json`.
+
+## Part B — arch-aware GEMV launch autotune (F0023 §5 roadmap #6, A-segment)
+F0023 §5 showed albatross's linear dispatch is a hand-frozen per-GPU (5090) table, and **our own
+`gemv_m1` had the same weakness, coarser** (fixed `<128,2>`/`<128,1>` by N-parity only, no arch
+awareness). Fix (this finding):
+- **`gemv_m1_cfg(x, w, threads, out_tile)`** (`rwkv7_fast.cu`): the same kernel, parametrized over
+  Threads∈{64,128,256}×OutTile∈{1,2,4} via a 9-way switch. Occupancy of these is compile-time
+  (regs/smem), so the key is purely `(sm_arch, N, K)`.
+- **`_select_config(N,K)`** (`fast_linear.py`): `torch.cuda.get_device_capability` → arch key;
+  in-process + on-disk cache (`~/.cache/rwkv7_fast/gemv_autotune_<gpu>.json`); a one-time **warmup
+  autotune** (CUDA-event micro-bench of valid configs) or a closed-form heuristic. **cuda-graph
+  safe**: never benchmarks while `torch.cuda.is_current_stream_capturing()` (falls back to
+  heuristic), so timing happens in eager warmup and is frozen before capture.
+
+**Correctness gate (3090):** `gemv_m1_cfg(...,128,2)` is **token-exact vs the fixed `gemv_m1`**
+(`torch.equal`) on all RWKV-7 1.5B M==1 shapes, rel-err vs fp32 ~3e-4 (same as before). No accuracy
+change — it is the same kernel, only the launch config varies.
+
+**3090 sweep (best config per shape, `bench/autotune_gemv.py`):**
+
+| shape | N×K | fixed `<128,2>` | best cfg | speedup |
+|---|---|---|---|---|
+| att r/k/v/o | 2048×2048 | 16.86 µs | (256,2) | 1.04× |
+| ffn key | 8192×2048 | 40.79 µs | (128,1) | 1.01× |
+| ffn value | 2048×8192 | 42.34 µs | (256,1) | 1.05× |
+
+**3090 gains are small (1.01–1.05×) — and that is the predicted result, not a disappointment.**
+F0023 §5 established bsz1 GEMV is HBM-bandwidth-bound (~roofline), so the launch config can't move it
+much *on the arch it happens to fit*. The autotune's real value is **cross-arch portability**: the
+same fixed `<128,2>` that is ~optimal on the 3090 mis-fits other archs (F0023 §5: 64-thread configs
+hit a 67% occupancy ceiling on sm_86/89, different sweet spots on sm_90/120), and albatross forces a
+manual per-GPU re-tune there while we auto-select. **B-segment** (task #14, cloud multi-GPU L4/A10G/H100/
+RTX-PRO-6000) will seed + validate the other-arch rows and quantify the portability win.
+
+## Part C — w8a8 large-M throughput (ADR-0005 R1): the high-concurrency int8 overtake
+F0023 §3 headline: int8 tensor-core GEMM is the path albatross structurally cannot follow (fp16
+only). sglang-native w8a8 already delivers it at small M (quant.md: +15–53% decode ≤bsz32), but the
+**large-M** regime — exactly the high-concurrency strategic axis — was never measured (tables stop
+at 32, and were taken under the low `cuda_graph_max_bs` cap, F0024). Measured now on the clean
+single-GPU with `--cuda-graph-max-bs 512` (`rwkv7-1.5b-w8a8` pre-quantized model,
+`bench/results/bsz_sweep_w8a8.json`), vs the fp16 clean sweep (F0024):
+
+| concurrency | fp16 tok/s | **w8a8 tok/s** | int8 vs fp16 |
+|---|---|---|---|
+| 1 | 154.4 | 174.5 | +13% |
+| 8 | 968.0 | 1192.4 | +23% |
+| 32 | 3128.4 | 3895.5 | +25% |
+| 64 | 5036.2 | 5697.0 | +13% |
+| 128 | 6086.4 | 7005.7 | +15% |
+| 256 | 6742.7 | 8752.9 | **+30%** |
+| 384 | 6884.8 | 8755.2 | +27% |
+| **512** | 6637.1 | **9152.5** | **+38%** |
+
+**w8a8 peak ≈ 9152 tok/s @ 512 vs fp16 peak 6885 @ 384 = +33% peak throughput**, and +30–38% in the
+high-concurrency band (256–512). This is the concurrency overtake albatross cannot match on two
+counts at once: no scheduler/dynamic-batching AND no int8 path. Accuracy caveat (honest, per
+quant.md): 1.5B w8a8 free-running greedy diverges at token 12/24 (small-model int8 drift, a known
+near-tie cascade), while **7.2B w8a8 is greedy 8/8 EXACT** (int8 noise absorbed at scale) — so the
+w8a8 throughput win is unqualified at 7.2B and comes with a small-model accuracy note at 1.5B. VRAM
+−41–48%. This closes ADR-0005 R1.
+
+**Cross-precision composition — w8a8 + R2 fused glue (the highest throughput ceiling):** the R2 paged
+glue is byte-exact and operates on the fp16 normed hidden (identical in w8a8), so w8a8+glue output ≡
+w8a8-alone (same accuracy), while the glue's HBM-round-trip saving stacks on top of int8-TC. Measured
+(`bench/results/bsz_sweep_w8a8_glue.json`, all fast paths + glue on the w8a8 model): peak **9686 tok/s
+@ bsz512** (vs plain w8a8 9152 = +6%; vs plain fp16 6885 = **+41%**), c256 8753→9646 (+10%), bsz1
+174.5→195.1 (+12%). So the two techniques albatross structurally lacks — int8 tensor-core GEMM AND
+whole-layer paged mega-fusion — **compose**, and the composed ceiling is +41% over plain fp16.
+
+## Cross-references
+[[F0023]] (§5 launch-tuning axis, the overtake design) · [[F0024]] (best-bsz peak + cuda_graph_max_bs)
+· [[F0016]] (serving-scale wedge) · ADR-0005 (roadmap) · `bench/pd_mixed.py` · `bench/autotune_gemv.py`
+· `bench/bsz_throughput.py` · `bench/results/bsz_sweep_w8a8.json`.

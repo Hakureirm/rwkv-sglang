@@ -1,0 +1,29 @@
+{
+  "num_tasks": 500,
+  "rollout": 1,
+  "total_generations": 500,
+  "correct_generations": 196,
+  "rollout_accuracy": 0.392,
+  "pass_at_rollout_accuracy": 0.392,
+  "ended_eod_rate": 0.866,
+  "ended_user_stop_rate": 0.0,
+  "truncated_rate": 0.134,
+  "mean_generated_tokens": 581.306,
+  "generated_tokens_total": 290653,
+  "gen_wall_time_s": 92.95553851127625,
+  "throughput_gen_tok_per_s": 3126.7959355078287,
+  "sample_per_sec": 5.378915640829148,
+  "config": {
+    "model": "rwkv7-1.5b-fla",
+    "data": "bench/data/MATH500.jsonl",
+    "temperature": 0.0,
+    "top_p": 0.28,
+    "top_k": 32,
+    "max_new_tokens": 1500,
+    "ctx_limit": 8192,
+    "sampler_order": "temperature -> top_k -> top_p",
+    "penalty": "off",
+    "prompt_style": "fake_think",
+    "concurrency": 64
+  }
+}

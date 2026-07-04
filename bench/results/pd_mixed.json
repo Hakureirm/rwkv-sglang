@@ -1,0 +1,69 @@
+{
+  "rows": [
+    {
+      "rate": 2.0,
+      "completed": 300,
+      "wall_s": 147.71,
+      "out_tok_per_s": 519.6,
+      "req_per_s": 2.031,
+      "ttft_p50_ms": 122.6,
+      "ttft_p99_ms": 292.9,
+      "tpot_p50_ms": 9.24,
+      "tpot_p99_ms": 11.64
+    },
+    {
+      "rate": 4.0,
+      "completed": 300,
+      "wall_s": 74.96,
+      "out_tok_per_s": 1022.7,
+      "req_per_s": 4.002,
+      "ttft_p50_ms": 177.7,
+      "ttft_p99_ms": 340.1,
+      "tpot_p50_ms": 13.71,
+      "tpot_p99_ms": 19.68
+    },
+    {
+      "rate": 8.0,
+      "completed": 300,
+      "wall_s": 38.86,
+      "out_tok_per_s": 1976.4,
+      "req_per_s": 7.72,
+      "ttft_p50_ms": 228.4,
+      "ttft_p99_ms": 322.0,
+      "tpot_p50_ms": 36.8,
+      "tpot_p99_ms": 47.4
+    },
+    {
+      "rate": 16.0,
+      "completed": 300,
+      "wall_s": 26.03,
+      "out_tok_per_s": 2610.0,
+      "req_per_s": 11.523,
+      "ttft_p50_ms": 301.7,
+      "ttft_p99_ms": 1448.5,
+      "tpot_p50_ms": 70.84,
+      "tpot_p99_ms": 107.47
+    },
+    {
+      "rate": "inf",
+      "completed": 300,
+      "wall_s": 22.52,
+      "out_tok_per_s": 3194.9,
+      "req_per_s": 13.319,
+      "ttft_p50_ms": 6592.0,
+      "ttft_p99_ms": 12539.2,
+      "tpot_p50_ms": 66.16,
+      "tpot_p99_ms": 91.06
+    }
+  ],
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "rates": "2,4,8,16,inf",
+    "in_len": 512,
+    "out_len": 256,
+    "num_prompts": 300,
+    "seed": 1234,
+    "out": "bench/results/pd_mixed.json"
+  }
+}

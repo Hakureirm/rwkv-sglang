@@ -126,6 +126,11 @@ _FAST_LINEAR = os.environ.get("RWKV_FAST_LINEAR", "0") == "1"
 # everything else keeps the existing per-chain path untouched. Gate: greedy-EXACT
 # (verify_m1d) before it can be the default. Default OFF.
 _FUSED_LORA = os.environ.get("RWKV_FUSED_LORA", "0") == "1"
+# Fused LoRA wins only at small batch (measured crossover ~M=4→8); above this it
+# loses to cuBLAS-batched ReplicatedLinear, so gate lora4_m1/lora4_mn to T<=this.
+_FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "4"))
+_GLUE_ANNOUNCED = False  # one-time "R2 fused glue ENABLED" stderr notice (attn)
+_GLUE1_ANNOUNCED = False  # one-time notice (ffn shift_lerp1)
 
 # M6 measurement gate: log the per-token zero-fraction of the ffn sqrelu activation
 # (relu(k)^2 == 0 iff k<=0). Reproduces the 86-90% figure in bench/results/sparse_ffn/
@@ -657,12 +662,26 @@ class Rwkv7Attention(nn.Module):
         # original torch path (1-ULP reduction-order drift would risk the fp32 gate).
         fused = x.dtype != torch.float32
 
-        shifted = be.token_shift(x, self.layer_id, 0, forward_batch)
+        # R2: try the fused paged token-shift + 6-way lerp (one kernel, shifted
+        # stays on-chip). Falls back to token_shift + fused_lerp6 when ineligible.
+        lp = None
         if fused:
+            lp = be.try_fused_shift_lerp6(x, self.layer_id, 0, self._mix6_buf(), forward_batch)
+        if lp is not None:
+            global _GLUE_ANNOUNCED
+            if self.layer_id == 0 and not _GLUE_ANNOUNCED:
+                import sys
+                _GLUE_ANNOUNCED = True
+                print("[rwkv7] R2 fused paged shift+lerp6 glue ENABLED (decode, fp16)",
+                      file=sys.stderr, flush=True)
             # [6,T,H] in order xr,xk,xw,xa,xg,xv
+            xr, xk, xw, xa, xg, xv = lp[0], lp[1], lp[2], lp[3], lp[4], lp[5]
+        elif fused:
+            shifted = be.token_shift(x, self.layer_id, 0, forward_batch)
             lp = fused_lerp6(x, shifted, self._mix6_buf())
             xr, xk, xw, xa, xg, xv = lp[0], lp[1], lp[2], lp[3], lp[4], lp[5]
         else:
+            shifted = be.token_shift(x, self.layer_id, 0, forward_batch)
             d = shifted - x
             xr = x + self.x_r.view(-1) * d
             xw = x + self.x_w.view(-1) * d
@@ -682,8 +701,13 @@ class Rwkv7Attention(nn.Module):
         # M9 fused path (bsz1 fp16 decode): one lora4_m1 op (2 launches) computes all
         # chains' up(act(down(x)))+bias; the OUTER nonlinearities (w_log sigmoid, a
         # sigmoid, v-residual mix) stay in model code, identical to the torch path.
-        lo = None
-        if self._fused_lora and fused and T == 1 and x.dtype == torch.float16:
+        lo = None       # [C,H] from lora4_m1 (T==1)
+        lo_mn = None    # [T,C,H] from lora4_mn (T>1, ADR-0005 R3)
+        # M-gate (measured crossover): the fused LoRA wins at small batch (bsz1
+        # +15%) but LOSES to the cuBLAS-batched ReplicatedLinear at large M
+        # (lora4_mn is correctness-first, no smem). Crossover ~M=4→8; fire only
+        # for T <= RWKV_FUSED_LORA_MAX_BS (default 4), else torch fallback.
+        if self._fused_lora and fused and x.dtype == torch.float16 and T <= _FUSED_LORA_MAX_BS:
             if self._lora_pack is None:
                 # lazy build on the first eligible (eager warmup) forward
                 self._lora_pack = self._build_lora_pack()
@@ -691,20 +715,34 @@ class Rwkv7Attention(nn.Module):
                     self._fused_lora = False  # not packable -> torch path from now on
                 elif self.layer_id == 0:
                     import sys
-                    print("[rwkv7] M9 fused LoRA path ENABLED (bsz1 decode, fp16)",
+                    print("[rwkv7] M9 fused LoRA path ENABLED (fp16 decode, M1+batched)",
                           file=sys.stderr, flush=True)
             if self._lora_pack is not None:
-                # lp rows [2:6] are xw,xa,xg,xv — a contiguous zero-copy [C,1,H]
-                # slice in exactly the pack's chain order (w,a,g[,v]).
+                # lp rows [2:6] are xw,xa,xg,xv in exactly the pack's chain order (w,a,g[,v]).
                 C = 4 if self.layer_id > 0 else 3
-                xs = lp[2:2 + C].reshape(C, -1)
-                lo = lora_fused.lora4_m1(xs, *self._lora_pack)
+                if T == 1:
+                    xs = lp[2:2 + C].reshape(C, -1)               # [C,H]
+                    lo = lora_fused.lora4_m1(xs, *self._lora_pack)
+                else:
+                    # [C,T,H] -> [T,C,H]; per-token result == lora4_m1(xs[t]) (test_lora_mn.py)
+                    xs = lp[2:2 + C].permute(1, 0, 2).contiguous()  # [T,C,H]
+                    lo_mn = lora_fused.lora4_mn(xs, *self._lora_pack)  # [T,C,H]
         if lo is not None:
             w_log = -torch.sigmoid(lo[0:1]) * _INV_SQRT_E
             a = torch.sigmoid(lo[1:2])
             g = lo[2:3]
             if self.layer_id != 0:
                 v = v + (v_first - v) * torch.sigmoid(lo[3:4])
+        elif lo_mn is not None:
+            # lo_mn[:, c] is a STRIDED column slice of [T,C,H]; w_log/a/v get
+            # materialized (contiguous) by sigmoid/arithmetic, but g is a raw slice
+            # -> .contiguous() so the fused_gate_corr kernel reads it correctly
+            # (the T==1 lora4_m1 path's lo[2:3] is a contiguous row slice; match that).
+            w_log = -torch.sigmoid(lo_mn[:, 0]) * _INV_SQRT_E
+            a = torch.sigmoid(lo_mn[:, 1])
+            g = lo_mn[:, 2].contiguous()
+            if self.layer_id != 0:
+                v = v + (v_first - v) * torch.sigmoid(lo_mn[:, 3])
         else:
             w_log = -torch.sigmoid(self.w_lora(xw)) * _INV_SQRT_E
             a = torch.sigmoid(self.a_lora(xa))
@@ -784,8 +822,18 @@ class Rwkv7FeedForward(nn.Module):
         if x.shape[0] == 0:
             return x
         be = _linear_backend(forward_batch)
-        shifted = be.token_shift(x, self.layer_id, 1, forward_batch)
-        xk = x + self.x_k * (shifted - x)
+        # R2: fused paged token-shift + 1-way lerp (falls back to token_shift + torch lerp)
+        xk = be.try_fused_shift_lerp1(x, self.layer_id, 1, self.x_k, forward_batch)
+        if xk is None:
+            shifted = be.token_shift(x, self.layer_id, 1, forward_batch)
+            xk = x + self.x_k * (shifted - x)
+        else:
+            global _GLUE1_ANNOUNCED
+            if self.layer_id == 0 and not _GLUE1_ANNOUNCED:
+                import sys
+                _GLUE1_ANNOUNCED = True
+                print("[rwkv7] R2 fused paged shift+lerp1 (ffn) glue ENABLED (decode, fp16)",
+                      file=sys.stderr, flush=True)
         k = _proj_gemv(self.key, xk, self._fast)
         # M6 sparse value-projection on the eligible bsz1-decode path (kernel applies
         # relu()^2 to k internally, then a sparse fp32-accum SpMV skipping zero rows).

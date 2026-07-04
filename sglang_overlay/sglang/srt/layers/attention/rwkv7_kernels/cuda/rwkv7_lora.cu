@@ -186,9 +186,141 @@ at::Tensor lora4_m1(at::Tensor xs, at::Tensor d_cat, at::Tensor u_cat,
   return y;
 }
 
+// ===========================================================================
+// Batched-M variant (F0023 #3 / ADR-0005 R3): xs[M,C,H] -> y[M,C,H], so the
+// 2-launch fusion covers M>1 decode instead of falling back to per-chain
+// ReplicatedLinear (the one place LoRA ran against albatross, which fuses M<=8).
+// Per-(m) reduction order is byte-identical to lora4_m1 (same fp16 intermediate
+// roundings), so lora4_mn at M==1 must equal lora4_m1 token-for-token.
+// h scratch is [M, R_total]; stage2 reads h from global (no smem staging, since
+// warps in a block may span different m) — correctness first; smem-per-m tiling
+// is a later optimization. cuda-graph safe (grid from sizes only, no host sync).
+// ===========================================================================
+template <int Threads>
+__global__ __launch_bounds__(Threads, 1) void lora_stage1_mn_kernel(
+    int H, int C, int Rtot,
+    const dtype* __restrict__ xs,     // [M, C, H]
+    const dtype* __restrict__ d_cat,  // [R_total, H]
+    const int* __restrict__ meta,     // [C, 3]
+    float* __restrict__ h) {          // [M, R_total]
+  const int r = blockIdx.x;
+  const int m = blockIdx.y;
+  int chain = 0, act = 0;
+  for (int c = 0; c < C; ++c) {
+    const int roff = meta[c * 3];
+    const int rank = meta[c * 3 + 1];
+    if (r >= roff && r < roff + rank) { chain = c; act = meta[c * 3 + 2]; }
+  }
+  const dtype* x = xs + (static_cast<int64_t>(m) * C + chain) * H;
+  const dtype* w = d_cat + static_cast<int64_t>(r) * H;
+  float acc = 0.0f;
+  for (int k = threadIdx.x << 2; k < H; k += Threads << 2) {
+    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(x + k));
+    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(x + k + 2));
+    const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(w + k));
+    const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(w + k + 2));
+    acc = fmaf(x0.x, w0.x, acc);
+    acc = fmaf(x0.y, w0.y, acc);
+    acc = fmaf(x1.x, w1.x, acc);
+    acc = fmaf(x1.y, w1.y, acc);
+  }
+  __shared__ float partial[Threads / 32];
+  const int lane = threadIdx.x & 31;
+  const int warp = threadIdx.x >> 5;
+  const float v = warp_sum(acc);
+  if (lane == 0) partial[warp] = v;
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    float sum = 0.0f;
+#pragma unroll
+    for (int i = 0; i < Threads / 32; ++i) sum += partial[i];
+    float t = __half2float(__float2half_rn(sum));
+    if (act == 1) t = tanhf(t);
+    else if (act == 2) t = 1.0f / (1.0f + expf(-t));
+    h[static_cast<int64_t>(m) * Rtot + r] = __half2float(__float2half_rn(t));
+  }
+}
+
+template <int Warps>
+__global__ __launch_bounds__(Warps * 32, 1) void lora_stage2_mn_kernel(
+    int H, int C, int Rtot, int M,
+    const dtype* __restrict__ u_cat,     // [H, R_total]
+    const dtype* __restrict__ bias_cat,  // [C, H]
+    const int* __restrict__ meta,        // [C, 3]
+    const float* __restrict__ h,         // [M, R_total]
+    dtype* __restrict__ y) {             // [M, C, H]
+  const int64_t gw = static_cast<int64_t>(blockIdx.x) * Warps + (threadIdx.x >> 5);
+  const int64_t CH = static_cast<int64_t>(C) * H;
+  if (gw >= static_cast<int64_t>(M) * CH) return;
+  const int m = static_cast<int>(gw / CH);
+  const int rem = static_cast<int>(gw - static_cast<int64_t>(m) * CH);
+  const int c = rem / H;
+  const int n = rem - c * H;
+  const int roff = meta[c * 3];
+  const int rank = meta[c * 3 + 1];
+  const dtype* u = u_cat + static_cast<int64_t>(n) * Rtot + roff;
+  const float* hm = h + static_cast<int64_t>(m) * Rtot + roff;
+  const int lane = threadIdx.x & 31;
+  float acc = 0.0f;
+  if (((Rtot | roff | rank) & 1) == 0) {
+    for (int r = lane << 1; r < rank; r += 64) {
+      const float2 uv = __half22float2(*reinterpret_cast<const __half2*>(u + r));
+      acc = fmaf(uv.x, hm[r], acc);
+      acc = fmaf(uv.y, hm[r + 1], acc);
+    }
+  } else {
+    for (int r = lane; r < rank; r += 32) acc = fmaf(__half2float(u[r]), hm[r], acc);
+  }
+  acc = warp_sum(acc);
+  if (lane == 0) y[gw] = __float2half_rn(acc + __half2float(bias_cat[c * H + n]));
+}
+
+at::Tensor lora4_mn(at::Tensor xs, at::Tensor d_cat, at::Tensor u_cat,
+                    at::Tensor bias_cat, at::Tensor meta) {
+  // xs [M, C, H] -> y [M, C, H]
+  TORCH_CHECK(xs.dim() == 3, "lora4_mn: xs must be [M,C,H]");
+  const int64_t M = xs.size(0);
+  const int64_t C = xs.size(1);
+  const int64_t H = xs.size(2);
+  const int64_t Rtot = d_cat.size(0);
+  TORCH_CHECK(xs.is_cuda() && xs.scalar_type() == at::kHalf, "lora4_mn: xs CUDA fp16");
+  TORCH_CHECK(d_cat.scalar_type() == at::kHalf && u_cat.scalar_type() == at::kHalf &&
+              bias_cat.scalar_type() == at::kHalf, "lora4_mn: weights/bias fp16");
+  TORCH_CHECK(meta.scalar_type() == at::kInt && meta.dim() == 2 && meta.size(0) == C &&
+              meta.size(1) == 3 && meta.is_cuda(), "lora4_mn: meta int32 [C,3] CUDA");
+  TORCH_CHECK(d_cat.size(1) == H, "lora4_mn: d_cat [R,H] mismatch");
+  TORCH_CHECK(u_cat.size(0) == H && u_cat.size(1) == Rtot, "lora4_mn: u_cat [H,R] mismatch");
+  TORCH_CHECK(bias_cat.size(0) == C && bias_cat.size(1) == H, "lora4_mn: bias_cat [C,H] mismatch");
+  TORCH_CHECK(xs.is_contiguous() && d_cat.is_contiguous() && u_cat.is_contiguous() &&
+              bias_cat.is_contiguous() && meta.is_contiguous(), "lora4_mn: inputs contiguous");
+  TORCH_CHECK((H % 4) == 0, "lora4_mn requires H%4==0");
+  TORCH_CHECK(C >= 1 && C <= 8, "lora4_mn: 1<=C<=8");
+  TORCH_CHECK(M >= 1 && Rtot >= 1, "lora4_mn: empty M/rank");
+  auto h = at::empty({M, Rtot}, xs.options().dtype(at::kFloat));
+  auto y = at::empty({M, C, H}, xs.options());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  constexpr int kThreads = 128;
+  dim3 g1(static_cast<unsigned>(Rtot), static_cast<unsigned>(M));
+  lora_stage1_mn_kernel<kThreads><<<g1, kThreads, 0, stream>>>(
+      static_cast<int>(H), static_cast<int>(C), static_cast<int>(Rtot),
+      xs.data_ptr<dtype>(), d_cat.data_ptr<dtype>(), meta.data_ptr<int>(), h.data_ptr<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  constexpr int kWarps = 8;
+  const int64_t total = M * C * H;
+  const int64_t blocks = (total + kWarps - 1) / kWarps;
+  lora_stage2_mn_kernel<kWarps><<<blocks, kWarps * 32, 0, stream>>>(
+      static_cast<int>(H), static_cast<int>(C), static_cast<int>(Rtot), static_cast<int>(M),
+      u_cat.data_ptr<dtype>(), bias_cat.data_ptr<dtype>(), meta.data_ptr<int>(),
+      h.data_ptr<float>(), y.data_ptr<dtype>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return y;
+}
+
 TORCH_LIBRARY(rwkv7_lora, m) {
   m.def("lora4_m1(Tensor xs, Tensor d_cat, Tensor u_cat, Tensor bias_cat, Tensor meta) -> Tensor");
+  m.def("lora4_mn(Tensor xs, Tensor d_cat, Tensor u_cat, Tensor bias_cat, Tensor meta) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(rwkv7_lora, CUDA, m) {
   m.impl("lora4_m1", &lora4_m1);
+  m.impl("lora4_mn", &lora4_mn);
 }

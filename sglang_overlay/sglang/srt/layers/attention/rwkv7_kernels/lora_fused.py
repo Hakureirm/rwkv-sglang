@@ -74,6 +74,10 @@ def _register_fakes():
         @torch.library.register_fake("rwkv7_lora::lora4_m1")
         def _lora4_m1_fake(xs, d_cat, u_cat, bias_cat, meta):
             return xs.new_empty((xs.shape[0], xs.shape[1]))
+
+        @torch.library.register_fake("rwkv7_lora::lora4_mn")
+        def _lora4_mn_fake(xs, d_cat, u_cat, bias_cat, meta):
+            return xs.new_empty((xs.shape[0], xs.shape[1], xs.shape[2]))
     except Exception:
         pass  # older torch without register_fake -> caller must disable piecewise cuda graph
 
@@ -130,3 +134,17 @@ def lora4_m1(
     xs fp16 [C, H] = the chains' lerped inputs stacked in pack order. Caller
     (models/rwkv7.py) guarantees eligibility (fp16, M==1, packed weights built)."""
     return torch.ops.rwkv7_lora.lora4_m1(xs, d_cat, u_cat, bias_cat, meta)
+
+
+def lora4_mn(
+    xs: torch.Tensor,
+    d_cat: torch.Tensor,
+    u_cat: torch.Tensor,
+    bias_cat: torch.Tensor,
+    meta: torch.Tensor,
+) -> torch.Tensor:
+    """y[M,C,H]: all C LoRA chains for M decode tokens in 2 kernel launches
+    (batched-M variant, ADR-0005 R3). Per-token result is byte-identical to
+    lora4_m1(xs[m]) — see bench/test_lora_mn.py. xs fp16 [M, C, H]. Same packed
+    weights as lora4_m1 (they are M-independent)."""
+    return torch.ops.rwkv7_lora.lora4_mn(xs, d_cat, u_cat, bias_cat, meta)
