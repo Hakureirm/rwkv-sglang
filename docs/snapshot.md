@@ -223,6 +223,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 | F0027 | Cross-arch occupancy: 64-thread cap is sm_86-specific (66.7%), not all-Ada; heuristic seeded | info | open |
 | F0028 | Full-stack composition greedy-EXACT + LoRA M-gate (≤4); committed raws: bsz1 225.9 (+46%), peak 7334 (+6.5%) | info | open |
 | F0029 | Spec-decode viability: α=0.738 → ~2.0×/~2.7× bsz1 estimate; gate PASSES (req#6 step 1) | info | open |
+| F0030 | Spec-decode HTTP two-server prototype ruled out (statecache=eager → 19× baseline penalty + align bug); viability F0029 intact; real build = in-engine, queued | info | open |
 | F0021 | Uncheatable compression (BlinkDL's decreed metric) — 1.5B full-corpus POOLED fp16 0.6085 / w8 0.6086 (lossless) / w4-GPTQ 0.6514; + position curve. 7.2B GPTQ lambada 0.7297 (−1.28pt). Weights on ModelScope | info | open |
 | F0020 | Fused LoRA kernel — fp16 bsz1 226.5 tok/s (+11.6%), greedy EXACT; lm_head identified as 58.5% of the graphed step | info | open |
 | F0019 | TP+PP full matrix greedy-EXACT on real L4 fleets (tp 2/4/8, pp 2/4/8, mixed tp2×pp2 after the v_first full-width fix); PP-transfer chunk-send pitfall documented (upstream-relevant) | info | open |
