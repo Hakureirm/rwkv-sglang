@@ -153,11 +153,25 @@ class Rwkv7AttnBackend(MambaAttnBackendBase):
         shifted = torch.empty_like(x)
         if x.shape[0] > 1:
             shifted[1:] = x[:-1]
+        # Route cuda-graph pad indices (-1) to the pool reserved row 0, same
+        # convention as the decode path.
+        safe_idx = torch.clamp_min(cache_indices, 0)
+        # The Mamba pool does not guarantee zeroed slots on free/alloc; RWKV-7
+        # reads the stored state directly, so zero the shift state of sequences
+        # starting from scratch (prefix 0), keeping chunked-prefill / state-cache
+        # carry-ins (prefix > 0). Branch-free + host-copy-free (capture-safe on
+        # engines that capture extend): fresh rows -> own slot, others -> row 0.
+        prefix_lens = getattr(forward_batch, "extend_prefix_lens", None)
+        if prefix_lens is not None:
+            zero_target = torch.where(
+                prefix_lens == 0, safe_idx, torch.zeros_like(safe_idx)
+            )
+            conv.index_fill_(0, zero_target.to(torch.long), 0.0)
         # first token of each sequence reads the stored prev-token (0 for fresh
         # reqs; the correct carry-in for chunked prefill / prefix continuation).
-        shifted[starts] = conv[cache_indices, :, 0].to(x.dtype)
+        shifted[starts] = conv[safe_idx, :, 0].to(x.dtype)
         # store last token of each sequence for the next chunk / decode.
-        conv[cache_indices, :, 0] = x[ends - 1].to(conv.dtype)
+        conv[safe_idx, :, 0] = x[ends - 1].to(conv.dtype)
         return shifted
 
     def _fused_glue_conv(self, layer_id, conv_idx, normed, forward_batch):
@@ -236,7 +250,16 @@ class Rwkv7AttnBackend(MambaAttnBackendBase):
             return o.squeeze(1)  # [bs, H, V]
 
         # extend: packed B=1, varlen -> OUR recurrent kernel (de-FLA, ADR-0004).
-        init_state = temporal[cache_indices].contiguous().float()  # [N, H, K, V]
+        # Same pad + slot-reuse handling as token_shift: pads -> reserved row 0,
+        # fresh sequences recurrent state zeroed before snapshotting.
+        safe_idx = torch.clamp_min(cache_indices, 0)
+        prefix_lens = getattr(forward_batch, "extend_prefix_lens", None)
+        if prefix_lens is not None:
+            zero_target = torch.where(
+                prefix_lens == 0, safe_idx, torch.zeros_like(safe_idx)
+            )
+            temporal.index_fill_(0, zero_target.to(torch.long), 0.0)
+        init_state = temporal[safe_idx].contiguous().float()  # [N, H, K, V]
         cu = md.query_start_loc.to(torch.int64)
         r1 = r.unsqueeze(0).contiguous()
         w1 = w.unsqueeze(0).contiguous()
@@ -251,7 +274,7 @@ class Rwkv7AttnBackend(MambaAttnBackendBase):
             output_final_state=True,
             cu_seqlens=cu,
         )
-        temporal[cache_indices] = final_state.to(temporal.dtype)
+        temporal[safe_idx] = final_state.to(temporal.dtype)
         return o.squeeze(0)  # [total_T, H, V]
 
     # The model calls token_shift/recurrence directly; these are not used.
