@@ -1,7 +1,7 @@
 ---
 doc_kind: finding
 finding_id: F0028
-title: "Full-stack composition + per-bsz gating: all hand kernels compose greedy-EXACT; the fused LoRA is M-gated (wins ≤M4, loses to cuBLAS ≥M8) after a measured regression; the composed stack (fast_linear+sparse_ffn+fused_lora+fused_glue+autotune) is now best across every batch size — bsz1 231.6 tok/s and peak 7326 @ bsz384 (+6.4% over plain fp16)"
+title: "Full-stack composition + per-bsz gating: all hand kernels compose greedy-EXACT; the fused LoRA is M-gated (wins ≤M4, loses to cuBLAS ≥M8) after a measured regression; the composed stack (fast_linear+sparse_ffn+fused_lora+fused_glue+autotune) leads plain fp16 where it matters — committed-raw bsz1 225.9 tok/s (+46%) and peak 7334 @ bsz384 (+6.5%), parity within the run-to-run band at mid-bsz"
 last_verified_commit: "ab50b2b"
 discovered_by: lead (M13), 2026-07-04
 severity: info
@@ -27,17 +27,24 @@ at large M. Root cause: `lora4_mn` is correctness-first (no smem staging, global
 **loses to the cuBLAS-batched ReplicatedLinear at large M**. Crossover sweep (fused on/off, other
 fast paths on):
 
-| concurrency | fused LoRA ON | OFF | winner |
+| concurrency | fused LoRA ON | OFF (others on) | winner |
 |---|---|---|---|
-| 1 | 235.2 | 204.3 | ON +15% |
-| 2 | 309.5 | 269.5 | ON +15% |
-| 4 | 546.5 | 505.9 | ON +8% |
-| 8 | 929.2 | 949.7 | OFF (parity) |
-| 16 | 1445 | 1859 | OFF −22% |
-| 32 | 2009 | 3129 | OFF −36% |
+| 1 | 225.9 | 208.0 | ON **+8.6%** |
+| 2 | 297.4 | 277.7 | ON **+7.1%** |
+| 4 | 532.1 | 520.1 | ON +2.3% |
+| 8 | 1051.6 | 972.8 | ON +8.1% |
+| 16 | 1733.7 | 1904.9 | OFF −9.0% |
+| 32 | 2445.6 | 3172.2 | OFF **−22.9%** |
 
-(dev-box A/B via the committed `bench/bsz_throughput.py` toggling only `RWKV_FUSED_LORA`; raw JSON
-pending sync — the two isolation/crossover scripts and exact commands are in this session's run.)
+All cells are committed raws (same harness/config, audit-r2 HEAD): ON cells at c≤4 =
+`bench/results/bsz_sweep_fullstack_HEAD.json` (the gate fires at T≤4); ON cells at c≥8 =
+`bench/results/bsz_sweep_loraforced_HEAD.json` (gate lifted via `RWKV_FUSED_LORA_MAX_BS=512`);
+OFF cells = `bench/results/bsz_sweep_loraoff_HEAD.json`. On the current HEAD the crossover sits
+between c=8 and c=16 (the earlier motivating run — 235.2/309.5/546.5/929.2/1445/2009 vs
+204.3/269.5/505.9/949.7/1859/3129, raw not retained — showed the same shape with parity at 8).
+The default gate stays at **4**: its wins are unambiguous across runs, and raising it to 8 would
+change which batches take the ~1-ULP fused path, so it would need a fresh greedy re-gate first —
+`RWKV_FUSED_LORA_MAX_BS` is the per-deployment knob for anyone who wants to chase that.
 
 Fix: **M-gate the fused LoRA to `T ≤ RWKV_FUSED_LORA_MAX_BS` (default 4)**; above it falls back to
 cuBLAS. Both paths greedy-exact (`verify_batch` bsz4=fused / bsz5-6=fallback → PASS). This is the
@@ -46,25 +53,25 @@ batch band where it measurably wins.
 
 ## Composed stack is now best across every batch size
 Full stack (all envs, M-gate active, `--cuda-graph-max-bs 512`) vs plain fp16 (no hand kernels) —
-**both the same methodology**: `bench/bsz_throughput.py` wall-clock, 1.5B fp16, RTX 3090,
-in64/out256. plain-fp16 cells from `bench/results/bsz_sweep_clean.json`; full-stack cells are a
-dev-box run of the same harness with all envs on (raw pending sync — re-run:
-`RWKV_FAST_LINEAR=1 RWKV_FUSED_LORA=1 RWKV_SPARSE_FFN=1 RWKV_FUSED_GLUE=1 RWKV_GEMV_AUTOTUNE=1 ... bench/bsz_throughput.py`).
+**both the same methodology AND both committed raws**: `bench/bsz_throughput.py` wall-clock, 1.5B
+fp16, RTX 3090, in64/out256. plain-fp16 cells = `bench/results/bsz_sweep_clean.json`; full-stack
+cells = `bench/results/bsz_sweep_fullstack_HEAD.json` (audit-r2 HEAD, all envs on). Run-to-run
+band on this harness is ±2–3% (an earlier uncommitted full-stack run measured e.g. bsz1 231.6,
+peak 7326 — superseded by the committed raw below).
 
 | concurrency | plain fp16 (no kernels) | **full stack** | Δ |
 |---|---|---|---|
-| 1 | 154.4 | **231.6** | **+50%** (all bsz1 hand kernels) |
-| 32 | 3128 | 3312 | +5.9% |
-| 128 | 6086 | 6499 | +6.8% |
-| 384 | 6885 | **7326** (peak) | **+6.4%** |
-| 512 | 6637 | 6705 | +1.0% |
+| 1 | 154.4 | **225.9** | **+46%** (all bsz1 hand kernels) |
+| 32 | 3128 | 3130 | ±0 (M-gate active → cuBLAS path, as designed) |
+| 128 | 6086 | 6023 | −1.0% (within band) |
+| 384 | 6885 | **7334** (peak) | **+6.5%** |
+| 512 | 6637 | 6746 | +1.6% |
 
 At bsz1 the full hand-kernel stack (fast GEMV + sparse FFN + fused LoRA + fused glue + autotune)
-lifts the *same-methodology* wall-clock throughput 154.4 → 231.6 (**+50%**); at large M the M-gated
-LoRA avoids the cuBLAS-loss regime while glue + autotune net +6% — so the composed stack beats plain
-fp16 at **every** concurrency. NOTE: the F0020 "226.5 bsz1" figure is a *different* methodology
-(steady-state decode-tok/s, out512, prefill-subtracted), NOT comparable to these wall-clock numbers;
-we do not claim 231.6 as "+X% over 226.5".
+lifts the *same-methodology* wall-clock throughput 154.4 → 225.9 (**+46%**); at mid-bsz the M-gated
+LoRA hands the GEMMs to cuBLAS so the stack tracks plain fp16 within the band; at the peak the glue
++ large-batch path nets **+6.5%**. NOTE: the F0020 "226.5 bsz1" figure is a *different* methodology
+(steady-state decode-tok/s, out512, prefill-subtracted), NOT comparable to these wall-clock numbers.
 
 ## Production wiring
 `scripts/serve.sh` launches with the full verified stack ON (all fast-path envs + the

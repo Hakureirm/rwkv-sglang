@@ -84,6 +84,8 @@ single-GPU with `--cuda-graph-max-bs 512` (`rwkv7-1.5b-w8a8` pre-quantized model
 | 384 | 6884.8 | 8755.2 | +27% |
 | **512** | 6637.1 | **9152.5** | **+38%** |
 
+**Integrated accuracy (measured 2026-07-04, F0024 addendum):** full-corpus uncheatable compression **0.6161** (+0.0076 bpb vs fp16 0.6085) and greedy MATH500 **199/500 (39.8%)** (statistically = fp16 39.2%) — the w8a8 throughput path's cost is small and now quantified on the decreed metrics (w8g64 remains the lossless int8 at 0.6086).
+
 **w8a8 peak ≈ 9152 tok/s @ 512 vs fp16 peak 6885 @ 384 = +33% peak throughput**, and +30–38% in the
 high-concurrency band (256–512). This is the concurrency overtake albatross cannot match on two
 counts at once: no scheduler/dynamic-batching AND no int8 path. Accuracy caveat (honest, per

@@ -24,8 +24,9 @@
 #
 # Two VERIFIED modes (we don't ship untested combos):
 #   throughput (default): cuda-graph ON (max-bs 512) + radix OFF. Full fast-path
-#       stack beats plain fp16 at every bsz on the same wall-clock harness (F0028):
-#       1.5B fp16 bsz1 154.4->231.6 (+50%), peak 7326 @ bsz384 (+6.4% vs 6885); the
+#       stack leads plain fp16 at small bsz and at the peak (parity within the
+#       run-to-run band at mid-bsz) on the same wall-clock harness (F0028):
+#       1.5B fp16 bsz1 154.4->225.9 (+46%), peak 7334 @ bsz384 (+6.5% vs 6885); the
 #       w8a8 model reaches ~9152 @ bsz512 (F0025). Greedy-exact; fused LoRA self-gates
 #       by M (wins <=4, cuBLAS fallback above), so all-envs-on is optimal per bsz.
 #   statecache: state-aware MambaRadixCache ON (req#3, ~98% high-reuse hit,

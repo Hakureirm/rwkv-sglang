@@ -1,0 +1,91 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 9.85,
+      "out_tokens": 2048,
+      "out_tok_per_s": 208.0,
+      "req_per_s": 0.812,
+      "lat_p50_s": 1.232,
+      "lat_p99_s": 1.235,
+      "per_stream_tok_s": 208.0
+    },
+    {
+      "concurrency": 2,
+      "requests": 8,
+      "wall_s": 7.37,
+      "out_tokens": 2048,
+      "out_tok_per_s": 277.7,
+      "req_per_s": 1.085,
+      "lat_p50_s": 1.841,
+      "lat_p99_s": 1.854,
+      "per_stream_tok_s": 138.9
+    },
+    {
+      "concurrency": 4,
+      "requests": 16,
+      "wall_s": 7.88,
+      "out_tokens": 4096,
+      "out_tok_per_s": 520.1,
+      "req_per_s": 2.032,
+      "lat_p50_s": 1.963,
+      "lat_p99_s": 1.978,
+      "per_stream_tok_s": 130.0
+    },
+    {
+      "concurrency": 8,
+      "requests": 32,
+      "wall_s": 8.42,
+      "out_tokens": 8192,
+      "out_tok_per_s": 972.8,
+      "req_per_s": 3.8,
+      "lat_p50_s": 2.093,
+      "lat_p99_s": 2.131,
+      "per_stream_tok_s": 121.6
+    },
+    {
+      "concurrency": 16,
+      "requests": 64,
+      "wall_s": 8.6,
+      "out_tokens": 16384,
+      "out_tok_per_s": 1904.9,
+      "req_per_s": 7.441,
+      "lat_p50_s": 2.132,
+      "lat_p99_s": 2.166,
+      "per_stream_tok_s": 119.1
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 10.33,
+      "out_tokens": 32768,
+      "out_tok_per_s": 3172.2,
+      "req_per_s": 12.392,
+      "lat_p50_s": 2.526,
+      "lat_p99_s": 2.609,
+      "per_stream_tok_s": 99.1
+    }
+  ],
+  "peak": {
+    "concurrency": 32,
+    "requests": 128,
+    "wall_s": 10.33,
+    "out_tokens": 32768,
+    "out_tok_per_s": 3172.2,
+    "req_per_s": 12.392,
+    "lat_p50_s": 2.526,
+    "lat_p99_s": 2.609,
+    "per_stream_tok_s": 99.1
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 31031,
+    "concurrencies": "1,2,4,8,16,32",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "bench/results/bsz_sweep_loraoff_HEAD.json"
+  }
+}
