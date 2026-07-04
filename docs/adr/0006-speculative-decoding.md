@@ -4,7 +4,7 @@ adr_id: 0006
 title: "RWKV-7 speculative decoding (req#6): recurrent-verify + O(1)-state rollback — a bespoke draft/target loop, NOT EAGLE"
 status: proposed
 date: 2026-07-04
-last_verified_commit: "924d0f8"
+last_verified_commit: "bd08540"
 supersedes: []
 superseded_by: []
 ---

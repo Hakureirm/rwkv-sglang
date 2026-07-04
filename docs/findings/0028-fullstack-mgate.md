@@ -2,7 +2,7 @@
 doc_kind: finding
 finding_id: F0028
 title: "Full-stack composition + per-bsz gating: all hand kernels compose greedy-EXACT; the fused LoRA is M-gated (wins ≤M4, loses to cuBLAS ≥M8) after a measured regression; the composed stack (fast_linear+sparse_ffn+fused_lora+fused_glue+autotune) is now best across every batch size — bsz1 231.6 tok/s and peak 7326 @ bsz384 (+6.4% over plain fp16)"
-last_verified_commit: "c4e58e0"
+last_verified_commit: "ab50b2b"
 discovered_by: lead (M13), 2026-07-04
 severity: info
 status: open

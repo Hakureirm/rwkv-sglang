@@ -4,7 +4,7 @@ adr_id: 0005
 title: "Reverse-overtake execution roadmap — the plan to make RWKV-7×SGLang beat albatross even on its home turf"
 status: accepted
 date: 2026-07-03
-last_verified_commit: "c4e58e0"
+last_verified_commit: "ab50b2b"
 supersedes: []
 superseded_by: []
 ---

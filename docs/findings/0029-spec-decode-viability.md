@@ -2,7 +2,7 @@
 doc_kind: finding
 finding_id: F0029
 title: "Speculative-decoding viability (req#6): 0.1B-class RWKV-7 draft vs 1.5B target per-token greedy acceptance α = 0.738 → ~2.98 target-tokens/forward at block K=4, net ~2.0× (1.5B target) to ~2.7× (7.2B target, same-α assumption) bsz1 decode speedup — the viability gate PASSES, justifying the full spec-decode build (ADR-0006)"
-last_verified_commit: "924d0f8"
+last_verified_commit: "bd08540"
 discovered_by: lead (M13), 2026-07-04
 severity: info
 status: open
