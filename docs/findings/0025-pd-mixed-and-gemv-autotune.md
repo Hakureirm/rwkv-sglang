@@ -124,11 +124,25 @@ though ON sat lowest of the three runs at every point:
 | 384 (peak) | 7425.8 | 7255.0 | 7788.5 | in noise |
 
 Raw: `bench/results/autotune_ab_3090_{off,on,off_hot}.json` (table abridged — c2 −0.2% and
-c8 −3.2% omitted for width; full raws committed). The same-config OFF/OFF spread reached +3.5%
-@ c128 and +4.9% @ c384 — the same magnitude as the on-vs-cold deficits (−0.4%..−3.5%) — so no
-effect is resolvable at this run count: with one sweep per side the true autotune effect on the
-3090 is bounded roughly in [−3.5%, +1%] — **par, not gain** (and not a proven zero; a
-back-to-back same-session off/on round is committed alongside as the two-sided check).
+c8 −3.2% omitted for width; full raws committed). Because the first round's on-side deltas sat
+at the edge of the observed spread, two decisive follow-up rounds were run and committed
+(`autotune_ab2_*` = same-session back-to-back OFF→ON; `autotune_ab3_*` = ORDER REVERSED ON→OFF):
+
+| round | order | c128 first / second | c384 first / second |
+|---|---|---|---|
+| ab | off → on (separate boots) | 6698.0 / 6473.8 | 7425.8 / 7255.0 |
+| ab2 | off → on (back-to-back) | 6955.2 / 6685.8 | 7824.0 / 7523.5 |
+| ab3 | **on → off** (back-to-back) | **7008.0** / 6772.8 | **7792.0** / 7565.6 |
+
+The FIRST server boot of a session measures ~3-3.5% higher at c>=128 **regardless of which side
+it is** — with the order reversed, ON lands high and OFF lands low by the same margin. The
+mid/high-concurrency deltas are therefore a boot-position artifact of the harness session
+structure, not an autotune effect (consistent with the M-gate argument: the tuned kernel serves
+M==1 only, with sub-0.1% incidental M==1 work inside c>1 levels). Verdict, now two-sided:
+**no measurable autotune effect at any operating point on the 3090** — bsz1 par (231.3 vs
+230.4), c>=4 differences fully explained by boot position. Methodology note for future A/Bs on
+this harness: alternate boot order or interleave sides; never compare sides across different
+boot positions within a session.
 
 Kernel-level (default class-locked scope, `bench/autotune_gemv.py`): att_rkvo's apparent 1.10x is a
 measurement artifact — the "best" config IS the fixed reference (128,2), timed twice across a
