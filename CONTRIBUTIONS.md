@@ -47,13 +47,17 @@ Each line: what + where + key number (with baseline) + verification gate + commi
   **Upstream impact:** reported as sglang issue
   [#30015](https://github.com/sgl-project/sglang/issues/30015) (2026-07-03,
   model-independent tp2pp2 repro + root cause + two fix options,
-  `docs/upstream_pp_allgather_issue.md`). Upstream PR
-  [#30058](https://github.com/sgl-project/sglang/pull/30058) ("Fixes #30015",
-  credits our repro) later implemented our option 1 (the `all_gather_exclude`
-  primitive) but explicitly left the model-side wiring — declaring which proxy
-  keys are TP-sharded (RWKV's `v_first`) through `scheduler_pp_mixin` — as a
-  follow-up; our shipped `v_first` full-width-transit fix already closes that
-  end-to-end for RWKV-7.
+  `docs/upstream_pp_allgather_issue.md`), and fixed by our PR
+  [#30095](https://github.com/sgl-project/sglang/pull/30095): carries the
+  TP-sharded flag in the proxy-tensor **metadata** (sender-only `all_gather_exclude`;
+  the receiver reads it off the wire, so the two sides can't disagree) and wires
+  it through `scheduler_pp_mixin` from a one-line model opt-in attribute, with a
+  registered `tp2×pp2` gloo test (sharded tensor round-trips exact, replicated
+  still all-gathered, corruption reproduced without the fix). This is a more
+  robust alternative to the concurrent community PR
+  [#30058](https://github.com/sgl-project/sglang/pull/30058), which took our
+  option-1 primitive but requires the exclude set on both send and recv and left
+  the model wiring as a follow-up.
 - **GPTQ for RWKV-7** (activation-aware, Hessian capture hook + streamed/
   sharded accumulation for models whose Hessian set exceeds GPU+RAM) —
   `bench/{calib_run,gptq_w4}.py`; 1.5B lambada −3.34pt (vs RTN −4.95);
