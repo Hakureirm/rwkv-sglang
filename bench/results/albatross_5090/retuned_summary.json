@@ -70,66 +70,72 @@
   "stock_tok_s": 553.8938739337543,
   "stock_spread_pct": 0.20494073335549112,
   "stock_runs": 3,
-  "tuned_p50_ms": 1.8042,
-  "tuned_tok_s": 554.2622769094336,
+  "tuned_p50_ms": 1.8049,
+  "tuned_tok_s": 554.0473156407558,
   "tuned_spread_pct": 0.11639507815098053,
   "tuned_runs": 3,
-  "delta_pct": 0.06651147322913609
+  "delta_pct": 0.03,
+  "note": "re-measured on the md5-verified original weights (edd3430b...) after the resave incident"
  },
  "1.5b/b1/prefill": {
   "stock_p50_ms": 28.4163,
   "stock_tok_s": 36035.655592036965,
   "stock_spread_pct": 0.0971273529629108,
   "stock_runs": 3,
-  "tuned_p50_ms": 27.3586,
-  "tuned_tok_s": 37428.81580197817,
+  "tuned_p50_ms": 27.0053,
+  "tuned_tok_s": 37918.48266821698,
   "tuned_spread_pct": 0.05519288267674638,
   "tuned_runs": 3,
-  "delta_pct": 3.8660603978273755
+  "delta_pct": 5.22,
+  "note": "re-measured on the md5-verified original weights (edd3430b...) after the resave incident"
  },
  "1.5b/b8/decode": {
   "stock_p50_ms": 4.6875,
   "stock_tok_s": 1706.6666666666667,
   "stock_spread_pct": 0.39253333333334695,
   "stock_runs": 3,
-  "tuned_p50_ms": 4.4009,
-  "tuned_tok_s": 1817.8099934104387,
+  "tuned_p50_ms": 4.3994,
+  "tuned_tok_s": 1818.4297858798927,
   "tuned_spread_pct": 0.13633574950578808,
   "tuned_runs": 3,
-  "delta_pct": 6.5123043013928905
+  "delta_pct": 6.55,
+  "note": "re-measured on the md5-verified original weights (edd3430b...) after the resave incident"
  },
  "1.5b/b8/prefill": {
   "stock_p50_ms": 134.034,
   "stock_tok_s": 61118.82059775878,
   "stock_spread_pct": 0.10773385857319062,
   "stock_runs": 3,
-  "tuned_p50_ms": 131.4657,
-  "tuned_tok_s": 62312.83140773601,
+  "tuned_p50_ms": 131.5247,
+  "tuned_tok_s": 62284.87880983572,
   "tuned_spread_pct": 0.06473171329098225,
   "tuned_runs": 3,
-  "delta_pct": 1.9535894153379862
+  "delta_pct": 1.91,
+  "note": "re-measured on the md5-verified original weights (edd3430b...) after the resave incident"
  },
  "1.5b/b32/decode": {
   "stock_p50_ms": 3.529,
   "stock_tok_s": 9067.724567866251,
   "stock_spread_pct": 0.08500991782373675,
   "stock_runs": 3,
-  "tuned_p50_ms": 3.2756,
-  "tuned_tok_s": 9769.202588838687,
+  "tuned_p50_ms": 3.272,
+  "tuned_tok_s": 9779.9511002445,
   "tuned_spread_pct": 0.051898888753206585,
   "tuned_runs": 3,
-  "delta_pct": 7.73598730003664
+  "delta_pct": 7.85,
+  "note": "re-measured on the md5-verified original weights (edd3430b...) after the resave incident"
  },
  "1.5b/b32/prefill": {
   "stock_p50_ms": 507.0466,
   "stock_tok_s": 64625.22379599824,
   "stock_spread_pct": 0.12823278964892787,
   "stock_runs": 3,
-  "tuned_p50_ms": 492.4932,
-  "tuned_tok_s": 66534.92880713886,
+  "tuned_p50_ms": 492.7875,
+  "tuned_tok_s": 66495.19316135251,
   "tuned_spread_pct": 0.14337253793554758,
   "tuned_runs": 3,
-  "delta_pct": 2.9550458767755527
+  "delta_pct": 2.89,
+  "note": "re-measured on the md5-verified original weights (edd3430b...) after the resave incident"
  },
  "7.2b/b1/decode": {
   "stock_p50_ms": 6.8047,
