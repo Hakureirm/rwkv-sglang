@@ -172,7 +172,9 @@ Kernel-level on/off A/B for `gemv_m1_cfg` on nine cards, audit-hardened methodol
 CUDA-event round per pass — kills the first-measured clock-ramp bias documented in Addendum 1).
 Scope: class-locked (threads fixed at the heuristic class = the logits-invariant subspace);
 gains are heuristic-config vs best-in-class-config on the RWKV-7 1.5B GEMV shapes.
-Raw: `bench/results/autotune_ab_9cards.json` (per-config medians + pass spreads included).
+Raw: `bench/results/autotune_ab_9cards.json` (per-config medians + pass spreads included);
+RTX 5090 row added 2026-07-05 from the same harness run standalone on the workstation
+(`bench/results/autotune_ab_5090.json`).
 
 | card | arch | SMs | gain att_rkvo / ffn_key / ffn_value | max gain (shape) |
 |---|---|---|---|---|
@@ -185,13 +187,16 @@ Raw: `bench/results/autotune_ab_9cards.json` (per-config medians + pass spreads 
 | H100 | sm90 | 132 | +0.0% / +0.0% / +0.0% | +0.0% (att_rkvo) |
 | H200 | sm90 | 132 | +2.0% / +0.0% / +0.0% | +2.0% (att_rkvo) |
 | B200 | sm100 | 148 | +0.5% / +0.0% / +0.0% | +0.5% (att_rkvo) |
+| RTX 5090 | sm120 | 170 | +0.0% / +3.2% / +5.0% | +5.0% (ffn_value) |
 
 Reading: the closed-form heuristic is already optimal on H100 (0.0% on all three shapes) and
 near-par on A10G/A100-80/B200 (<=2.1%) — consistent with the 3090 serving A/B (Addendum 1).
 The value concentrates where the heuristic misses: **L4 +24.1% (ffn_value), L40S +9.2%
 (ffn_key), T4 +7.6% (att_rkvo)** — and the winning out_tile differs by card AND shape
 (1 vs 2 vs 4), which is precisely the per-card launch-selection effect hardcoded-constant
-kernels cannot express. sm100 (B200) runs the kernel unmodified at 4.1-6.2us/shape.
+kernels cannot express. Consumer Blackwell repeats the pattern: on the RTX 5090 (170 SMs)
+the heuristic's out_tile=4 loses to out_tile=1 on both FFN shapes (+3.2%/+5.0%) — with
+170 SMs there are already enough blocks without output tiling. sm100 (B200) runs the kernel unmodified at 4.1-6.2us/shape.
 All numbers are per-card real-hardware measurements; serving-level deltas on any given card
 follow only where M==1 decode dominates (see the M-gate scope note above).
 
