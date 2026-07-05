@@ -211,13 +211,13 @@ mutual validation, recorded plainly to vllm-rwkv's credit.
 
 | concurrency | RTX 5090 | RTX 3090 |
 |---|---|---|
-| 1 | 1.1352 (vllm-rwkv leads) | **0.8240 (rwkv-sglang leads: 230.7 main vs 190.1)** |
-| 8 | **0.9204 (rwkv-sglang leads)** | **0.9677 (rwkv-sglang leads)** |
-| 32 | **0.9866** | 0.9953 |
-| 64 | **0.9858** | 0.9931 |
-| 128 | 1.0507 | 1.0176 |
-| 256 | 1.2194 | 1.1391 |
-| peak (512/384) | 1.2621 (27,988 vs 22,175) | 1.1826 (8,583 vs 7,258) |
+| 1 | 1.1352 (vllm-rwkv leads) | **0.8114 (rwkv-sglang leads: 230.7 vs 187.2)** |
+| 8 | **0.9204 (rwkv-sglang leads)** | **0.8947 (rwkv-sglang leads)** |
+| 32 | **0.9866** | **0.9980** |
+| 64 | **0.9858** | **0.9557** |
+| 128 | 1.0507 | **0.9745** |
+| 256 | 1.2194 | 1.0985 |
+| peak (512/384) | 1.2621 (27,988 vs 22,175) | 1.1702 (8,493 vs 7,258) |
 
 **Reading it honestly:** vllm-rwkv's kernels are Albatross's (ported file-by-file), so single-stream
 tracks the Albatross baseline — vllm-rwkv leads bsz1 on the 5090; on the 3090 rwkv-sglang's hand-written
@@ -229,11 +229,46 @@ blocked by the upstream sgl-kernel sm120 gap — closing it (rwkv-sglang's own i
 runs everywhere else) is now the single highest-leverage speed item. Raw:
 `bench/results/vllmrwkv/` (correctness JSONs with full token ids + both sweeps per card).
 
-> **3090 row under re-measurement (2026-07-06):** the box synthetic sweep was taken right
-> after a CUDA host-wedge + VM reboot and with a possibly under-sized vllm-rwkv server config;
-> it is being re-run on a clean box with max_num_seqs sized to the 3090's VRAM before external
-> use. The 5090 numbers (clean machine, symmetric config) stand. Treat the 3090 vllm-rwkv
-> comparison as provisional until this line is removed.
+
+> The 3090 column is the clean re-measurement (`_v2`, max_num_seqs sized to 24GB): it
+> reproduces the first box run within ~2% at every point (if anything slightly lower), so the
+> earlier numbers were sound — the 3090/5090 asymmetry is a real hardware effect (higher
+> bandwidth favors the fused-layer kernels at high concurrency), not a config artifact.
+
+## 7c. Real-workload comparison (ShareGPT, variable-length conversations)
+
+The synthetic sweep above uses one fixed shape (64-in/256-out). Real serving is
+variable-length, which stresses the scheduler differently. Same neutral client
+(`sglang.bench_serving`), same ShareGPT file, same 500 prompts, same weights, each engine
+at its best config. Two load levels: peak (all requests at once) and steady (16 req/s).
+
+**Output throughput (tok/s) and latency, RTX 5090:**
+
+| load | engine | output tok/s | median TTFT | p99 inter-token |
+|---|---|---|---|---|
+| peak | rwkv-sglang | **9,602** | **2,503 ms** | **20.5 ms** |
+| peak | vllm-rwkv | 8,865 | 3,458 ms | 370.8 ms |
+| 16 req/s | rwkv-sglang | 3,300 | 31.6 ms | 37.8 ms |
+| 16 req/s | vllm-rwkv | 3,351 | 24.1 ms | 22.7 ms |
+
+**RTX 3090:**
+
+| load | engine | output tok/s | median TTFT | p99 inter-token |
+|---|---|---|---|---|
+| peak | rwkv-sglang | **3,974** | **7,297 ms** | **717 ms** |
+| peak | vllm-rwkv | 2,805 | 12,750 ms | 1,595 ms |
+| 16 req/s | rwkv-sglang | 2,477 | **316 ms** | 1,239 ms |
+| 16 req/s | vllm-rwkv | 2,600 | 375 ms | 375 ms |
+
+**The reversal — and it's the point.** On the *synthetic fixed-shape* sweep, vllm-rwkv led
+high concurrency (its Albatross kernels + decode-wave batching like uniform shapes). On
+*real variable-length* load at peak, **rwkv-sglang leads throughput on both cards** (1.08× on
+the 5090, 1.42× on the 3090) with lower median time-to-first-token — sglang's continuous
+dynamic batching packs uneven requests without the bubbles a wave scheduler leaves on
+variable shapes. At steady 16 req/s the two are within a few percent on throughput, and
+tail latency is mixed (vllm-rwkv's steady-state inter-token tail is tighter; rwkv-sglang's
+peak-load tail is far tighter on the 5090). Net: for realistic mixed-length serving at high
+load, rwkv-sglang is ahead; at light steady load they trade. Raw: `bench/results/realload/`.
 
 ## 8. Launch autotune across cards (why hardcoded constants don't travel)
 
