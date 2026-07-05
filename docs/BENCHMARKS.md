@@ -101,6 +101,23 @@ Three modes, all with hand-written kernels, all arch-portable (JIT per GPU):
 Prequantized checkpoints are required (the loader reads qweight/scale keys; pointing the
 quant flags at an fp16 dir errors out by design).
 
+**Where int8 is decisive — 7.2B on a single 32 GB 5090 (measured 2026-07-06).** RWKV-7
+state is constant-size, so the state-pool slot count is the max concurrency (per-request
+state ≈ 33 MB, identical for both — it is fp32 model state, independent of weight
+quantization). fp16 weights (14.4 GB) leave the pool room for only 221 concurrent and it
+OOMs above; w8a8 weights (7.75 GB) free enough headroom for 512. Same launch, cuda-graph
+ON, 64-in/256-out:
+
+| 7.2B on one 5090 | max concurrency | peak output throughput |
+|---|---|---|
+| fp16 | 221 | 5,983 tok/s @c192 |
+| **w8a8** | **512 (2.32×)** | **6,987 tok/s @c512 (1.168×, still climbing at 512)** |
+
+So int8 serves 7.2B at **2.32× the concurrency and a 16.8% higher peak than fp16 can reach
+on this card** — fp16 is pinned at the memory limit. Honest mechanism: at matched
+concurrency ≤221 fp16 is faster per step (no activation-quant tax); w8a8 wins purely by
+reaching concurrency fp16 physically cannot. Raw: `bench/results/72b/`.
+
 **An honest int4 warning (measured 2026-07-05):** perplexity-style metrics understate int4's
 damage to multi-step reasoning. On the 1.5B GPTQ checkpoint, compression looks mild (0.6514)
 but **MATH500 greedy collapses to 0.1560** (78/500, vs fp16's 0.3940) — the quantized model
