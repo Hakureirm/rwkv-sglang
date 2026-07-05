@@ -7,6 +7,10 @@
 (从 2018 年的 T4 到 B200、RTX 5090)加 Apple Silicon。
 下文每一个数字的原始日志都在 [`bench/results/`](bench/results/) 里。
 
+**➡ 完整基准文档:[docs/BENCHMARKS.zh-CN.md](docs/BENCHMARKS.zh-CN.md)**——所有测过的
+指标轴,可读的表格形式(正确性验证、精度指标、逐卡速度、与 Albatross 的对比、量化
+取舍、真实负载延迟),每张表链接到原始日志。
+
 **同时支持 sglang `main` 和 v0.5.10**——同一份代码,版本差异在运行时自动识别。
 模型支持的核心部分已提交上游:[sglang PR #30115](https://github.com/sgl-project/sglang/pull/30115)。
 

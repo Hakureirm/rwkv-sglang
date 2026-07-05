@@ -7,6 +7,10 @@ token-exact against the reference implementation, quantized (int8/int4), and run
 11 platforms — 10 CUDA GPU models (2018's T4 through B200 and RTX 5090) plus Apple Silicon.
 Every number below has its raw log committed in [`bench/results/`](bench/results/).
 
+**➡ Full benchmark reference: [docs/BENCHMARKS.md](docs/BENCHMARKS.md)** — every measured
+axis in readable tables (correctness gates, accuracy rulers, per-GPU speeds, the Albatross
+comparison, quantization trade-offs, latency under load), each linked to its raw log.
+
 **Runs on sglang `main` and on v0.5.10** — one code base, the version difference is detected
 at runtime. The model-support core is submitted upstream:
 [sglang PR #30115](https://github.com/sgl-project/sglang/pull/30115).
