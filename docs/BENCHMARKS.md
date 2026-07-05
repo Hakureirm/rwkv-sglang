@@ -20,6 +20,11 @@ slightly faster across the board.
 
 Same config, same GPU: steady-state reads ~3% higher. Every table below says which window it uses.
 
+All comparison tables use **cuda-graph ON** (the production decode path — serving_scale.py,
+run_clean_comparison.py, and bsz_throughput.py via serve.sh). A separate script, throughput.py,
+reports an **eager (cuda-graph OFF) baseline** used only for internal kernel-development tracking;
+its numbers are ~2× lower for batched decode and are never quoted against the cuda-graph tables.
+
 ---
 
 ## 1. Correctness (the gate everything else stands on)
