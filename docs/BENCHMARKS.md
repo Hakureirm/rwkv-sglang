@@ -229,6 +229,12 @@ blocked by the upstream sgl-kernel sm120 gap — closing it (rwkv-sglang's own i
 runs everywhere else) is now the single highest-leverage speed item. Raw:
 `bench/results/vllmrwkv/` (correctness JSONs with full token ids + both sweeps per card).
 
+> **3090 row under re-measurement (2026-07-06):** the box synthetic sweep was taken right
+> after a CUDA host-wedge + VM reboot and with a possibly under-sized vllm-rwkv server config;
+> it is being re-run on a clean box with max_num_seqs sized to the 3090's VRAM before external
+> use. The 5090 numbers (clean machine, symmetric config) stand. Treat the 3090 vllm-rwkv
+> comparison as provisional until this line is removed.
+
 ## 8. Launch autotune across cards (why hardcoded constants don't travel)
 
 Kernel-level A/B of our GEMV launch autotune vs the built-in heuristic (interleaved 4-pass
