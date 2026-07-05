@@ -59,14 +59,18 @@ def _register_fakes():
     try:
 
         @torch.library.register_fake("rwkv7_w8a8::gemm_w8a8_tc")
-        def _gemm_w8a8_tc_fake(x, w, x_scale, w_scale, out_dtype, bias):
+        def _gemm_w8a8_tc_fake(x, w, x_scale, w_scale, out_dtype, bias, algo):
             return x.new_empty((x.shape[0], w.shape[1]), dtype=out_dtype)
 
     except Exception:
         pass  # older torch without register_fake -> disable piecewise cuda graph
 
 
-def gemm_w8a8_tc(x_q, w_t, x_scale, w_scale, out_dtype, bias=None):
+# algo: -1 = auto (per-M: V2 large / V1 small, default); 1 = force V2; 0 = force V1.
+_ALGO = int(os.environ.get("RWKV_W8A8_ALGO", "-1"))
+
+
+def gemm_w8a8_tc(x_q, w_t, x_scale, w_scale, out_dtype, bias=None, algo=None):
     """out[m,n] = (Σ_k x_q[m,k]·w[n,k]) · x_scale[m] · w_scale[n] (+ bias[n]),
     fp16/bf16 out; the bias add happens in fp32 before the output rounding.
 
@@ -74,7 +78,8 @@ def gemm_w8a8_tc(x_q, w_t, x_scale, w_scale, out_dtype, bias=None):
     loader's contiguous [N,K] int8 tensor; scales fp32 [M]/[M,1] and [N]/[N,1].
     """
     return torch.ops.rwkv7_w8a8.gemm_w8a8_tc(
-        x_q, w_t, x_scale.reshape(-1), w_scale.reshape(-1), out_dtype, bias
+        x_q, w_t, x_scale.reshape(-1), w_scale.reshape(-1), out_dtype, bias,
+        _ALGO if algo is None else algo,
     )
 
 

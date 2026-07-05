@@ -49,14 +49,16 @@ def _mk(m, n, k, dev, seed):
     return x_q, w_nk, xs, ws
 
 
-def gate(dev):
+def gate(dev, algo):
+    G = lambda *a, **k: torch.ops.rwkv7_w8a8.gemm_w8a8_tc(*a, **k)
     ok = True
+    print(f"── gate algo={algo} ({'V2 register-blocked' if algo == 1 else 'V1'})")
     for out_dtype in (torch.float16, torch.bfloat16):
         for (m, n, k) in [(64, 2048, 2048), (33, 2048, 2048), (257, 8192, 2048),
                           (128, 2048, 8192), (1, 2048, 2048), (500, 65536, 2048),
                           (96, 4160, 4096)]:
             x_q, w_nk, xs, ws = _mk(m, n, k, dev, seed=1234 + m + n)
-            y = torch.ops.rwkv7_w8a8.gemm_w8a8_tc(x_q, w_nk.t(), xs, ws, out_dtype, None)
+            y = G(x_q, w_nk.t(), xs, ws, out_dtype, None, algo)
             y_ref = _ref(x_q, w_nk, xs, ws, out_dtype)
             same = torch.equal(y, y_ref)
             if not same:
@@ -72,7 +74,7 @@ def gate(dev):
     # (__fmaf_rn — single rounding). Mimic the fma in fp64 (exact) + one fp32 round.
     x_q, w_nk, xs, ws = _mk(128, 2048, 2048, dev, seed=42)
     bias = (torch.rand(2048, device=dev) - 0.5).half()
-    y = torch.ops.rwkv7_w8a8.gemm_w8a8_tc(x_q, w_nk.t(), xs, ws, torch.float16, bias)
+    y = G(x_q, w_nk.t(), xs, ws, torch.float16, bias, algo)
     acc = (x_q.double() @ w_nk.double().t()).round().float()
     v1 = acc * xs.view(-1, 1)  # fp32, one rounding — matches __fmul_rn
     y_ref = (
@@ -86,7 +88,7 @@ def gate(dev):
     x_q, w_nk, xs, ws = _mk(64, 2048, 96, dev, seed=43)
     xp = torch.nn.functional.pad(x_q, (0, 32))
     wp = torch.nn.functional.pad(w_nk, (0, 32)).contiguous()
-    y = torch.ops.rwkv7_w8a8.gemm_w8a8_tc(xp, wp.t(), xs, ws, torch.float16, None)
+    y = G(xp, wp.t(), xs, ws, torch.float16, None, algo)
     y_ref = _ref(x_q, w_nk, xs, ws, torch.float16)
     p_ok = torch.equal(y, y_ref)
     print(f"  K=96 zero-pad path: {'EXACT' if p_ok else 'FAIL'}")
@@ -96,11 +98,20 @@ def gate(dev):
     x1, w_nk, xs1, ws = _mk(1, 2048, 2048, dev, seed=77)
     xbig = torch.cat([x1, torch.randint(-128, 128, (256, 2048), dtype=torch.int8, device=dev)])
     xsbig = torch.cat([xs1, torch.rand(256, dtype=torch.float32, device=dev)])
-    y1 = torch.ops.rwkv7_w8a8.gemm_w8a8_tc(x1, w_nk.t(), xs1, ws, torch.float16, None)
-    ybig = torch.ops.rwkv7_w8a8.gemm_w8a8_tc(xbig, w_nk.t(), xsbig, ws, torch.float16, None)
+    y1 = G(x1, w_nk.t(), xs1, ws, torch.float16, None, algo)
+    ybig = G(xbig, w_nk.t(), xsbig, ws, torch.float16, None, algo)
     bi = torch.equal(y1[0], ybig[0])
     print(f"  batch-invariance M=1 vs M=257 row0: {'EXACT' if bi else 'FAIL'}")
     ok = ok and bi
+
+    # cross-algo agreement: V2 must be bit-identical to V1 (same epilogue math)
+    if algo == 1:
+        x_q, w_nk, xs, ws = _mk(300, 4096, 2048, dev, seed=99)
+        yv1 = G(x_q, w_nk.t(), xs, ws, torch.float16, None, 0)
+        yv2 = G(x_q, w_nk.t(), xs, ws, torch.float16, None, 1)
+        xa = torch.equal(yv1, yv2)
+        print(f"  V2==V1 bit-identical (M300 N4096 K2048): {'EXACT' if xa else 'FAIL'}")
+        ok = ok and xa
     return ok
 
 
@@ -115,8 +126,8 @@ def bench(dev, iters=50):
         ("head 65536x2048", 65536, 2048),
     ]
     ms_list = [64, 128, 256, 512, 1024, 4096]
-    print(f"\n{'shape':22s} {'M':>5s} {'ours ms':>9s} {'fp16 ms':>9s} {'dequant+mm':>11s} "
-          f"{'vs fp16':>8s} {'vs deq':>7s}")
+    print(f"\n{'shape':22s} {'M':>5s} {'V1 ms':>8s} {'V2 ms':>8s} {'fp16 ms':>8s} "
+          f"{'V1/fp16':>8s} {'V2/fp16':>8s} {'V2/V1':>7s}")
     for label, n, k in shapes:
         w_nk = torch.randint(-128, 128, (n, k), dtype=torch.int8, device=dev)
         ws = torch.rand(n, dtype=torch.float32, device=dev) * 0.02
@@ -136,12 +147,13 @@ def bench(dev, iters=50):
                 torch.cuda.synchronize()
                 return (time.perf_counter() - t0) / iters * 1e3
 
-            t_ours = t(lambda: torch.ops.rwkv7_w8a8.gemm_w8a8_tc(
-                x_q, w_nk.t(), xs, ws, torch.float16, None))
+            t_v1 = t(lambda: torch.ops.rwkv7_w8a8.gemm_w8a8_tc(
+                x_q, w_nk.t(), xs, ws, torch.float16, None, 0))
+            t_v2 = t(lambda: torch.ops.rwkv7_w8a8.gemm_w8a8_tc(
+                x_q, w_nk.t(), xs, ws, torch.float16, None, 1))
             t_fp16 = t(lambda: torch.mm(x_fp16, w_fp16.t()))
-            t_deq = t(lambda: torch.mm(x_fp16, (w_nk.float() * ws.view(-1, 1)).half().t()))
-            print(f"{label:22s} {m:5d} {t_ours:9.4f} {t_fp16:9.4f} {t_deq:11.4f} "
-                  f"{t_fp16 / t_ours:7.2f}x {t_deq / t_ours:6.2f}x")
+            print(f"{label:22s} {m:5d} {t_v1:8.4f} {t_v2:8.4f} {t_fp16:8.4f} "
+                  f"{t_fp16 / t_v1:7.2f}x {t_fp16 / t_v2:7.2f}x {t_v1 / t_v2:6.2f}x")
 
 
 if __name__ == "__main__":
@@ -152,7 +164,7 @@ if __name__ == "__main__":
     dev = "cuda"
     print(f"GPU: {torch.cuda.get_device_name(0)} sm{''.join(map(str, torch.cuda.get_device_capability()))}")
     _load()
-    ok = gate(dev)
+    ok = gate(dev, 0) and gate(dev, 1)
     print(f"GATE: {'PASS' if ok else 'FAIL'}")
     if args.bench and ok:
         bench(dev, args.iters)

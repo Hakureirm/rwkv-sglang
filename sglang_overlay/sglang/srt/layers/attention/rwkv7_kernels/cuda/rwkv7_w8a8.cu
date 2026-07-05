@@ -182,9 +182,137 @@ __global__ __launch_bounds__(256, 2) void gemm_w8a8_tc_kernel(
 #endif  // __CUDA_ARCH__ >= 800
 }
 
+// ── V2 ────────────────────────────────────────────────────────────────────
+// Register-blocked tiling. Block 64(M)×128(N)×64(K), 256 threads = 8 warps in a
+// 2(M)×4(N) grid; each warp owns a 32×32 output tile = 2×2 wmma fragments held in
+// registers, so per k-step a warp issues 2 A-loads + 2 B-loads and 4 mma
+// (arithmetic-per-smem-load 1.0 vs V1's 0.67 — the smem-load-bound inner loop of
+// V1 was the decode-shape drag). Epilogue stages each 16×16 int32 fragment through
+// a tiny per-warp smem tile (8 KB total vs V1's 16.9 KB full-tile buffer), which
+// lifts occupancy to 3 blocks/SM. Same explicitly-rounded rescale as V1 → the
+// bit-exact gate is preserved. Grid at N=2048/M=512 is 16×8=128 blocks (good fill).
+constexpr int V2_BM = 64;
+constexpr int V2_BN = 128;
+constexpr int V2_BK = 64;
+
+template <typename OutT>
+__global__ __launch_bounds__(256, 3) void gemm_w8a8_tc_v2_kernel(
+    const int8_t* __restrict__ x,   // [M,K]
+    const int8_t* __restrict__ w,   // [N,K] storage
+    const float* __restrict__ xs,   // [M]
+    const float* __restrict__ ws,   // [N]
+    const OutT* __restrict__ bias,  // [N] or nullptr
+    OutT* __restrict__ y,           // [M,N]
+    int M, int N, int K) {
+#if (!defined(__CUDA_ARCH__)) || (__CUDA_ARCH__ >= 800)
+  using namespace nvcuda;
+  const int n0 = blockIdx.x * V2_BN;
+  const int m0 = blockIdx.y * V2_BM;
+  const int tid = threadIdx.x;   // 0..255
+  const int warp = tid >> 5;     // 0..7
+  const int lane = tid & 31;
+  const int wm = warp >> 2;      // 0..1 -> M rows [m0+wm*32, +32)
+  const int wn = warp & 3;       // 0..3 -> N cols [n0+wn*32, +32)
+
+  __shared__ __align__(16) int8_t s_a[2][V2_BM][V2_BK];
+  __shared__ __align__(16) int8_t s_b[2][V2_BN][V2_BK];
+  __shared__ int32_t s_epi[8][16][16];  // per-warp epilogue staging (8 KB)
+
+  const int a_rows_live = (M - m0 < V2_BM) ? (M - m0) : V2_BM;
+  const int b_rows_live = (N - n0 < V2_BN) ? (N - n0) : V2_BN;
+
+  for (int r = a_rows_live; r < V2_BM; ++r)
+    for (int c = tid; c < V2_BK; c += 256) { s_a[0][r][c] = 0; s_a[1][r][c] = 0; }
+  for (int r = b_rows_live; r < V2_BN; ++r)
+    for (int c = tid; c < V2_BK; c += 256) { s_b[0][r][c] = 0; s_b[1][r][c] = 0; }
+  __syncthreads();
+
+  auto stage = [&](int k0s, int buf) {
+    const int a_ops = a_rows_live * 4;  // 16B each
+    for (int t = tid; t < a_ops; t += 256) {
+      const int r = t >> 2, c = (t & 3) * 16;
+      __pipeline_memcpy_async(&s_a[buf][r][c],
+                              x + static_cast<int64_t>(m0 + r) * K + k0s + c, 16);
+    }
+    const int b_ops = b_rows_live * 4;
+    for (int t = tid; t < b_ops; t += 256) {
+      const int r = t >> 2, c = (t & 3) * 16;
+      __pipeline_memcpy_async(&s_b[buf][r][c],
+                              w + static_cast<int64_t>(n0 + r) * K + k0s + c, 16);
+    }
+  };
+
+  wmma::fragment<wmma::accumulator, 16, 16, 16, int> acc[2][2];
+#pragma unroll
+  for (int i = 0; i < 2; ++i)
+#pragma unroll
+    for (int j = 0; j < 2; ++j) wmma::fill_fragment(acc[i][j], 0);
+
+  stage(0, 0);
+  __pipeline_commit();
+
+  const int nk = K / V2_BK;
+  for (int i = 0; i < nk; ++i) {
+    if (i + 1 < nk) {
+      stage((i + 1) * V2_BK, (i + 1) & 1);
+      __pipeline_commit();
+      __pipeline_wait_prior(1);
+    } else {
+      __pipeline_wait_prior(0);
+    }
+    __syncthreads();
+    const int buf = i & 1;
+#pragma unroll
+    for (int kk = 0; kk < V2_BK; kk += 16) {
+      wmma::fragment<wmma::matrix_a, 16, 16, 16, signed char, wmma::row_major> a[2];
+      wmma::fragment<wmma::matrix_b, 16, 16, 16, signed char, wmma::col_major> b[2];
+#pragma unroll
+      for (int mf = 0; mf < 2; ++mf)
+        wmma::load_matrix_sync(a[mf], &s_a[buf][wm * 32 + mf * 16][kk], V2_BK);
+#pragma unroll
+      for (int nf = 0; nf < 2; ++nf)
+        wmma::load_matrix_sync(b[nf], &s_b[buf][wn * 32 + nf * 16][kk], V2_BK);
+#pragma unroll
+      for (int mf = 0; mf < 2; ++mf)
+#pragma unroll
+        for (int nf = 0; nf < 2; ++nf)
+          wmma::mma_sync(acc[mf][nf], a[mf], b[nf], acc[mf][nf]);
+    }
+    __syncthreads();
+  }
+
+  // Epilogue: stage each 16×16 int32 fragment through this warp's small smem tile,
+  // rescale (same explicit rounding as V1), write guarded.
+#pragma unroll
+  for (int mf = 0; mf < 2; ++mf)
+#pragma unroll
+    for (int nf = 0; nf < 2; ++nf) {
+      wmma::store_matrix_sync(&s_epi[warp][0][0], acc[mf][nf], 16,
+                              wmma::mem_row_major);
+      __syncwarp();
+      const int rbase = m0 + wm * 32 + mf * 16;
+      const int cbase = n0 + wn * 32 + nf * 16;
+#pragma unroll
+      for (int i = 0; i < 8; ++i) {
+        const int e = lane + i * 32;
+        const int r = e >> 4, c = e & 15;
+        const int gm = rbase + r, gn = cbase + c;
+        if (gm < M && gn < N) {
+          const float v1 = __fmul_rn(static_cast<float>(s_epi[warp][r][c]), xs[gm]);
+          const float v = (bias != nullptr)
+                              ? __fmaf_rn(v1, ws[gn], from_out(bias[gn]))
+                              : __fmul_rn(v1, ws[gn]);
+          y[static_cast<int64_t>(gm) * N + gn] = to_out<OutT>(v);
+        }
+      }
+      __syncwarp();
+    }
+#endif  // __CUDA_ARCH__ >= 800
+}
+
 at::Tensor gemm_w8a8_tc(at::Tensor x, at::Tensor w, at::Tensor x_scale,
                         at::Tensor w_scale, at::ScalarType out_dtype,
-                        c10::optional<at::Tensor> bias) {
+                        c10::optional<at::Tensor> bias, int64_t algo) {
   TORCH_CHECK(x.is_cuda() && w.is_cuda(), "w8a8: CUDA tensors required");
   TORCH_CHECK(x.dtype() == at::kChar && w.dtype() == at::kChar,
               "w8a8: int8 operands required");
@@ -216,24 +344,39 @@ at::Tensor gemm_w8a8_tc(at::Tensor x, at::Tensor w, at::Tensor x_scale,
   if (M == 0) return y;
 
 #if !defined(USE_ROCM)
-  dim3 grid((N + BN - 1) / BN, (M + BM - 1) / BM);
   auto stream = at::cuda::getCurrentCUDAStream();
-  if (out_dtype == at::kHalf) {
-    gemm_w8a8_tc_kernel<__half><<<grid, 256, 0, stream>>>(
-        reinterpret_cast<const int8_t*>(x.data_ptr()),
-        reinterpret_cast<const int8_t*>(w.data_ptr()), xs.data_ptr<float>(),
-        wsc.data_ptr<float>(),
-        b ? reinterpret_cast<const __half*>(b->data_ptr()) : nullptr,
-        reinterpret_cast<__half*>(y.data_ptr()), static_cast<int>(M),
-        static_cast<int>(N), static_cast<int>(K));
-  } else {
-    gemm_w8a8_tc_kernel<__nv_bfloat16><<<grid, 256, 0, stream>>>(
-        reinterpret_cast<const int8_t*>(x.data_ptr()),
-        reinterpret_cast<const int8_t*>(w.data_ptr()), xs.data_ptr<float>(),
-        wsc.data_ptr<float>(),
-        b ? reinterpret_cast<const __nv_bfloat16*>(b->data_ptr()) : nullptr,
-        reinterpret_cast<__nv_bfloat16*>(y.data_ptr()), static_cast<int>(M),
-        static_cast<int>(N), static_cast<int>(K));
+  const int Mi = static_cast<int>(M), Ni = static_cast<int>(N), Ki = static_cast<int>(K);
+  const auto* xp = reinterpret_cast<const int8_t*>(x.data_ptr());
+  const auto* wp = reinterpret_cast<const int8_t*>(w.data_ptr());
+  const float* xsp = xs.data_ptr<float>();
+  const float* wsp = wsc.data_ptr<float>();
+  // algo<0 = auto: V2's 64×128 tile wins at large M but under-fills the grid at
+  // small M, where V1's 32×128 tile keeps more blocks live (microbench crossover
+  // between M=256 and M=512). Pick per-launch; M is constant within a captured graph.
+  int use = static_cast<int>(algo);
+  if (use < 0) use = (Mi >= 384) ? 1 : 0;
+  if (use == 1) {  // V2 register-blocked
+    dim3 grid((N + V2_BN - 1) / V2_BN, (M + V2_BM - 1) / V2_BM);
+    if (out_dtype == at::kHalf)
+      gemm_w8a8_tc_v2_kernel<__half><<<grid, 256, 0, stream>>>(
+          xp, wp, xsp, wsp, b ? reinterpret_cast<const __half*>(b->data_ptr()) : nullptr,
+          reinterpret_cast<__half*>(y.data_ptr()), Mi, Ni, Ki);
+    else
+      gemm_w8a8_tc_v2_kernel<__nv_bfloat16><<<grid, 256, 0, stream>>>(
+          xp, wp, xsp, wsp,
+          b ? reinterpret_cast<const __nv_bfloat16*>(b->data_ptr()) : nullptr,
+          reinterpret_cast<__nv_bfloat16*>(y.data_ptr()), Mi, Ni, Ki);
+  } else {  // algo == 0: V1 (kept for A/B + fallback)
+    dim3 grid((N + BN - 1) / BN, (M + BM - 1) / BM);
+    if (out_dtype == at::kHalf)
+      gemm_w8a8_tc_kernel<__half><<<grid, 256, 0, stream>>>(
+          xp, wp, xsp, wsp, b ? reinterpret_cast<const __half*>(b->data_ptr()) : nullptr,
+          reinterpret_cast<__half*>(y.data_ptr()), Mi, Ni, Ki);
+    else
+      gemm_w8a8_tc_kernel<__nv_bfloat16><<<grid, 256, 0, stream>>>(
+          xp, wp, xsp, wsp,
+          b ? reinterpret_cast<const __nv_bfloat16*>(b->data_ptr()) : nullptr,
+          reinterpret_cast<__nv_bfloat16*>(y.data_ptr()), Mi, Ni, Ki);
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
@@ -245,7 +388,7 @@ at::Tensor gemm_w8a8_tc(at::Tensor x, at::Tensor w, at::Tensor x_scale,
 TORCH_LIBRARY(rwkv7_w8a8, m) {
   m.def(
       "gemm_w8a8_tc(Tensor x, Tensor w, Tensor x_scale, Tensor w_scale, "
-      "ScalarType out_dtype, Tensor? bias) -> Tensor");
+      "ScalarType out_dtype, Tensor? bias, int algo) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(rwkv7_w8a8, CUDA, m) {
   m.impl("gemm_w8a8_tc", &w8a8::gemm_w8a8_tc);
