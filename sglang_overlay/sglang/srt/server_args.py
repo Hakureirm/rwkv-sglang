@@ -2996,8 +2996,30 @@ class ServerArgs:
         if self.speculative_algorithm == "NEXTN":
             self.speculative_algorithm = "EAGLE"
 
-        if self.speculative_algorithm in ("EAGLE", "EAGLE3", "STANDALONE"):
-            if self.speculative_algorithm == "STANDALONE" and self.enable_dp_attention:
+        if self.speculative_algorithm in ("EAGLE", "EAGLE3", "STANDALONE", "RWKV_CHAIN"):
+            if self.speculative_algorithm == "RWKV_CHAIN":
+                # ADR-0006 chain-speculative decoding for recurrent RWKV-7:
+                # bespoke draft/verify worker, non-overlap (V1) scheduler only.
+                if self.speculative_draft_model_path is None:
+                    raise ValueError(
+                        "RWKV_CHAIN requires --speculative-draft-model-path "
+                        "(a small RWKV-7 draft, e.g. the 0.1B)."
+                    )
+                if self.speculative_num_draft_tokens is None:
+                    self.speculative_num_draft_tokens = 4
+                # chain draft = K linear proposals, no tree: set all three so
+                # the EAGLE auto_choose (all-or-nothing assert) is skipped.
+                # num_steps = K-1 because the upstream topk==1 rule later sets
+                # num_draft_tokens = num_steps + 1; this keeps K as given.
+                self.speculative_num_steps = self.speculative_num_draft_tokens - 1
+                self.speculative_eagle_topk = 1
+                if not self.disable_radix_cache:
+                    self.disable_radix_cache = True
+                    logger.warning(
+                        "RWKV_CHAIN: radix cache disabled (spec + state radix "
+                        "cache is a separate follow-up)."
+                    )
+            if self.speculative_algorithm in ("STANDALONE", "RWKV_CHAIN") and self.enable_dp_attention:
                 # TODO: support dp attention for standalone speculative decoding
                 raise ValueError(
                     "Currently standalone speculative decoding does not support dp attention."
@@ -4772,7 +4794,7 @@ class ServerArgs:
         parser.add_argument(
             "--speculative-algorithm",
             type=str,
-            choices=["EAGLE", "EAGLE3", "NEXTN", "STANDALONE", "NGRAM"],
+            choices=["EAGLE", "EAGLE3", "NEXTN", "STANDALONE", "NGRAM", "RWKV_CHAIN"],
             help="Speculative algorithm.",
         )
         parser.add_argument(
