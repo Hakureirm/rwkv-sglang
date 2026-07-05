@@ -198,7 +198,7 @@ def run_ours(args):
     wbytes = weight_bytes(args.model_path)
 
     import sglang as sgl
-    engine = sgl.Engine(
+    engine_kwargs = dict(
         model_path=args.model_path,
         skip_tokenizer_init=True,
         disable_cuda_graph=False,                # cuda-graph ON (production)
@@ -209,6 +209,10 @@ def run_ours(args):
         tp_size=1,
         mem_fraction_static=args.mem_fraction,
     )
+    # cross-version: only pass kwargs this sglang's ServerArgs still accepts
+    from sglang.srt.server_args import ServerArgs
+    engine_kwargs = {k: v for k, v in engine_kwargs.items() if k in ServerArgs.__dataclass_fields__}
+    engine = sgl.Engine(**engine_kwargs)
 
     rows = []
     for bsz in batch_sizes:
