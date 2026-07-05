@@ -481,9 +481,18 @@ class RwkvChainWorker:
         target's own lm_head weight + the sampler's fp32 argmax semantics
         (vocab-padded rows sliced off). tp=1 scope for increment (i)."""
         w = self.target_runner.model.lm_head.weight
-        logits = torch.matmul(hidden.to(w.dtype), w.t()).float()
         vocab = self.target_runner.model_config.vocab_size
-        return logits[:, :vocab].argmax(dim=-1)
+        # Row-by-row [1,H]@[H,V] on purpose: the SAME shape as the decode
+        # path's logits matmul -> same cuBLAS kernel -> same reduction order.
+        # A single [K,H]@[H,V] GEMM reduces in a different order and can flip
+        # near-tie argmaxes vs the plain decode baseline (observed ~1e-3/token
+        # on the first gate run).
+        h = hidden.to(w.dtype)
+        out = [
+            torch.matmul(h[i : i + 1], w.t()).float()[:, :vocab].argmax(dim=-1)
+            for i in range(h.shape[0])
+        ]
+        return torch.cat(out)
 
     def _draft_prefill_mirror(self, batch):
         """Mirror the current extend chunk into the draft's own pool. With

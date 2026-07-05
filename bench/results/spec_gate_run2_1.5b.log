@@ -1,0 +1,33 @@
+=== baseline (spec-off) ===
+  |out|=   8      9.2 tok/s  'User: What is the capital of France?\n\nAs'
+  |out|= 128     11.2 tok/s  'User: Write a haiku about autumn.\n\nAssis'
+  |out|=  27     10.8 tok/s  'User: Explain why the sky is blue in one'
+  |out|= 128     11.0 tok/s  'User: Solve for x: 2x + 6 = 14.\n\nAssista'
+  |out|=  13     10.3 tok/s  'User: List three prime numbers.\n\nAssista'
+  |out|= 128     11.3 tok/s  "User: Translate 'good morning' to Spanis"
+  |out|= 128     11.9 tok/s  'User: Who wrote Romeo and Juliet?\n\nAssis'
+  |out|=  51     11.7 tok/s  'User: What is 15 percent of 200?\n\nAssist'
+  |out|= 128     12.0 tok/s  'The quick brown fox'
+  |out|= 128     12.0 tok/s  'def fibonacci(n):'
+pooled: median 11.3 tok/s  mean 11.2 tok/s over 10 prompts
+baseline dumped -> /tmp/spec_gate_base.json
+/tmp/spec_gate_run.sh: line 26: 212758 Killed                  nohup $PY -m sglang.launch_server $COMMON --port "$port" "$@" > "/tmp/spec_gate_srv_$port.log" 2>&1
+=== spec-on (RWKV_CHAIN K=4) ===
+  |out|=   8      5.3 tok/s  'User: What is the capital of France?\n\nAs'
+  |out|= 128      4.7 tok/s  'User: Write a haiku about autumn.\n\nAssis'
+  |out|=  27      6.0 tok/s  'User: Explain why the sky is blue in one'
+  |out|= 128     10.5 tok/s  'User: Solve for x: 2x + 6 = 14.\n\nAssista'
+  |out|=  13     12.5 tok/s  'User: List three prime numbers.\n\nAssista'
+  |out|= 128      6.4 tok/s  "User: Translate 'good morning' to Spanis"
+  |out|= 128      5.6 tok/s  'User: Who wrote Romeo and Juliet?\n\nAssis'
+  |out|=  51      8.7 tok/s  'User: What is 15 percent of 200?\n\nAssist'
+  |out|= 128     11.9 tok/s  'The quick brown fox'
+  |out|= 128      9.2 tok/s  'def fibonacci(n):'
+pooled: median 7.5 tok/s  mean 8.1 tok/s over 10 prompts
+  MISMATCH at pos 71 (|base|=128 |spec|=128) 'User: Solve for x: 2x + 6 = 14.\n\nAssista'
+    base[71:77]=[59, 19242, 1672, 19242, 51, 121]  spec[...]=[38595, 59, 19242, 1672, 19242, 51]
+accept-length/round: mean 3.17 over 10 prompts
+speed: baseline 11.3 -> spec 7.5 tok/s  (0.67x)
+GATE: FAIL (divergence above)
+/tmp/spec_gate_run.sh: line 26: 213176 Killed                  nohup $PY -m sglang.launch_server $COMMON --port "$port" "$@" > "/tmp/spec_gate_srv_$port.log" 2>&1
+SPEC_GATE_EXIT=2
