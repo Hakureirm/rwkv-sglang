@@ -95,7 +95,7 @@ Three modes, all with hand-written kernels, all arch-portable (JIT per GPU):
 | mode | accuracy cost | when it wins | checkpoints |
 |---|---|---|---|
 | int8 w8g64 (weight-only) | none measurable (greedy-exact; compression +0.0001) | small-batch speed (+13% over fp16 full stack at bsz1 on 5090) + half the weight bytes | ModelScope `Hakureirm/rwkv7-g1-1.5b-w8g64` |
-| int8 w8a8 (tensor-core) | compression +0.0076; MATH500 greedy statistically equal | large-batch throughput king on sm80–90 (3090 peak 9,851 tok/s) — **not available on sm120/Blackwell** (upstream sgl-kernel gap) | box-relayable |
+| int8 w8a8 (tensor-core) | compression +0.0076; MATH500 greedy statistically equal | large-batch throughput king on sm80–90 (3090 peak 9,851 tok/s). On sm120/Blackwell the upstream cutlass op does not exist; rwkv-sglang's own s8-wmma kernel (V1, bit-exact 17/17 gate, batch-invariant) now serves the tier there — peak 20,518.5 tok/s @c512 = 0.9253× fp16, so on that card it is an availability win, not yet a speed win (V2 in progress) | box-relayable |
 | int4 GPTQ | lambada −1.28pt at 7.2B (RTN would be −2.64) | lowest VRAM: 7.2B in 4.6 GB weights, serves on a 16 GB T4 at 32.9 tok/s | ModelScope `Hakureirm/rwkv7-g1-{1.5b,7.2b}-w4gptq` |
 
 Prequantized checkpoints are required (the loader reads qweight/scale keys; pointing the
@@ -116,7 +116,7 @@ loss) is being re-checked on the same ruler. Raw: `bench/results/math500_greedy_
 | plain fp16, peak | 7,205.5 @ 384 conc | 22,090.8 @ 512 |
 | full kernel stack, single request | 230.7 | 397.3 |
 | full kernel stack, peak | 7,257.7 @ 384 | **22,175.3 @ 512** |
-| int8 w8a8 + fused glue, peak | **9,850.9 @ 256** | not available on sm120 |
+| int8 w8a8 + fused glue, peak | **9,850.9 @ 256** | 20,518.5 @ 512 (own s8-wmma kernel V1; 0.9253× fp16 — enabled, not yet faster) |
 
 v0.5.10 reference points: 3090 plain peak was 6,885, w8a8+glue 9,686 — the main migration
 alone made the 3090 faster. Raw: `bench/results/bsz_sweep_*_{3090main,5090}.json`.
@@ -229,9 +229,10 @@ tracks the Albatross baseline — vllm-rwkv leads bsz1 on the 5090; on the 3090 
 GEMV stack beats the port outright. rwkv-sglang leads the c8–64 middle on the 5090. **vllm-rwkv leads
 high concurrency on both cards (up to 1.26×)** — that is the real result of this comparison
 and rwkv-sglang's next kernel target. Two counters already exist: on the 3090 rwkv-sglang's int8 w8a8 peak
-(9,851) beats vllm-rwkv's fp16 peak (8,583) by **1.1477×**; on the 5090 the same int8 path is
-blocked by the upstream sgl-kernel sm120 gap — closing it (rwkv-sglang's own int8 kernel already
-runs everywhere else) is now the single highest-leverage speed item. Raw:
+(9,851) beats vllm-rwkv's fp16 peak (8,583) by **1.1477×**; on the 5090 the upstream cutlass
+int8 op does not exist; rwkv-sglang's own s8-wmma kernel (V1) now runs the tier there end-to-end
+(20,518.5 @c512 = 0.9253× fp16) — the availability gap is closed, and pushing V1 past fp16 (the 3090
+ratio is 1.38×) is the single highest-leverage speed item. Raw:
 `bench/results/vllmrwkv/` (correctness JSONs with full token ids + both sweeps per card).
 
 
