@@ -1,0 +1,274 @@
+{
+ "T4": {
+  "gpu": "Tesla T4",
+  "sm": 75,
+  "arch_list": "7.5",
+  "commit": "343147a333fcd6dd0845de0d165089685402c012",
+  "results": {
+   "b1_raw_tail": "00000000-6_rwkv7_wkv_fp16_v2.ptx, line 9957; error   : Feature 'cp.async.wait_all' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000058_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11054; error   : Feature 'cp.async' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000058_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11057; error   : Feature 'cp.async.commit_group' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000058_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11068; error   : Feature 'cp.async' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000058_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11077; error   : Feature 'cp.async' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000058_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11080; error   : Feature 'cp.async.commit_group' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000058_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11088; error   : Feature 'cp.async.wait_group' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000058_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11295; error   : Feature 'cp.async.wait_all' requires .target sm_80 or higher\nptxas fatal   : Ptx assembly aborted due to errors\nninja: build stopped: subcommand failed.\n\n",
+   "b8_raw_tail": "00000000-6_rwkv7_wkv_fp16_v2.ptx, line 9957; error   : Feature 'cp.async.wait_all' requires .target sm_80 or higher\nptxas /tmp/tmpxft_000000b7_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11054; error   : Feature 'cp.async' requires .target sm_80 or higher\nptxas /tmp/tmpxft_000000b7_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11057; error   : Feature 'cp.async.commit_group' requires .target sm_80 or higher\nptxas /tmp/tmpxft_000000b7_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11068; error   : Feature 'cp.async' requires .target sm_80 or higher\nptxas /tmp/tmpxft_000000b7_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11077; error   : Feature 'cp.async' requires .target sm_80 or higher\nptxas /tmp/tmpxft_000000b7_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11080; error   : Feature 'cp.async.commit_group' requires .target sm_80 or higher\nptxas /tmp/tmpxft_000000b7_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11088; error   : Feature 'cp.async.wait_group' requires .target sm_80 or higher\nptxas /tmp/tmpxft_000000b7_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11295; error   : Feature 'cp.async.wait_all' requires .target sm_80 or higher\nptxas fatal   : Ptx assembly aborted due to errors\nninja: build stopped: subcommand failed.\n\n",
+   "b32_raw_tail": "00000000-6_rwkv7_wkv_fp16_v2.ptx, line 9957; error   : Feature 'cp.async.wait_all' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000114_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11054; error   : Feature 'cp.async' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000114_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11057; error   : Feature 'cp.async.commit_group' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000114_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11068; error   : Feature 'cp.async' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000114_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11077; error   : Feature 'cp.async' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000114_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11080; error   : Feature 'cp.async.commit_group' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000114_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11088; error   : Feature 'cp.async.wait_group' requires .target sm_80 or higher\nptxas /tmp/tmpxft_00000114_00000000-6_rwkv7_wkv_fp16_v2.ptx, line 11295; error   : Feature 'cp.async.wait_all' requires .target sm_80 or higher\nptxas fatal   : Ptx assembly aborted due to errors\nninja: build stopped: subcommand failed.\n\n"
+  }
+ },
+ "L4": {
+  "gpu": "NVIDIA L4",
+  "sm": 89,
+  "arch_list": "8.9",
+  "commit": "343147a333fcd6dd0845de0d165089685402c012",
+  "results": {
+   "b1": {
+    "decode_p50_ms": 8.81,
+    "decode_tok_s": 113.5,
+    "prefill_p50_ms": 82.4612,
+    "prefill_tok_s": 12418.0,
+    "n_runs": 3
+   },
+   "b8": {
+    "decode_p50_ms": 12.251,
+    "decode_tok_s": 653.0,
+    "prefill_p50_ms": 577.9738,
+    "prefill_tok_s": 14173.7,
+    "n_runs": 3
+   },
+   "b32": {
+    "decode_p50_ms": 15.4567,
+    "decode_tok_s": 2070.3,
+    "prefill_p50_ms": 2616.4178,
+    "prefill_tok_s": 12524.0,
+    "n_runs": 3
+   }
+  }
+ },
+ "A10G": {
+  "gpu": "NVIDIA A10G",
+  "sm": 86,
+  "arch_list": "8.6",
+  "commit": "343147a333fcd6dd0845de0d165089685402c012",
+  "results": {
+   "b1": {
+    "decode_p50_ms": 4.9157,
+    "decode_tok_s": 203.4,
+    "prefill_p50_ms": 75.3183,
+    "prefill_tok_s": 13595.6,
+    "n_runs": 3
+   },
+   "b8": {
+    "decode_p50_ms": 8.0051,
+    "decode_tok_s": 999.4,
+    "prefill_p50_ms": 434.0854,
+    "prefill_tok_s": 18871.9,
+    "n_runs": 3
+   },
+   "b32": {
+    "decode_p50_ms": 8.7803,
+    "decode_tok_s": 3644.5,
+    "prefill_p50_ms": 1701.0012,
+    "prefill_tok_s": 19263.9,
+    "n_runs": 3
+   }
+  }
+ },
+ "A100-40GB": {
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "sm": 80,
+  "arch_list": "8.0",
+  "commit": "343147a333fcd6dd0845de0d165089685402c012",
+  "results": {
+   "b1": {
+    "decode_p50_ms": 2.9302,
+    "decode_tok_s": 341.3,
+    "prefill_p50_ms": 45.8803,
+    "prefill_tok_s": 22318.9,
+    "n_runs": 3
+   },
+   "b8": {
+    "decode_p50_ms": 5.2966,
+    "decode_tok_s": 1510.4,
+    "prefill_p50_ms": 151.232,
+    "prefill_tok_s": 54168.4,
+    "n_runs": 3
+   },
+   "b32": {
+    "decode_p50_ms": 5.717,
+    "decode_tok_s": 5597.3,
+    "prefill_p50_ms": 593.8499,
+    "prefill_tok_s": 55178.9,
+    "n_runs": 3
+   }
+  }
+ },
+ "A100-80GB": {
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "sm": 80,
+  "arch_list": "8.0",
+  "commit": "343147a333fcd6dd0845de0d165089685402c012",
+  "results": {
+   "b1": {
+    "decode_p50_ms": 2.5939,
+    "decode_tok_s": 385.5,
+    "prefill_p50_ms": 45.3576,
+    "prefill_tok_s": 22576.2,
+    "n_runs": 3
+   },
+   "b8": {
+    "decode_p50_ms": 4.8584,
+    "decode_tok_s": 1646.6,
+    "prefill_p50_ms": 150.6,
+    "prefill_tok_s": 54395.8,
+    "n_runs": 3
+   },
+   "b32": {
+    "decode_p50_ms": 5.1041,
+    "decode_tok_s": 6269.5,
+    "prefill_p50_ms": 568.0172,
+    "prefill_tok_s": 57688.4,
+    "n_runs": 3
+   }
+  }
+ },
+ "L40S": {
+  "gpu": "NVIDIA L40S",
+  "sm": 89,
+  "arch_list": "8.9",
+  "commit": "343147a333fcd6dd0845de0d165089685402c012",
+  "results": {
+   "b1": {
+    "decode_p50_ms": 3.4273,
+    "decode_tok_s": 291.8,
+    "prefill_p50_ms": 31.6841,
+    "prefill_tok_s": 32319.0,
+    "n_runs": 3
+   },
+   "b8": {
+    "decode_p50_ms": 5.504,
+    "decode_tok_s": 1453.5,
+    "prefill_p50_ms": 176.8832,
+    "prefill_tok_s": 46313.0,
+    "n_runs": 3
+   },
+   "b32": {
+    "decode_p50_ms": 5.9034,
+    "decode_tok_s": 5420.6,
+    "prefill_p50_ms": 702.6816,
+    "prefill_tok_s": 46632.8,
+    "n_runs": 3
+   }
+  }
+ },
+ "H100": {
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "sm": 90,
+  "arch_list": "9.0",
+  "commit": "343147a333fcd6dd0845de0d165089685402c012",
+  "results": {
+   "b1": {
+    "decode_p50_ms": 1.6467,
+    "decode_tok_s": 607.3,
+    "prefill_p50_ms": 28.2472,
+    "prefill_tok_s": 36251.4,
+    "n_runs": 3
+   },
+   "b8": {
+    "decode_p50_ms": 2.8837,
+    "decode_tok_s": 2774.2,
+    "prefill_p50_ms": 67.7623,
+    "prefill_tok_s": 120893.2,
+    "n_runs": 3
+   },
+   "b32": {
+    "decode_p50_ms": 3.1915,
+    "decode_tok_s": 10026.6,
+    "prefill_p50_ms": 212.0541,
+    "prefill_tok_s": 154526.6,
+    "n_runs": 3
+   }
+  }
+ },
+ "H200": {
+  "gpu": "NVIDIA H200",
+  "sm": 90,
+  "arch_list": "9.0",
+  "commit": "343147a333fcd6dd0845de0d165089685402c012",
+  "results": {
+   "b1": {
+    "decode_p50_ms": 1.4614,
+    "decode_tok_s": 684.3,
+    "prefill_p50_ms": 27.5236,
+    "prefill_tok_s": 37204.4,
+    "n_runs": 3
+   },
+   "b8": {
+    "decode_p50_ms": 3.1385,
+    "decode_tok_s": 2549.0,
+    "prefill_p50_ms": 65.3198,
+    "prefill_tok_s": 125413.7,
+    "n_runs": 3
+   },
+   "b32": {
+    "decode_p50_ms": 2.972,
+    "decode_tok_s": 10767.2,
+    "prefill_p50_ms": 205.6345,
+    "prefill_tok_s": 159350.7,
+    "n_runs": 3
+   }
+  }
+ },
+ "B200": {
+  "gpu": "NVIDIA B200",
+  "sm": 100,
+  "arch_list": "10.0",
+  "commit": "343147a333fcd6dd0845de0d165089685402c012",
+  "results": {
+   "b1": {
+    "decode_p50_ms": 1.344,
+    "decode_tok_s": 744.0,
+    "prefill_p50_ms": 24.6971,
+    "prefill_tok_s": 41462.4,
+    "n_runs": 3
+   },
+   "b8": {
+    "decode_p50_ms": 2.5636,
+    "decode_tok_s": 3120.6,
+    "prefill_p50_ms": 51.4009,
+    "prefill_tok_s": 159374.6,
+    "n_runs": 3
+   },
+   "b32": {
+    "decode_p50_ms": 2.816,
+    "decode_tok_s": 11363.6,
+    "prefill_p50_ms": 167.5467,
+    "prefill_tok_s": 195575.3,
+    "n_runs": 3
+   }
+  }
+ },
+ "RTX-PRO-6000": {
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "sm": 120,
+  "arch_list": "12.0",
+  "commit": "343147a333fcd6dd0845de0d165089685402c012",
+  "results": {
+   "b1": {
+    "decode_p50_ms": 2.1861,
+    "decode_tok_s": 457.4,
+    "prefill_p50_ms": 26.1008,
+    "prefill_tok_s": 39232.5,
+    "n_runs": 3
+   },
+   "b8": {
+    "decode_p50_ms": 4.4512,
+    "decode_tok_s": 1797.3,
+    "prefill_p50_ms": 110.2832,
+    "prefill_tok_s": 74281.5,
+    "n_runs": 3
+   },
+   "b32": {
+    "decode_p50_ms": 4.1704,
+    "decode_tok_s": 7673.1,
+    "prefill_p50_ms": 391.458,
+    "prefill_tok_s": 83707.6,
+    "n_runs": 3
+   }
+  }
+ }
+}
