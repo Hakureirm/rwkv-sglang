@@ -1,0 +1,72 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 10.77,
+      "out_tokens": 2048,
+      "out_tok_per_s": 190.1,
+      "req_per_s": 0.743,
+      "lat_p50_s": 1.343,
+      "lat_p99_s": 1.362,
+      "per_stream_tok_s": 190.1,
+      "prompt_tokens_per_req": 64
+    },
+    {
+      "concurrency": 8,
+      "requests": 32,
+      "wall_s": 8.92,
+      "out_tokens": 8192,
+      "out_tok_per_s": 918.0,
+      "req_per_s": 3.586,
+      "lat_p50_s": 2.216,
+      "lat_p99_s": 2.306,
+      "per_stream_tok_s": 114.7,
+      "prompt_tokens_per_req": 64
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 9.75,
+      "out_tokens": 32768,
+      "out_tok_per_s": 3361.7,
+      "req_per_s": 13.132,
+      "lat_p50_s": 2.432,
+      "lat_p99_s": 2.488,
+      "per_stream_tok_s": 105.1,
+      "prompt_tokens_per_req": 64
+    }
+  ],
+  "peak": {
+    "concurrency": 32,
+    "requests": 128,
+    "wall_s": 9.75,
+    "out_tokens": 32768,
+    "out_tok_per_s": 3361.7,
+    "req_per_s": 13.132,
+    "lat_p50_s": 2.432,
+    "lat_p99_s": 2.488,
+    "per_stream_tok_s": 105.1,
+    "prompt_tokens_per_req": 64
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 8321,
+    "model": "rwkv7-g1g-1.5b",
+    "concurrencies": "1,8,32",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "prompt_mode": "auto",
+    "label": "small_maxseqs32",
+    "tag": "3090",
+    "engine_note": "vllm-rwkv 4bf0239a1 + 2 documented local patches (skip-external-projects build guard; postprocess_state 2-line compat shim required to run at all)",
+    "out": "/data/results/their_sweep_small_3090.json"
+  },
+  "prompt": {
+    "prompt_mode": "ids",
+    "effective_prompt_tokens": 64
+  },
+  "when_utc": "2026-07-05T17:50:28.319572+00:00"
+}

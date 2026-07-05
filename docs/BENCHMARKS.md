@@ -193,6 +193,42 @@ ratios above are against the stock numbers; against the re-tuned track they are 
 bsz1 (554.0 vs 553.9). Our launch parameters re-select at warmup on any card+CUDA — the design
 difference the next table quantifies.
 
+## 7b. Comparison with vllm-rwkv (the community vLLM fork)
+
+Measured 2026-07-06 under strictly equal conditions: same GPUs (RTX 3090 + RTX 5090), same
+weights file (tensor-verified), same client logic (our sweep client ported to their OpenAI
+endpoint, identical 64-in/256-out protocol), their engine at its documented best config.
+Disclosure: their tip (`4bf0239a1`) crashes on the first decode as shipped (an interface
+mismatch introduced by their automated upstream rebase); all numbers below required our
+documented 2-line compatibility fix to run at all. Their branch force-push rebases daily —
+pin commits when reproducing.
+
+**Correctness:** their fp16 engine also reproduces our fp32 numpy-oracle fixture 24/24
+token-exactly on both GPUs — two independent engines converging on the same reference is
+mutual validation, and worth stating plainly to their credit.
+
+**Throughput, theirs / ours-full-stack (wall-clock, in64/out256):**
+
+| concurrency | RTX 5090 | RTX 3090 |
+|---|---|---|
+| 1 | 1.1352 (they lead) | **0.8415 (we lead: 225.9 hist / 230.7 main vs their 190.1)** |
+| 8 | **0.9204 (we lead)** | **0.9677 (we lead)** |
+| 32 | **0.9866** | 1.0741 |
+| 64 | **0.9858** | 1.0714 |
+| 128 | 1.0507 | 1.1491 |
+| 256 | 1.2194 | 1.1864 |
+| peak (512/384) | 1.2621 (27,988 vs 22,175) | 1.1703 (8,583 vs 7,334) |
+
+**Reading it honestly:** their kernels are Albatross's (ported file-by-file), so single-stream
+tracks the Albatross baseline — they lead bsz1 on the 5090; on the 3090 our hand-written
+GEMV stack beats their port outright. We lead the c8–64 middle on the 5090. **They lead
+high concurrency on both cards (up to 1.26×)** — that is the real result of this comparison
+and our next kernel target. Two counters already exist: on the 3090 our int8 w8a8 peak
+(9,851) beats their fp16 peak (8,583) by **1.1477×**; on the 5090 the same int8 path is
+blocked by the upstream sgl-kernel sm120 gap — closing it (our own int8 kernel already
+runs everywhere else) is now the single highest-leverage speed item. Raw:
+`bench/results/vllmrwkv/` (correctness JSONs with full token ids + both sweeps per card).
+
 ## 8. Launch autotune across cards (why hardcoded constants don't travel)
 
 Kernel-level A/B of our GEMV launch autotune vs the built-in heuristic (interleaved 4-pass

@@ -1,0 +1,96 @@
+{
+  "rows": [
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 5.25,
+      "out_tokens": 65536,
+      "out_tok_per_s": 12486.3,
+      "req_per_s": 48.775,
+      "lat_p50_s": 1.303,
+      "lat_p99_s": 1.333,
+      "per_stream_tok_s": 195.1,
+      "prompt_tokens_per_req": 64
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 6.99,
+      "out_tokens": 131072,
+      "out_tok_per_s": 18745.4,
+      "req_per_s": 73.224,
+      "lat_p50_s": 1.739,
+      "lat_p99_s": 1.766,
+      "per_stream_tok_s": 146.4,
+      "prompt_tokens_per_req": 64
+    },
+    {
+      "concurrency": 256,
+      "requests": 1024,
+      "wall_s": 10.26,
+      "out_tokens": 262144,
+      "out_tok_per_s": 25542.6,
+      "req_per_s": 99.776,
+      "lat_p50_s": 2.549,
+      "lat_p99_s": 2.607,
+      "per_stream_tok_s": 99.8,
+      "prompt_tokens_per_req": 64
+    },
+    {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 14.5,
+      "out_tokens": 393216,
+      "out_tok_per_s": 27118.7,
+      "req_per_s": 105.932,
+      "lat_p50_s": 3.598,
+      "lat_p99_s": 3.721,
+      "per_stream_tok_s": 70.6,
+      "prompt_tokens_per_req": 64
+    },
+    {
+      "concurrency": 512,
+      "requests": 2048,
+      "wall_s": 18.73,
+      "out_tokens": 524288,
+      "out_tok_per_s": 27987.6,
+      "req_per_s": 109.327,
+      "lat_p50_s": 4.651,
+      "lat_p99_s": 4.811,
+      "per_stream_tok_s": 54.7,
+      "prompt_tokens_per_req": 64
+    }
+  ],
+  "peak": {
+    "concurrency": 512,
+    "requests": 2048,
+    "wall_s": 18.73,
+    "out_tokens": 524288,
+    "out_tok_per_s": 27987.6,
+    "req_per_s": 109.327,
+    "lat_p50_s": 4.651,
+    "lat_p99_s": 4.811,
+    "per_stream_tok_s": 54.7,
+    "prompt_tokens_per_req": 64
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 8321,
+    "model": "rwkv7-g1g-1.5b",
+    "concurrencies": "64,128,256,384,512",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "prompt_mode": "auto",
+    "label": "large_maxseqs512",
+    "tag": "5090",
+    "engine_note": "vllm-rwkv 4bf0239a1 + 2 documented local patches (skip-external-projects build guard; postprocess_state 2-line compat shim required to run at all)",
+    "out": "/data/bench5090/vllmrwkv/results/their_sweep_large_5090.json"
+  },
+  "prompt": {
+    "prompt_mode": "ids",
+    "effective_prompt_tokens": 64
+  },
+  "when_utc": "2026-07-06T01:35:31.222953+00:00"
+}

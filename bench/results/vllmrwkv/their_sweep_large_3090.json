@@ -1,0 +1,84 @@
+{
+  "rows": [
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 12.22,
+      "out_tokens": 65536,
+      "out_tok_per_s": 5365.0,
+      "req_per_s": 20.957,
+      "lat_p50_s": 2.986,
+      "lat_p99_s": 3.12,
+      "per_stream_tok_s": 83.8,
+      "prompt_tokens_per_req": 64
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 18.94,
+      "out_tokens": 131072,
+      "out_tok_per_s": 6921.3,
+      "req_per_s": 27.036,
+      "lat_p50_s": 4.615,
+      "lat_p99_s": 4.778,
+      "per_stream_tok_s": 54.1,
+      "prompt_tokens_per_req": 64
+    },
+    {
+      "concurrency": 256,
+      "requests": 1024,
+      "wall_s": 32.24,
+      "out_tokens": 262144,
+      "out_tok_per_s": 8130.6,
+      "req_per_s": 31.76,
+      "lat_p50_s": 7.857,
+      "lat_p99_s": 8.218,
+      "per_stream_tok_s": 31.8,
+      "prompt_tokens_per_req": 64
+    },
+    {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 45.81,
+      "out_tokens": 393216,
+      "out_tok_per_s": 8583.2,
+      "req_per_s": 33.528,
+      "lat_p50_s": 11.236,
+      "lat_p99_s": 11.8,
+      "per_stream_tok_s": 22.4,
+      "prompt_tokens_per_req": 64
+    }
+  ],
+  "peak": {
+    "concurrency": 384,
+    "requests": 1536,
+    "wall_s": 45.81,
+    "out_tokens": 393216,
+    "out_tok_per_s": 8583.2,
+    "req_per_s": 33.528,
+    "lat_p50_s": 11.236,
+    "lat_p99_s": 11.8,
+    "per_stream_tok_s": 22.4,
+    "prompt_tokens_per_req": 64
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 8321,
+    "model": "rwkv7-g1g-1.5b",
+    "concurrencies": "64,128,256,384",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "prompt_mode": "auto",
+    "label": "large_maxseqs384",
+    "tag": "3090",
+    "engine_note": "vllm-rwkv 4bf0239a1 + 2 documented local patches (skip-external-projects build guard; postprocess_state 2-line compat shim required to run at all)",
+    "out": "/data/results/their_sweep_large_3090.json"
+  },
+  "prompt": {
+    "prompt_mode": "ids",
+    "effective_prompt_tokens": 64
+  },
+  "when_utc": "2026-07-05T17:53:11.118696+00:00"
+}

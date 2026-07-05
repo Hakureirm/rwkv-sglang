@@ -1,0 +1,72 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 4.54,
+      "out_tokens": 2048,
+      "out_tok_per_s": 451.0,
+      "req_per_s": 1.762,
+      "lat_p50_s": 0.568,
+      "lat_p99_s": 0.575,
+      "per_stream_tok_s": 451.0,
+      "prompt_tokens_per_req": 64
+    },
+    {
+      "concurrency": 8,
+      "requests": 32,
+      "wall_s": 5.34,
+      "out_tokens": 8192,
+      "out_tok_per_s": 1534.6,
+      "req_per_s": 5.995,
+      "lat_p50_s": 1.332,
+      "lat_p99_s": 1.346,
+      "per_stream_tok_s": 191.8,
+      "prompt_tokens_per_req": 64
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 4.48,
+      "out_tokens": 32768,
+      "out_tok_per_s": 7316.4,
+      "req_per_s": 28.58,
+      "lat_p50_s": 1.114,
+      "lat_p99_s": 1.132,
+      "per_stream_tok_s": 228.6,
+      "prompt_tokens_per_req": 64
+    }
+  ],
+  "peak": {
+    "concurrency": 32,
+    "requests": 128,
+    "wall_s": 4.48,
+    "out_tokens": 32768,
+    "out_tok_per_s": 7316.4,
+    "req_per_s": 28.58,
+    "lat_p50_s": 1.114,
+    "lat_p99_s": 1.132,
+    "per_stream_tok_s": 228.6,
+    "prompt_tokens_per_req": 64
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 8321,
+    "model": "rwkv7-g1g-1.5b",
+    "concurrencies": "1,8,32",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "prompt_mode": "auto",
+    "label": "small_maxseqs32",
+    "tag": "5090",
+    "engine_note": "vllm-rwkv 4bf0239a1 + 2 documented local patches (skip-external-projects build guard; postprocess_state 2-line compat shim required to run at all)",
+    "out": "/data/bench5090/vllmrwkv/results/their_sweep_small_5090.json"
+  },
+  "prompt": {
+    "prompt_mode": "ids",
+    "effective_prompt_tokens": 64
+  },
+  "when_utc": "2026-07-06T01:34:13.408550+00:00"
+}
