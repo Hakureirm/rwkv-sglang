@@ -63,6 +63,7 @@ from sglang.srt.layers.attention.rwkv7_kernels import fast_linear
 from sglang.srt.layers.attention.rwkv7_kernels import lora_fused
 from sglang.srt.layers.attention.rwkv7_kernels import sparse_cmix
 from sglang.srt.layers.attention.rwkv7_kernels import w4_linear
+from sglang.srt.layers.attention.rwkv7_kernels import w8a8_linear
 from sglang.srt.layers.attention.rwkv7_kernels.fused import (
     fused_gate_corr,
     fused_kk_kmix,
@@ -1060,6 +1061,10 @@ class Rwkv7ForCausalLM(nn.Module):
         super().__init__()
         self.config = config
         self.quant_config = quant_config
+        # w8a8_int8's cutlass GEMM is sm80-90 only; on sm100/120 route its linear
+        # method through our s8-wmma kernel BEFORE any layer builds. No-op elsewhere.
+        if quant_config is not None and quant_config.get_name() == "w8a8_int8":
+            w8a8_linear.maybe_patch_w8a8_linear_method()
         self.pp_group = get_pp_group()
         self.model = Rwkv7Model(config, quant_config, prefix=add_prefix("model", prefix))
         # lm_head exists on every pp rank (llama pattern; only the last rank uses
