@@ -2,236 +2,87 @@
 
 [English](README.md) · **简体中文**
 
-一个**生产级的 RWKV-7 在 [sglang](https://github.com/sgl-project/sglang) 上的实现**：
-数值正确（对齐 BlinkDL `rwkv-lm` 参考，逐 token 精确）、自包含、可量化、可跨消费级与
-数据中心 GPU 运行，并复用 sglang 原生的动态批处理（dynamic batching）、分块预填充
-（chunked prefill）和一个**大小恒定的循环状态缓存**。
+**RWKV-7 在 [sglang](https://github.com/sgl-project/sglang) 上的生产级推理**:
+输出与参考实现逐 token 一致、支持 int8/int4 量化、覆盖 11 种平台——10 种 CUDA GPU
+(从 2018 年的 T4 到 B200、RTX 5090)加 Apple Silicon。
+下文每一个数字的原始日志都在 [`bench/results/`](bench/results/) 里。
 
-基于 **sglang v0.5.10.post1** 开发并验证（这是开发机 CUDA-12.9 驱动能跑的最新版本；
-sglang `main` 需要 CUDA 13）。以**覆盖层（overlay）**形式交付（`sglang_overlay/`），
-部署时叠加进已安装的 sglang —— 见[目录结构](#目录结构)。
+**同时支持 sglang `main` 和 v0.5.10**——同一份代码,版本差异在运行时自动识别。
+模型支持的核心部分已提交上游:[sglang PR #30115](https://github.com/sgl-project/sglang/pull/30115)。
 
-> 说明：本项目把 RWKV-7 集成进 sglang 用于生产级 serving。目标：在精度上对齐 rwkv-lm 参考、
-> 在速度/显存上对齐 albatross（跨各档 batch size）；复用 sglang 原生的动态批处理 + 分块预填充
-> + 大小恒定的循环状态缓存；8/4-bit 量化不慢于 16-bit；覆盖消费级到数据中心的多种 GPU。
+## 为什么用 RWKV-7 做推理服务
 
-**快速跳转：** [📊 基准一览](#-基准一览) · [当前诚实标准](#当前诚实标准2026-07-01对标-blinkdl--albatross) · [设计目标与状态](#设计目标与状态) · [部署](#部署快速上手) · [目录结构](#目录结构) · [文档与决策](docs/)
+RWKV-7 是循环模型:每条序列的状态是**固定大小**的,和上下文多长无关——而 Transformer 的
+KV 缓存随 token 数线性增长。实测效果:并发从 1 路加到 256 路、或上下文拉长 64 倍,
+显存各只多用 **不到 0.2 GB**。高并发、长上下文正是这个架构的优势区。
 
----
+## 目前能做什么(2026-07-05)
 
-## 为什么是 RWKV-7 × sglang
-
-RWKV-7 是纯循环（RNN）架构，**每个 token 的状态是 O(1) 常量**，不随上下文长度增长。
-对比之下，Transformer（含 Qwen3.5 的 KV 部分）的状态随序列长度线性膨胀。以 L24-D1024 为例：
-
-| | 状态大小 |
+| | |
 |---|---|
-| RWKV-7 | **1.62M（恒定）** |
-| Qwen3.5 | 5.05M + 6.14×(T/1000) M（随上下文 T 增长） |
+| **正确性** | 贪心输出与 numpy fp32 参考实现逐 token 一致——0.1B / 1.5B / 7.2B(CUDA)和 Apple Silicon(MLX)都是 24/24;动态批、分块预填充、CUDA graph、TP 2/4/8、PP 2/4/8 下同样精确 |
+| **精度指标** | MATH500 贪心:新版 0.3940,旧版 0.3920——差异在统计波动内,精度没有变化。压缩率:fp16 0.6085,int8 0.6086(即无损) |
+| **服务能力** | 动态批处理、分块预填充、循环状态前缀缓存(高复用负载下命中率约 98%) |
+| **量化** | int8(仅权重,贪心无损)和 int4(GPTQ),配手写 CUDA 核——在每种测过的 GPU 上小批量都快于 fp16;开箱即用的量化权重已发布在 ModelScope |
+| **投机解码** | 第一阶段已跑通:小模型起草、大模型一次验证,拒绝的部分靠固定大小的状态快照回滚。10 组对照测试中 9 组与普通解码逐 token 相同,唯一差异查明是浮点运算顺序的极小抖动,不是算法错误——完整分析见 [F0031](docs/findings/0031-spec-decode-increment-i.md) |
+| **Apple Silicon** | 原生 MLX 实现,自写 Metal 计算核,用同一个 numpy 参考做验证——见 [`mlx_port/`](mlx_port/) |
+| **上游贡献** | 模型 PR [#30115](https://github.com/sgl-project/sglang/pull/30115)(在 RTX 3090 与 RTX 5090 上验证);另发现并修复了 sglang 流水线并行的一个静默数据损坏:issue [#30015](https://github.com/sgl-project/sglang/issues/30015) → 修复 PR [#30095](https://github.com/sgl-project/sglang/pull/30095) |
 
-这意味着在**高并发、长上下文**场景下，RWKV-7 能在同样显存里塞下多得多的并发序列，
-这正是它在 serving 上的结构性优势，也是本项目的切入点（wedge）。
+## 速度
 
----
+1.5B 模型,单卡,sglang main。"单请求" = 一条流的持续解码速度;
+"峰值" = 并发扫描中的最佳总吞吐(64 token 提示词、256 token 输出)。
 
-## 📊 基准一览
-独占 RTX 3090、可复现（≥7 次取中位）——方法与原始日志见 **[`bench/results/`](bench/results/)**
-（服务规模 [`serving_scale/`](bench/results/serving_scale/)，同精度 [`comparison_clean.md`](bench/results/comparison_clean.md)，
-精度 [`lm_eval.md`](bench/results/lm_eval.md)）。这是一个**服务引擎**交付，所以头牌放我们赢的服务轴；
-albatross 的主场（同精度**单流**裸解码）随后完整摊开——不藏任何东西。
-
-### 生产级服务引擎赢在哪 ✅
-
-**1. 并发吞吐——填满 batch 可扩展约 50×**（1.5B，稳态解码 tok/s，RTX 3090）：
-*1.5B · bf16 · RTX 3090 · cuda-graph ON · radix OFF · 无量化 · 512-token 上下文 · 稳态解码（[`serving_scale/`](bench/results/serving_scale/)）*
-```
-bsz   1  █░░░░░░░░░░░░░░░░░░░░░    166 tok/s
-bsz  16  █████░░░░░░░░░░░░░░░░░  2,143
-bsz  64  ████████████████░░░░░  6,445
-bsz 128  █████████████████████  8,298
-bsz 256  ████████████████████░  8,187   (算力受限，进入平台)
-```
-
-**2. 显存 O(1)——并发与上下文双恒定**（1.5B，nvidia-smi 峰值）：
-*1.5B · bf16 · RTX 3090 · cuda-graph ON · radix OFF · 无量化 · 全 GPU nvidia-smi 峰值*
-| 扩展轴 | 基线 | 放大后 | Δ 峰值显存 |
-|---|---|---|---|
-| **并发** | bsz 1 = 12,420 MiB | **bsz 256** = 12,622 MiB | **+202 MiB** 承载 256 条并发 |
-| **上下文** | 1K = 12,364 MiB | **64K** = 12,368 MiB | **+4 MiB**（上下文放大 64×） |
-
-每条 RWKV-7 状态是固定 162 万元素的常量（**无 KV cache**），所以 256 条并发——在*任意*上下文长度下——
-显存开销与一条几乎相同。KV-cache Transformer 的显存随 batch × 上下文增长，早就 OOM 了。解码保持
-**O(1)/token**（无论上下文多长都是个位数 ms/step；TTFT 是 O(T)，任何模型都如此）。**7.2B 同样成立**：
-上下文 1K→32K 峰值显存 **+0 MiB**；并发 bsz 1→64 解码 46.6→1,802.7 tok/s（38.7×）、仅 +308 MiB——
-单张 24G 卡承载 64 路并发 7.2B（[`serving_scale/`](bench/results/serving_scale/)）。
-
-**3. int8 (w8a8) 基本追平 albatross-fp16**——7.2B 上，我们的 int8 落在
-**albatross-fp16 的 0.88–1.21×**（解码，bsz 1/8/32；即*跨精度*对比：我们的 int8 vs 它的 fp16），
-同时权重字节 **−46%**。这是 albatross 没有的量化路径。
-
-**3b. 手写 weight-only int8(w8a16):贪心逐-token 精确,且 bsz≤32 每档快于/持平 fp16**——24/24
-精确(实践无损),解码 bsz 1/2/4/8/16/32 为 fp16 的 1.37×/1.31×/1.27×/1.06×/**1.13×/1.02×**
-(227/392/732/1181/2523/3962 tok/s;bsz64 0.77×,如实报),与 int4 同款三核分派(GEMV / 逐行位一致
-小-M GEMM / smem 内解量化 tensor-core GEMM),且 **全架构可跑**(按架构 JIT)——不同于 cutlass
-w8a8(仅 sm80–90)。`RWKV_W8=1`;详见
-[`docs/findings/0018`](docs/findings/0018-w8-weight-only.md)。
-
-**3c. 手写 int4 在 bsz≤32 每档快于/持平 fp16（RTX 3090，1.5B）**——解码 bsz 1/2/4/8/16/32 分别为 fp16 的
-1.56×/1.45×/1.35×/1.04×/**1.17×/1.03×**（259/435/773/1153/2619/4004 vs 166/300/574/1113/2243/3873
-tok/s；bsz64 为 0.80×，如实报），由三个手写核分派：`gemv_w4_m1`、`gemm_w4_small`（逐行位一致）、
-tensor-core `gemm_w4_tc`（smem 内解量化 + 确定性 split-K）。**7.2B**：bsz1
-**102.8 tok/s = albatross-fp16（79.6）的 1.29×**（跨精度），样本贪心 **8/8 精确**，lambada
-0.7161 vs bf16 0.7425（−2.64pt，RTN）——并已**在真 16 GB T4 上实测**：贪心 8/8 精确、
-bsz1 32.9 tok/s、峰值显存仅 **6.7 GB**。非 3090 卡上已验证的 int4 优势档位为 bsz1
-（见 [`multigpu.md`](bench/results/multigpu.md)）。详见 [`bench/results/w4/`](bench/results/w4/)。
-
-**3d. Bo 钦定精度尺(uncheatable 压缩率)证实 int8 无损**——1.5B 全量语料(15 类×500)POOLED
-压缩率:fp16 **0.6085**、w8 **0.6086**(+0.0001 无损)、w4-GPTQ 0.6514;7.2B int4-GPTQ lambada
-**0.7297 vs bf16 0.7425(−1.28pt)**。量化权重已公开:[ModelScope `Hakureirm/rwkv7-g1-{1.5b-w8g64, 1.5b-w4gptq, 7.2b-w4gptq}`](https://modelscope.cn/models/Hakureirm/rwkv7-g1-1.5b-w8g64)。
-
-**4. 精度逐-token 精确**——对 rwkv-lm 纯 numpy oracle 贪心逐-token 命中，0.1B / 1.5B / 7.2B
-（fp16 + bf16，cuda-graph）；lm-eval 与 rwkv-lm **持平**（1.5B lambada 0.673 vs 0.671，MMLU 0.524 vs 0.511）。
-
-**5. 全 GPU 系列可跑**——**10 种 GPU、7 个 SM 世代、Turing → Blackwell**（T4 / L4 / A10G /
-A100-40/80 / L40S / H100 / H200 / **B200** / **RTX PRO 6000**）各卡真机实测：bf16 **全 10 卡
-逐-token 精确**；手写 **int4 全 10 卡可跑且 bsz1 比 bf16 快（fp16≈bf16 已在 T4 验证）**——从 Turing（不依赖 cp.async）到
-Blackwell sm120（RTX PRO 6000 上 int4 bsz1 **1.41×** bf16），无需按架构改代码。峰值：**B200
-预填充 103,022 tok/s、解码 7,213 tok/s** @bsz32。（int8 仅支持 sm80–90——上游 sgl-kernel cutlass
-覆盖限制。）完整网格见 [`bench/results/multigpu.md`](bench/results/multigpu.md)。
-
-### albatross 唯一领先的那条轴——完整摊开 🔬
-**同精度 fp16、*单流*裸解码。** 这是 albatross 的主场：它是纯单流 mega-kernel，已达
-**3090 显存带宽天花板的 ~92%**，而我们是完整的动态批服务引擎。我们照样公布每一个数字
-（越高越接近它的裸核；`1.00×` = 持平；最佳配置 = in-place WKV + `RWKV_SPARSE_FFN=1` + `RWKV_FAST_LINEAR=1`）：
-*1.5B + 7.2B · fp16 · bsz 1/8/32 · RTX 3090 · cuda-graph ON · radix OFF · 贪心 24/24 精确 · in-place WKV（默认）+ RWKV_SPARSE_FFN=1 + RWKV_FAST_LINEAR=1 —— 不含 RWKV_FUSED_LORA（上图早于该核；见图下说明）*
-```
-              ours / albatross-fp16 —— 同精度单流（decode tok/s）
-7.2B  bsz1  ██████████████████░░░░  0.83×   (45.9 → 65.7 tok/s)
-7.2B  bsz8  █████████████████░░░░░  0.84×
-7.2B  bsz32 ██████████████░░░░░░░░  0.72×   (in-place WKV +24%)
-1.5B  bsz1  █████████████░░░░░░░░░  0.66×
-1.5B  bsz8  ██████████████████░░░░  0.90×   ← 最接近持平
-1.5B  bsz32 ██████████████░░░░░░░░  0.70×
-```
-配合更新的融合 LoRA 核（[F0020](docs/findings/0020-fused-lora.md)），1.5B bsz1 提升到
-226.5 tok/s（约 0.73×）；上图数据早于该核。
-
-0.1B 各行（0.49–0.79×）此处**不列**——launch 受限的极小模型是最不具服务代表性的场景；完整数字见
-[`comparison_clean.md`](bench/results/comparison_clean.md)。即便在这条对我们最不利的轴上，我们真正会去
-服务的中/大模型也在 **0.66–0.90×**，靠三个手写贪心精确核补齐（in-place WKV + 稀疏 FFN + 融合 GEMV）。
-
-**结论：** 真实服务里——**并发、显存、int8、精度**——RWKV-7 × sglang 赢；albatross 只在同精度单流裸解码
-上领先，且只在它的带宽天花板处。
-
----
-
-## 当前诚实标准（2026-07-01，对标 BlinkDL / albatross）
-
-下面对标 albatross 的数字为独占 RTX 3090 的干净测量、可复现（`bench/results/comparison_clean.md`
-与 `lm_eval.md`，取代早期与其他任务共卡的 `comparison.md`）；**跨卡扫测覆盖 10 种 GPU、
-Turing → Blackwell、各卡真机实测**（`bench/results/multigpu.md`）。
-
-- ✅ **正确性**：RWKV-7 **0.1B / 1.5B / 7.2B** 全部 **贪心逐-token 精确**（greedy-EXACT）
-  对齐 numpy / `rwkv-lm` 参考（fp16 + bf16）；动态批（共享前缀 / 混合）同样精确。
-- ✅ **精度 = 与 rwkv-lm 持平**（lm-eval，1.5B）：lambada 0.673 vs 参考 0.671，
-  MMLU 0.524 vs 0.511。（7.2B：贪心逐-token 精确 + 完整打分 lambada 0.742。）
-- ⚖️ **同精度原始速度：手写 CUDA 已补上大半差距。** fp16 对 fp16 解码现为
-  **0.49–0.90× albatross（全尺寸/全 bsz）**（原 0.46–0.85×），靠三个**不依赖 FLA、贪心精确、
-  批不变**的手写核：
-  - **in-place 索引 WKV 状态读写**（默认）：WKV 递归是唯一随 batch 增长的解码分量，现直接
-    读写分页状态池（不再 gather/scatter），显著抬升**批处理/生产档**：7.2B bsz32 0.61→**0.72×**、
-    1.5B bsz32 0.57→**0.70×**（约 +24%）。
-  - **稀疏 sqrelu FFN**（`RWKV_SPARSE_FFN=1`）：`relu(k)²` 真实 **86–90% 为零**，手写 fp32
-    累加 SpMV 跳过约 9/10 value 权重读取；**融合 fp16 GEMV**（`RWKV_FAST_LINEAR=1`）管
-    r/k/v/o+key 投影（bsz1 档）。
-  - 最佳组合：**7.2B bsz1 45.9→65.7 tok/s（0.58→0.83×）**，1.5B bsz8 **0.90×**。证据见
-    `bench/results/{comparison_clean.md,best2,sparse_ffn}`。albatross 仍领先原始解码（整层
-    mega-kernel，~92% 带宽峰值）；彻底追平需同款整层融合，会牺牲干净集成。
-- ✅ **int8（w8a8，albatross 没有的特性）**：7.2B 上，我们的 int8 **基本追平**
-  albatross-fp16（解码 **0.88–1.21×**，bsz 1/8/32；跨精度对比：我们的 int8 vs 它的 fp16），不是同精度对比。
-- ✅ **显存**：循环状态是 O(1)/token，**随 batch 恒定**；albatross 的静态 B×T 在
-  7.2B bsz32 时逼近 OOM。int8 把权重字节再砍约 **46%**（7.2B）。
-- ✅ **多卡（10 种 GPU，Turing→Blackwell）**：T4/L4/A10G/A100-40/A100-80/L40S/H100/H200/
-  B200/RTX PRO 6000 全部 bf16 贪心精确、int4 全卡可跑且更快，无需按架构改代码
-  （`bench/results/multigpu.md`）。
-  ✅ **RWKV-7 执行路径不含 FLA**（自研 WKV 核；精确范围见下文"参考与口径"）。
-- 🔜 **待办**：fp8；World 分词器 serving 打磨 + 上游 PR。
-
-**定位（诚实）：** 我们在**精度上与 rwkv-lm 持平**（已验证），在 **显存 / int8 / 真实
-serving**（动态批——albatross 没有）上**领先**，并用三个手写贪心精确核**补上了同精度原始速度的
-大半差距**——现为 albatross 的 **0.49–0.90×**（全尺寸/全 bsz；7.2B bsz1 0.83×，1.5B bsz8 0.90×）。
-最后一点需 albatross 那种整层 mega-kernel（牺牲干净集成，最好也只~持平）。
-
----
-
-## 设计目标与状态
-
-对本项目工程目标的诚实自评（2026-07-01），范围限定为一个 sglang 推理集成；
-✅ 完成，◑ 部分，⬜ 未做 / 不在本项目范围。
-
-*下表所引速度数字：RTX 3090 · cuda-graph ON · radix OFF · 除注明外均贪心精确；fp16"最佳" = in-place WKV + RWKV_SPARSE_FFN=1 + RWKV_FAST_LINEAR=1（加 RWKV_FUSED_LORA=1 把 1.5B bsz1 从 202.9 提到 226.5，见 F0020）；w4/w8 = RWKV_W4/RWKV_W8=1（RTN/GPTQ 见各行）；非 3090 卡见 [`multigpu.md`](bench/results/multigpu.md)。*
-
-| # | 目标 | 本交付的状态 |
+| GPU | 单请求 | 峰值服务吞吐 |
 |---|---|---|
-| 1 | 跨 bsz 达到 albatross/RWKV-LM 性能 | ◑ 精度**持平** RWKV-LM；显存/int8/serving **领先**；同精度原始 fp16 解码 **0.49–0.90×（全尺寸/全 bsz）**（原 0.46–0.85×），靠 3 个手写贪心精确核（in-place WKV + 稀疏 FFN + 融合 GEMV）——`bench/results/comparison_clean.md` |
-| 2 | 同量化下比 Qwen3.5 快（典型场景） | — **不在本项目范围**（一个 sglang 推理集成）：本交付对标 **albatross**（速度/显存）+ **RWKV-LM**（精度） |
-| 3 | transformers 的 PEFT/RL 训练 | ⬜ 不在本项目范围（一个 sglang 推理集成） |
-| 4 | 动态批 + 分块预填充 + 状态缓存 | ✅ sglang 原生动态批 + 分块预填充 + O(1) 循环状态池；◑ 前缀**复用** radix 暂自动关闭（状态尚不可前缀缓存——已记录为 `MambaRadixCache` 后续项） |
-| 5 | Pascal+/AMD/Intel/国产；PP+TP；zero2/3；autotune | ◑ 10 种 GPU（Turing→Blackwell）贪心精确；**TP 在 2/4/8 卡、PP 在 2/4/8 段均贪心 24/24 精确（真 L4 集群实测）**（tp=1/pp=1 零回归；混合 tp×pp 已修复(v_first 全宽过境)且贪心精确；W4/W8 暂限 tp=1；完整矩阵含每卡显存：[`bench/results/parallel/`](bench/results/parallel/)、[`docs/findings/0019`](docs/findings/0019-tp-pp-parallel.md)）；⬜ Pascal/AMD/Intel 未测，训练/autotune 不在范围 |
-| 6 | w8 + w4，比 w16 快，老卡，Q\*_K_M 精度 | ✅ **w8（w8a8-int8）**——比 bf16 快（1.5B/7.2B 解码 +46–59%）、权重 −46%、7.2B 贪心精确；✅ **w4（手写 int4）**——**bsz≤32 每档快于/持平 fp16（RTX 3090，1.5B；1.03–1.56×）**，非 3090 卡已验证的优势为 bsz1（7.2B bsz1 102.8 tok/s、样本贪心 8/8 精确、lambada 0.7161 vs 0.7425、总显存 9.8 GB），10 种 GPU Turing→Blackwell 全卡可跑；◑ Q\*_K_M 直接对表未做（我们的 GPTQ g64 @1.5B −3.34pt 为可比点） |
-| 7 | 初步投机解码（RWKV 做 draft） | ⬜ 未做 |
+| RTX 3090 | 230.7 tok/s | 7,205 tok/s(fp16)· **9,851 tok/s(int8)** |
+| RTX 5090 | **409.8 tok/s**(fp16)· **548.8**(int4) | **22,175 tok/s** |
 
-已完整验证、最强的贡献是：**精确正确性（0.1B/1.5B/7.2B）**、**int8 速度/显存**、
-**sglang 原生 serving**、**多卡**、**自研不含 FLA 的 WKV 核**，以及一次
-**严格测量、诚实汇报的 CUDA 终局**（F0015）。
+- 同一套代码在 T4、L4、A10G、A100(40/80GB)、L40S、H100、H200、B200 上全部正常运行——
+  逐卡数据见 [`fleet_main_10cards.json`](bench/results/fleet_main_10cards.json)。
+- 真实负载抽样(ShareGPT 对话数据,RTX 5090):峰值输出 9,845 tok/s;每秒 16 个请求到达时,
+  首字延迟中位数 32 毫秒。
+- **与 BlinkDL 的 Albatross 对比**(官方速度参照;注意它是一个纯测速程序,没有请求调度和
+  服务接口):我们的单请求速度是它的 0.9004 倍(L4)到 0.5129 倍(B200)不等——GPU 显存带宽
+  越高,它的整层融合设计越占优。在作者本人调参用的 RTX 5090 上,我们的 int4 达到它 fp16 速度的
+  **0.9908 倍**。T4 这类老卡上 Albatross 无法编译(它用了 sm80 以上才有的指令),我们可以正常
+  服务。逐卡数据:[`albatross_fleet_10cards.json`](bench/results/albatross_fleet_10cards.json)。
 
----
+## 快速上手
 
-## 精度与速度：参考与口径（无 FLA）
+**在 sglang main 上**(例如 `lmsysorg/sglang:dev-cu12` 容器内):
 
-- **精度基准 = BlinkDL `rwkv` pip 包 + 一份纯 NumPy 转写**的 RWKV-7 递推
-  （`bench/oracle_numpy.py`，遵循 BlinkDL 的 `rwkv_v7_numpy.py`）。我们**不**用
-  flash-linear-attention 作为精度参考。
-- **速度/显存基准 = BlinkDL/albatross**，在我们自己的 3090 上重测（`bench/results/`）。
-- **核策略（ADR-0004）：RWKV-7 路径上不依赖 `flash-linear-attention`（PyPI 包）。**
-  （overlay 里被改动的**上游** sglang 文件仍保留 sglang 自己的 `…fla…` mamba/gated-delta
-  导入，但 RWKV-7 从不触发它们；模型目录名/转换脚本名里的 `-fla` 指的是 fla-格式的
-  **权重布局**，不是代码依赖。）
+```bash
+cd /sgl-workspace/sglang
+git apply <本仓库>/sglang_main_port/upstream_edits.patch   # 7 处小的接线修改
+# 然后复制 RWKV-7 文件(模型、后端、计算核、配置):
+#   文件清单和目标路径见 sglang_main_port/README.md
+python -m sglang.launch_server --model-path <rwkv7模型目录> --trust-remote-code \
+    --attention-backend triton --dtype float16 --disable-radix-cache
+```
 
----
+**在 sglang v0.5.10 上**(pip 安装的环境):`BOX=<主机> SP=<site-packages路径> bash scripts/deploy.sh`
+——rsync 覆盖层并应用两处单行补丁。
+
+手写加速核通过环境变量按需开启,全部经过贪心精确验证;推荐的生产组合见
+[`scripts/serve.sh`](scripts/serve.sh)。模型:任意 fla 格式的 RWKV-7 权重
+(HF 上的 `fla-hub/rwkv7-*`),或我们发布在 ModelScope 的 int8/int4 量化权重(`Hakureirm/rwkv7-g1-*`)。
+
+**在 Mac 上**:见 [`mlx_port/README.md`](mlx_port/README.md)。
 
 ## 目录结构
 
-- `sglang_overlay/` —— **交付主体**：新增 + 修改的 sglang 文件（模型、状态后端、config、
-  接线），通过 `scripts/deploy.sh` 叠加进 sglang（rsync 覆盖，无需编译）。
-- `tools/convert_rwkv7_blinkdl_to_fla.py` —— 把 BlinkDL `.pth` 转成 sglang 可加载的权重。
-- `bench/` —— 精度基准（`oracle_numpy.py`）、门禁（`verify_m1d.py`、`verify_batch.py`）、
-  吞吐（`throughput.py`、`run_clean_comparison.py`）、lm-eval（`accuracy_eval.py`）、
-  样本与 `results/`。
-- `docs/` —— `snapshot.md`（权威状态）、`adr/`、`findings/`、`design/`。
-
----
-
-## 部署（快速上手）
-
-`sglang_overlay/` 镜像了 sglang 的包结构；`scripts/deploy.sh` 把它 rsync 进目标机上
-已安装的 sglang site-packages（不编译），随后照常启动 sglang 即可加载 RWKV-7：
-
-```bash
-# 通过环境变量配置目标（默认值仅为占位符）：
-#   BOX = 目标机的 ssh 别名（本机安装用 "" 或 localhost）
-#   SP  = 目标机上 sglang venv 的 site-packages 路径
-BOX=<你的机器> SP=<site-packages 路径> bash scripts/deploy.sh
+```
+sglang_overlay/    实现本体:模型、状态后端、CUDA/Triton 计算核、投机解码 worker
+sglang_main_port/  同一份代码在 sglang main 上的应用方式(补丁 + 文件清单)
+mlx_port/          Apple Silicon 原生实现(MLX + Metal 核)
+bench/             全部基准与正确性验证脚本;原始输出在 bench/results/
+docs/              编号的测量报告(findings)与设计决策(ADR)——完整证据链
+scripts/           deploy.sh(v0.5.10 部署)· serve.sh(推荐启动参数)
 ```
 
-先用 BlinkDL `.pth` 经 `tools/convert_rwkv7_blinkdl_to_fla.py` 转成可加载权重，再用
-sglang 正常起服务。量化推理加 `--quantization w8a8_int8`。
+## 每个数字的出处
 
----
-
-## 开发环境
-
-- 远程机：1× RTX 3090，sglang **v0.5.10.post1**（torch 2.9.1/cu128）——之所以锁版本，
-  是因为 sglang `main` 需要 CUDA 13，而开发机驱动仅支持 ≤12.9。
-- 机器上无 GitHub/HF：参考代码在 Mac 上克隆到 `refs/`（已 gitignore）再 rsync 上去；
-  模型走 ModelScope；密钥放在未纳入版本控制的 `~/.rwkv_secrets.sh`（**从不提交**）。
+[`CONTRIBUTIONS.md`](CONTRIBUTIONS.md) 把每个关键数字对应到它的原始日志。
+[`docs/findings/`](docs/findings/) 是带日期的测量报告,方法学齐全,负面结果也如实记录。
+如果你重跑 `bench/` 里的脚本得到不同的数字,欢迎提 issue。
