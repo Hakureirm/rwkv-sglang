@@ -42,7 +42,7 @@ full re-run was **bit-identical** (pooled 0.6085, drift −0.0000 over ~7.5M tok
 ## 2. Accuracy rulers (official RWKV evaluation definitions)
 
 **Compression rate** (bits per byte on fresh corpora, lower is better; tokenizer-independent,
-15 corpora × 500 documents; v0.5.10 measurements, main re-run in progress):
+15 corpora × 500 documents). **Re-measured in full on sglang main (2026-07-05): every value below reproduced to the 4th decimal on BOTH the RTX 5090 and RTX 3090** — different silicon, different engine version, same pooled cross-entropy over ~7.5M tokens (`bench/results/uncheatable_full_*_5090main.json`, `*_3090main.json`):
 
 | precision | pooled bpb | vs fp16 |
 |---|---|---|
@@ -65,7 +65,7 @@ keeps absorbing context: 3.65 bits at position 0-64 → 2.24 bits past 1024) are
 | pass@64 (v0.5.10) | 0.6980 | ≥1 correct in 64 |
 | greedy avg@1, v0.5.10 | 0.3920 (196/500) | deterministic |
 | greedy avg@1, **main** | **0.3940 (197/500)** | Δ +0.0020, far inside the ±0.0220 noise band → no regression (`bench/results/math500_greedy_5090main.json`) |
-| avg@64 on main | in progress (both GPUs) | |
+| avg@64, **main** | **0.4042 (12,934/32,000)** | Δ −0.0018 vs v0.5.10, inside the ±0.0027 per-run band → no regression (`bench/results/math500_avg64_5090main.json`); the eval itself sustained 16,884 tok/s on the 5090 |
 
 ## 3. Single-request speed ladder (steady-state, 1.5B fp16)
 
