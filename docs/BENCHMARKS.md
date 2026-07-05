@@ -240,7 +240,9 @@ runs everywhere else) is now the single highest-leverage speed item. Raw:
 The synthetic sweep above uses one fixed shape (64-in/256-out). Real serving is
 variable-length, which stresses the scheduler differently. Same neutral client
 (`sglang.bench_serving`), same ShareGPT file, same 500 prompts, same weights, each engine
-at its best config. Two load levels: peak (all requests at once) and steady (16 req/s).
+at its best config. Two load levels: peak (all requests at once) and steady (16 req/s). Equal-conditions proof:
+all 8 runs processed exactly 168,913 input tokens and generated exactly 109,861 output tokens
+— same prompts in, same tokens out (identical weights + greedy + ignore_eos).
 
 **Output throughput (tok/s) and latency, RTX 5090:**
 
@@ -257,8 +259,11 @@ at its best config. Two load levels: peak (all requests at once) and steady (16 
 |---|---|---|---|---|
 | peak | rwkv-sglang | **3,974** | **7,297 ms** | **717 ms** |
 | peak | vllm-rwkv | 2,805 | 12,750 ms | 1,595 ms |
-| 16 req/s | rwkv-sglang | 2,477 | **316 ms** | 1,239 ms |
-| 16 req/s | vllm-rwkv | 2,600 | 375 ms | 375 ms |
+| 16 req/s* | rwkv-sglang | 2,477 | **316 ms** | 1,239 ms |
+| 16 req/s* | vllm-rwkv | 2,600 | 375 ms | 375 ms |
+
+*The 3090 can't actually sustain 16 req/s on this model (both engines top out ~11–12 req/s),
+so this row is mild overload, not true steady state. The 5090 handles 16 req/s comfortably.
 
 **The reversal — and it's the point.** On the *synthetic fixed-shape* sweep, vllm-rwkv led
 high concurrency (its Albatross kernels + decode-wave batching like uniform shapes). On
