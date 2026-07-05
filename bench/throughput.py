@@ -187,6 +187,10 @@ def main():
     )
     if args.cuda_graph and args.cuda_graph_max_bs is not None:
         engine_kwargs["cuda_graph_max_bs"] = args.cuda_graph_max_bs
+    # keep the same invocation across sglang versions (e.g. main dropped
+    # disable_piecewise_cuda_graph): only pass kwargs ServerArgs still accepts
+    from sglang.srt.server_args import ServerArgs
+    engine_kwargs = {k: v for k, v in engine_kwargs.items() if k in ServerArgs.__dataclass_fields__}
     engine = sgl.Engine(**engine_kwargs)
 
     rows = []
