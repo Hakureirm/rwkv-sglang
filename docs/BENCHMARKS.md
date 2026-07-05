@@ -65,7 +65,7 @@ keeps absorbing context: 3.65 bits at position 0-64 → 2.24 bits past 1024) are
 | pass@64 (v0.5.10) | 0.6980 | ≥1 correct in 64 |
 | greedy avg@1, v0.5.10 | 0.3920 (196/500) | deterministic |
 | greedy avg@1, **main** | **0.3940 (197/500)** | Δ +0.0020, far inside the ±0.0220 noise band → no regression (`bench/results/math500_greedy_5090main.json`) |
-| avg@64, **main** | **0.4042 (12,934/32,000)** | Δ −0.0018 vs v0.5.10, inside the ±0.0027 per-run band → no regression (`bench/results/math500_avg64_5090main.json`); the eval itself sustained 16,884 tok/s on the 5090 |
+| avg@64, **main** | **0.4042** (RTX 5090) / **0.4063** (RTX 3090) | both inside the ±0.0027 per-run band around v0.5.10's 0.4060 → no regression on either card (`bench/results/math500_avg64_{5090main,3090main}.json`) |
 
 ## 3. Single-request speed ladder (steady-state, 1.5B fp16)
 
@@ -95,6 +95,13 @@ Three modes, all with hand-written kernels, all arch-portable (JIT per GPU):
 
 Prequantized checkpoints are required (the loader reads qweight/scale keys; pointing the
 quant flags at an fp16 dir errors out by design).
+
+**An honest int4 warning (measured 2026-07-05):** perplexity-style metrics understate int4's
+damage to multi-step reasoning. On the 1.5B GPTQ checkpoint, compression looks mild (0.6514)
+but **MATH500 greedy collapses to 0.1560** (78/500, vs fp16's 0.3940) — the quantized model
+loses the thread mid-derivation and rambles to the token cap (60% truncation vs 14%). Treat
+1.5B int4 as a memory tool for non-reasoning workloads; the 7.2B GPTQ (much smaller lambada
+loss) is being re-checked on the same ruler. Raw: `bench/results/math500_greedy_w4gptq_5090main.json`.
 
 ## 5. Serving throughput (wall-clock, 64-in/256-out, concurrency sweep)
 
