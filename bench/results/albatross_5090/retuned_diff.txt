@@ -1,0 +1,73 @@
+--- /data/albatross/faster3a_2605/rwkv7_fast_v3a.py	2026-07-06 00:50:40.323679043 +0800
++++ /data/albatross-tuned/faster3a_2605/rwkv7_fast_v3a.py	2026-07-06 07:28:55.620845806 +0800
+@@ -747,6 +747,17 @@
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 128, 1)
+                 if 96 <= path.rows < 112:
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 32, 3)
++                # [5090-retune] RTX 5090 (GB202, cu129) sweep 2026-07-05: stock lt indices re-rank; see sweep_full_dump.json
++                if path.rows >= 16384:
++                    return torch.ops.rwkv7_v3a_ops.linear_f16_orig(x.contiguous(), weight)  # 1.82-1.88x vs lt(32,4) @32768
++                if path.rows >= 8192:
++                    return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 0, 1)  # 1.13-1.14x vs lt(32,4) @8192
++                if path.rows >= 1024:
++                    return torch.ops.rwkv7_v3a_ops.linear_f16_orig(x.contiguous(), weight)  # 1.32-1.42x vs lt(32,4) @1024
++                if 32 <= path.rows < 48:
++                    return torch.ops.rwkv7_v3a_ops.linear_f16_orig(x.contiguous(), weight)  # 1.54x vs lt(0,0) @32
++                if 5 <= path.rows < 12:
++                    return torch.ops.rwkv7_v3a_ops.linear_orig_rows_f16(x.contiguous(), weight, 1, 8)  # 2.14-2.26x vs lt(0,2) @8, err 4.1e-4
+             if C == 1024:
+                 if 256 <= path.rows < 384:
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 128, 0)
+@@ -759,6 +770,15 @@
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 128, 0)
+                 if 96 <= path.rows < 112:
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 32, 4)
++                # [5090-retune] see sweep_full_dump.json
++                if path.rows >= 16384:
++                    return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 0, 1)  # 1.20-1.22x vs lt(32,4) @32768
++                if path.rows >= 1024:
++                    return torch.ops.rwkv7_v3a_ops.linear_f16_orig(x.contiguous(), weight)  # 1.08-1.11x @1024, 1.10x @8192 vs lt(32,4)
++                if 32 <= path.rows < 48:
++                    return torch.ops.rwkv7_v3a_ops.linear_f16_orig(x.contiguous(), weight)  # 1.53-1.61x vs lt(0,0) @32
++                if 5 <= path.rows < 12:
++                    return torch.ops.rwkv7_v3a_ops.linear_orig_rows_f16(x.contiguous(), weight, 3, 2)  # 2.19-2.20x vs lt(0,2) @8, err 2.9e-4
+             if C == 2560:
+                 if path.rows >= 256:
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 0, 1)
+@@ -774,6 +794,16 @@
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 128, 2)
+                 if path.rows >= 5:
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig(x.contiguous(), weight)
++            if C == 4096:
++                # [5090-retune] C=4096 had no special-case rows upstream; see sweep_full_dump.json
++                if path.rows >= 8192:
++                    return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 0, 0)  # 1.08x @8192, 1.19x @32768 vs lt(32,4)
++                if path.rows >= 1024:
++                    return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 32, 6)  # 1.07-1.08x vs lt(32,4) @1024
++                # rows 32-47 -> orig (1.27-1.31x in L2-warm microbench) REVERTED: e2e decode b32 regressed -1.45%
++                # (33.5MB weight L2-resident in microbench, cold DRAM stream in model; stock lt(0,0) wins there)
++                if 5 <= path.rows < 12:
++                    return torch.ops.rwkv7_v3a_ops.linear_f16_orig(x.contiguous(), weight)  # 2.00-2.09x vs lt(0,2) @8
+             if path.rows >= 1024:
+                 return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 32, 4)
+             if path.rows >= 768:
+@@ -812,6 +842,9 @@
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig(x.contiguous(), weight)
+                 if 96 <= path.rows < 112:
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig(x.contiguous(), weight)
++                # [5090-retune] see sweep_full_dump.json
++                if 12 <= path.rows < 48:
++                    return torch.ops.rwkv7_v3a_ops.linear_f16_orig(x.contiguous(), weight)  # 1.52-1.54x vs lt(0,0) @32
+             if C == 1024:
+                 if 256 <= path.rows < 384:
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 32, 2)
+@@ -821,6 +854,9 @@
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 32, 2)
+             if C == 2048 and 128 <= path.rows < 160:
+                 return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 0, 3)
++            # [5090-retune] see sweep_full_dump.json
++            if C == 2048 and 12 <= path.rows < 48:
++                return torch.ops.rwkv7_v3a_ops.linear_f16_orig(x.contiguous(), weight)  # 1.29-1.32x vs lt(0,0) @32
+             if C == 2560:
+                 if path.rows >= 192:
+                     return torch.ops.rwkv7_v3a_ops.linear_f16_orig_lt_cfg(x.contiguous(), weight, 32, 5)

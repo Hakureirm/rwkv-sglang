@@ -1,0 +1,200 @@
+{
+ "0.1b/b1/decode": {
+  "stock_p50_ms": 0.5619,
+  "stock_tok_s": 1779.6760989499912,
+  "stock_spread_pct": 0.14237408791600337,
+  "stock_runs": 3,
+  "tuned_p50_ms": 0.5619,
+  "tuned_tok_s": 1779.6760989499912,
+  "tuned_spread_pct": 0.10678056593700748,
+  "tuned_runs": 3,
+  "delta_pct": 0.0
+ },
+ "0.1b/b1/prefill": {
+  "stock_p50_ms": 6.9813,
+  "stock_tok_s": 146677.55289129532,
+  "stock_spread_pct": 0.09453826651196363,
+  "stock_runs": 3,
+  "tuned_p50_ms": 6.9216,
+  "tuned_tok_s": 147942.67221451688,
+  "tuned_spread_pct": 0.059234858992130816,
+  "tuned_runs": 3,
+  "delta_pct": 0.8625173370319095
+ },
+ "0.1b/b8/decode": {
+  "stock_p50_ms": 1.2342,
+  "stock_tok_s": 6481.931615621455,
+  "stock_spread_pct": 0.2673796791443916,
+  "stock_runs": 3,
+  "tuned_p50_ms": 1.1117,
+  "tuned_tok_s": 7196.186021408654,
+  "tuned_spread_pct": 0.06296662768733877,
+  "tuned_runs": 3,
+  "delta_pct": 11.019159845282012
+ },
+ "0.1b/b8/prefill": {
+  "stock_p50_ms": 18.5063,
+  "stock_tok_s": 442660.0671122807,
+  "stock_spread_pct": 0.014049269708139894,
+  "stock_runs": 3,
+  "tuned_p50_ms": 18.1145,
+  "tuned_tok_s": 452234.3978580695,
+  "tuned_spread_pct": 0.05851665792597182,
+  "tuned_runs": 3,
+  "delta_pct": 2.1629081674901407
+ },
+ "0.1b/b32/decode": {
+  "stock_p50_ms": 0.8733,
+  "stock_tok_s": 36642.61994732624,
+  "stock_spread_pct": 0.45803274934157834,
+  "stock_runs": 3,
+  "tuned_p50_ms": 0.873,
+  "tuned_tok_s": 36655.21191294387,
+  "tuned_spread_pct": 0.630011454753717,
+  "tuned_runs": 3,
+  "delta_pct": 0.03436426116838476
+ },
+ "0.1b/b32/prefill": {
+  "stock_p50_ms": 63.154,
+  "stock_tok_s": 518858.66295088193,
+  "stock_spread_pct": 0.09658928967286307,
+  "stock_runs": 3,
+  "tuned_p50_ms": 55.6853,
+  "tuned_tok_s": 588449.7344900719,
+  "tuned_spread_pct": 0.0220884147162648,
+  "tuned_runs": 3,
+  "delta_pct": 13.41233682857057
+ },
+ "1.5b/b1/decode": {
+  "stock_p50_ms": 1.8054,
+  "stock_tok_s": 553.8938739337543,
+  "stock_spread_pct": 0.20494073335549112,
+  "stock_runs": 3,
+  "tuned_p50_ms": 1.8042,
+  "tuned_tok_s": 554.2622769094336,
+  "tuned_spread_pct": 0.11639507815098053,
+  "tuned_runs": 3,
+  "delta_pct": 0.06651147322913609
+ },
+ "1.5b/b1/prefill": {
+  "stock_p50_ms": 28.4163,
+  "stock_tok_s": 36035.655592036965,
+  "stock_spread_pct": 0.0971273529629108,
+  "stock_runs": 3,
+  "tuned_p50_ms": 27.3586,
+  "tuned_tok_s": 37428.81580197817,
+  "tuned_spread_pct": 0.05519288267674638,
+  "tuned_runs": 3,
+  "delta_pct": 3.8660603978273755
+ },
+ "1.5b/b8/decode": {
+  "stock_p50_ms": 4.6875,
+  "stock_tok_s": 1706.6666666666667,
+  "stock_spread_pct": 0.39253333333334695,
+  "stock_runs": 3,
+  "tuned_p50_ms": 4.4009,
+  "tuned_tok_s": 1817.8099934104387,
+  "tuned_spread_pct": 0.13633574950578808,
+  "tuned_runs": 3,
+  "delta_pct": 6.5123043013928905
+ },
+ "1.5b/b8/prefill": {
+  "stock_p50_ms": 134.034,
+  "stock_tok_s": 61118.82059775878,
+  "stock_spread_pct": 0.10773385857319062,
+  "stock_runs": 3,
+  "tuned_p50_ms": 131.4657,
+  "tuned_tok_s": 62312.83140773601,
+  "tuned_spread_pct": 0.06473171329098225,
+  "tuned_runs": 3,
+  "delta_pct": 1.9535894153379862
+ },
+ "1.5b/b32/decode": {
+  "stock_p50_ms": 3.529,
+  "stock_tok_s": 9067.724567866251,
+  "stock_spread_pct": 0.08500991782373675,
+  "stock_runs": 3,
+  "tuned_p50_ms": 3.2756,
+  "tuned_tok_s": 9769.202588838687,
+  "tuned_spread_pct": 0.051898888753206585,
+  "tuned_runs": 3,
+  "delta_pct": 7.73598730003664
+ },
+ "1.5b/b32/prefill": {
+  "stock_p50_ms": 507.0466,
+  "stock_tok_s": 64625.22379599824,
+  "stock_spread_pct": 0.12823278964892787,
+  "stock_runs": 3,
+  "tuned_p50_ms": 492.4932,
+  "tuned_tok_s": 66534.92880713886,
+  "tuned_spread_pct": 0.14337253793554758,
+  "tuned_runs": 3,
+  "delta_pct": 2.9550458767755527
+ },
+ "7.2b/b1/decode": {
+  "stock_p50_ms": 6.8047,
+  "stock_tok_s": 146.95725013593545,
+  "stock_spread_pct": 0.06466119005981753,
+  "stock_runs": 3,
+  "tuned_p50_ms": 6.8033,
+  "tuned_tok_s": 146.98749136448487,
+  "tuned_spread_pct": 0.01616862405009482,
+  "tuned_runs": 3,
+  "delta_pct": 0.020578248791025544
+ },
+ "7.2b/b1/prefill": {
+  "stock_p50_ms": 90.7391,
+  "stock_tok_s": 11285.102012252712,
+  "stock_spread_pct": 0.04849067270889499,
+  "stock_runs": 3,
+  "tuned_p50_ms": 89.6934,
+  "tuned_tok_s": 11416.670568848991,
+  "tuned_spread_pct": 0.032666840592514415,
+  "tuned_runs": 3,
+  "delta_pct": 1.1658605872896022
+ },
+ "7.2b/b8/decode": {
+  "stock_p50_ms": 8.8922,
+  "stock_tok_s": 899.6648748341242,
+  "stock_spread_pct": 0.11920559591552331,
+  "stock_runs": 3,
+  "tuned_p50_ms": 8.5899,
+  "tuned_tok_s": 931.326325102737,
+  "tuned_spread_pct": 0.050058789974279524,
+  "tuned_runs": 3,
+  "delta_pct": 3.519249350981979
+ },
+ "7.2b/b8/prefill": {
+  "stock_p50_ms": 575.465,
+  "stock_tok_s": 14235.444379762452,
+  "stock_spread_pct": 0.18244376287002328,
+  "stock_runs": 3,
+  "tuned_p50_ms": 559.3975,
+  "tuned_tok_s": 14644.327155555753,
+  "tuned_spread_pct": 0.28418074803694926,
+  "tuned_runs": 3,
+  "delta_pct": 2.8722867013170506
+ },
+ "7.2b/b32/decode": {
+  "stock_p50_ms": 10.8033,
+  "stock_tok_s": 2962.057889718882,
+  "stock_spread_pct": 0.040728295983621925,
+  "stock_runs": 3,
+  "tuned_p50_ms": 10.7987,
+  "tuned_tok_s": 2963.319658847824,
+  "tuned_spread_pct": 0.0944558141257681,
+  "tuned_runs": 3,
+  "delta_pct": 0.04259772009593821
+ },
+ "7.2b/b32/prefill": {
+  "stock_p50_ms": 2287.8502,
+  "stock_tok_s": 14322.616052397138,
+  "stock_spread_pct": 0.5565661597948861,
+  "stock_runs": 3,
+  "tuned_p50_ms": 2179.6388,
+  "tuned_tok_s": 15033.68356261597,
+  "tuned_spread_pct": 0.7544828069678409,
+  "tuned_runs": 3,
+  "delta_pct": 4.964648271080496
+ }
+}

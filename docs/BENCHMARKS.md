@@ -176,9 +176,22 @@ cross-precision), and the T4 row shows the coverage difference. Raw:
 `bench/results/albatross_fleet_10cards.json` + per-run logs.
 
 One more finding: on CUDA 12.9 the constants Albatross ships are no longer optimal even on
-the 5090 they were tuned for (its large-batch cuBLASLt algorithm indices drift across CUDA
-versions — we measured 1.08–1.19× left on the table). Our launch parameters are re-selected
-at warmup on whatever card+CUDA you run, which is the design difference the next table shows.
+the 5090 they were tuned for. We went further and **re-tuned Albatross for this card
+ourselves** (14 dispatch-table edits, every one verified numerically and end-to-end, one
+false win from an L2-resident microbench caught and reverted — full diff and evidence in
+`bench/results/albatross_5090/`). Result, stock → re-tuned on the RTX 5090 (median of 3):
+
+| model | batch | decode | prefill |
+|---|---|---|---|
+| 0.1b | 1 / 8 / 32 | +0.0% / **+11.0%** / +0.0% | +0.9% / +2.2% / **+13.4%** |
+| 1.5b | 1 / 8 / 32 | +0.0% / **+6.6%** / **+7.9%** | +5.2% / +1.9% / +2.9% |
+| 7.2b | 1 / 8 / 32 | +0.0% / +3.5% / +0.0% | +1.2% / +2.9% / **+5.0%** |
+
+Single-stream decode does not move (memory-bandwidth wall — stock 7.2b at 147.0 tok/s already
+exceeds the author's own published 144.04); the batch shapes gain up to 13%. Our single-request
+ratios above are against the stock numbers; against the re-tuned track they are unchanged at
+bsz1 (554.0 vs 553.9). Our launch parameters re-select at warmup on any card+CUDA — the design
+difference the next table quantifies.
 
 ## 8. Launch autotune across cards (why hardcoded constants don't travel)
 
