@@ -1,0 +1,23 @@
+Failed to load generation config for /data/models/rwkv7-1.5b-w4: /data/models/rwkv7-1.5b-w4 does not appear to have a file named generation_config.json. Checkout 'https://huggingface.co//data/models/rwkv7-1.5b-w4/tree/main' for available files.. Proceeding without generation config.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+[rwkv7] M6 fused fp16 GEMV projection path armed (fp16 bsz1 decode only; inactive for other dtypes)
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:05<00:00,  5.31s/it]Multi-thread loading shards: 100% Completed | 1/1 [00:05<00:00,  5.31s/it]
+  0%|          | 0/7 [00:00<?, ?it/s]Capturing batches (bs=24 avail_mem=17.57 GB):   0%|          | 0/7 [00:00<?, ?it/s][rwkv7] R2 fused paged shift+lerp6 glue ENABLED (decode, fp16)
+[rwkv7] R2 fused paged shift+lerp1 (ffn) glue ENABLED (decode, fp16)
+Capturing batches (bs=24 avail_mem=17.57 GB):  14%|█▍        | 1/7 [00:12<01:15, 12.52s/it]Capturing batches (bs=16 avail_mem=17.52 GB):  14%|█▍        | 1/7 [00:12<01:15, 12.52s/it]Capturing batches (bs=12 avail_mem=17.52 GB):  14%|█▍        | 1/7 [00:12<01:15, 12.52s/it]Capturing batches (bs=8 avail_mem=17.51 GB):  14%|█▍        | 1/7 [00:12<01:15, 12.52s/it] Capturing batches (bs=8 avail_mem=17.51 GB):  57%|█████▋    | 4/7 [00:12<00:07,  2.40s/it]Capturing batches (bs=4 avail_mem=17.51 GB):  57%|█████▋    | 4/7 [00:12<00:07,  2.40s/it][rwkv7] M9 fused LoRA path ENABLED (fp16 decode, M1+batched)
+Capturing batches (bs=2 avail_mem=17.41 GB):  57%|█████▋    | 4/7 [00:12<00:07,  2.40s/it]Capturing batches (bs=1 avail_mem=17.41 GB):  57%|█████▋    | 4/7 [00:12<00:07,  2.40s/it]Capturing batches (bs=1 avail_mem=17.41 GB): 100%|██████████| 7/7 [00:12<00:00,  1.82s/it]
+==================================================================================
+SERVING-SCALE  model=rwkv7-1.5b-w4  dtype=float16  mode=batch  cuda_graph=ON  radix=OFF
+  decode=64tok steady-state (prefill-subtracted)  mem_fraction=0.85  baseline=10 MiB
+----------------------------------------------------------------------------------
+ context |  bsz |  decode tok/s |   ms/step |    TTFT ms | peak VRAM MiB
+----------------------------------------------------------------------------------
+    1024 |    1 |         548.8 |      1.82 |       40.4 |         14482
+    1024 |    2 |         996.2 |      2.01 |       60.7 |         14598
+    1024 |    4 |        1731.9 |      2.31 |      119.4 |         14618
+    1024 |    8 |        2107.7 |      3.80 |      238.0 |         14620
+    1024 |   16 |        5089.0 |      3.14 |      471.1 |         14620
+    1024 |   32 |        3306.1 |      9.68 |      938.7 |         14620
+    1024 |   64 |        6686.1 |      9.57 |     1875.2 |         14622
+==================================================================================

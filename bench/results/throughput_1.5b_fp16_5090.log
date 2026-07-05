@@ -1,0 +1,21 @@
+Failed to load generation config for /data/models/rwkv7-1.5b-fla: /data/models/rwkv7-1.5b-fla does not appear to have a file named generation_config.json. Checkout 'https://huggingface.co//data/models/rwkv7-1.5b-fla/tree/main' for available files.. Proceeding without generation config.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+[rwkv7] M6 fused fp16 GEMV projection path armed (fp16 bsz1 decode only; inactive for other dtypes)
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:01<00:00,  1.37s/it]Multi-thread loading shards: 100% Completed | 1/1 [00:01<00:00,  1.37s/it]
+[rwkv7] R2 fused paged shift+lerp6 glue ENABLED (decode, fp16)
+[rwkv7] M9 fused LoRA path ENABLED (fp16 decode, M1+batched)
+[rwkv7] R2 fused paged shift+lerp1 (ffn) glue ENABLED (decode, fp16)
+[rwkv7] M6 sparse channel-mix value-proj ENABLED (bsz1 decode, fp16)
+
+==============================================================================
+THROUGHPUT  model=5090_1.5b  dtype=float16  cuda_graph=OFF  radix_cache=ON
+  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.85
+  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=10 MiB
+------------------------------------------------------------------------------
+ bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base
+------------------------------------------------------------------------------
+   1 |         133.6 |        28462.7 |      36.0 |         16104 |      16094
+   8 |         867.3 |        37839.1 |     216.5 |         16280 |      16270
+  32 |        3331.7 |        38336.6 |     854.7 |         16280 |      16270
+==============================================================================

@@ -1,0 +1,21 @@
+Failed to load generation config for /data/models/rwkv7-7.2b-fla: /data/models/rwkv7-7.2b-fla does not appear to have a file named generation_config.json. Checkout 'https://huggingface.co//data/models/rwkv7-7.2b-fla/tree/main' for available files.. Proceeding without generation config.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+[rwkv7] M6 fused fp16 GEMV projection path armed (fp16 bsz1 decode only; inactive for other dtypes)
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:13<00:00, 13.38s/it]Multi-thread loading shards: 100% Completed | 1/1 [00:13<00:00, 13.38s/it]
+[rwkv7] R2 fused paged shift+lerp6 glue ENABLED (decode, fp16)
+[rwkv7] M9 fused LoRA path ENABLED (fp16 decode, M1+batched)
+[rwkv7] R2 fused paged shift+lerp1 (ffn) glue ENABLED (decode, fp16)
+[rwkv7] M6 sparse channel-mix value-proj ENABLED (bsz1 decode, fp16)
+
+==============================================================================
+THROUGHPUT  model=5090_7.2b  dtype=float16  cuda_graph=OFF  radix_cache=ON
+  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.85
+  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=10 MiB
+------------------------------------------------------------------------------
+ bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base
+------------------------------------------------------------------------------
+   1 |         102.5 |         9259.4 |     110.6 |         25514 |      25504
+   8 |         651.7 |        11459.5 |     714.9 |         25740 |      25730
+  32 |        2439.2 |        11593.7 |    2826.4 |         25740 |      25730
+==============================================================================

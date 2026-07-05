@@ -1,0 +1,15 @@
+=== greedy gate fp16 (dtype=bfloat16) ===
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00,  3.88it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00,  3.88it/s]
+GREEDY MATCH 24/24  first_div=None  exact=True
+GOT  [37138, 45, 44312, 47, 11, 6699, 304, 25740, 109, 37480, 4600, 332, 47483, 4706, 37138, 21265, 44312, 47, 11, 6699, 304, 25740, 109, 37480]
+EXP  [37138, 45, 44312, 47, 11, 6699, 304, 25740, 109, 37480, 4600, 332, 47483, 4706, 37138, 21265, 44312, 47, 11, 6699, 304, 25740, 109, 37480]
+=== greedy gate w8 (dtype=float16) ===
+KeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'
+
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+[2026-07-05 19:24:48] Received sigquit from a child process. It usually means the child failed.
+=== greedy gate w4 (dtype=float16) ===
+KeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'
+
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+[2026-07-05 19:24:58] Received sigquit from a child process. It usually means the child failed.

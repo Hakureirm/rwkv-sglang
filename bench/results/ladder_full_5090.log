@@ -1,0 +1,24 @@
+Failed to load generation config for /data/models/rwkv7-1.5b-fla: /data/models/rwkv7-1.5b-fla does not appear to have a file named generation_config.json. Checkout 'https://huggingface.co//data/models/rwkv7-1.5b-fla/tree/main' for available files.. Proceeding without generation config.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+[rwkv7] M6 fused fp16 GEMV projection path armed (fp16 bsz1 decode only; inactive for other dtypes)
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:01<00:00,  1.18s/it]Multi-thread loading shards: 100% Completed | 1/1 [00:01<00:00,  1.18s/it]
+  0%|          | 0/7 [00:00<?, ?it/s]Capturing batches (bs=24 avail_mem=16.61 GB):   0%|          | 0/7 [00:00<?, ?it/s][rwkv7] R2 fused paged shift+lerp6 glue ENABLED (decode, fp16)
+[rwkv7] R2 fused paged shift+lerp1 (ffn) glue ENABLED (decode, fp16)
+Capturing batches (bs=24 avail_mem=16.61 GB):  14%|█▍        | 1/7 [00:00<00:02,  2.84it/s]Capturing batches (bs=16 avail_mem=16.56 GB):  14%|█▍        | 1/7 [00:00<00:02,  2.84it/s]Capturing batches (bs=12 avail_mem=16.56 GB):  14%|█▍        | 1/7 [00:00<00:02,  2.84it/s]Capturing batches (bs=8 avail_mem=16.56 GB):  14%|█▍        | 1/7 [00:00<00:02,  2.84it/s] Capturing batches (bs=8 avail_mem=16.56 GB):  57%|█████▋    | 4/7 [00:00<00:00,  9.97it/s]Capturing batches (bs=4 avail_mem=16.55 GB):  57%|█████▋    | 4/7 [00:00<00:00,  9.97it/s][rwkv7] M9 fused LoRA path ENABLED (fp16 decode, M1+batched)
+Capturing batches (bs=2 avail_mem=16.45 GB):  57%|█████▋    | 4/7 [00:00<00:00,  9.97it/s]Capturing batches (bs=1 avail_mem=16.45 GB):  57%|█████▋    | 4/7 [00:00<00:00,  9.97it/s][rwkv7] M6 sparse channel-mix value-proj ENABLED (bsz1 decode, fp16)
+Capturing batches (bs=1 avail_mem=16.45 GB): 100%|██████████| 7/7 [00:00<00:00, 14.93it/s]Capturing batches (bs=1 avail_mem=16.45 GB): 100%|██████████| 7/7 [00:00<00:00, 11.84it/s]
+==================================================================================
+SERVING-SCALE  model=rwkv7-1.5b-fla  dtype=float16  mode=batch  cuda_graph=ON  radix=OFF
+  decode=64tok steady-state (prefill-subtracted)  mem_fraction=0.85  baseline=10 MiB
+----------------------------------------------------------------------------------
+ context |  bsz |  decode tok/s |   ms/step |    TTFT ms | peak VRAM MiB
+----------------------------------------------------------------------------------
+    1024 |    1 |         409.8 |      2.44 |       36.0 |         16204
+    1024 |    2 |         554.1 |      3.61 |       56.7 |         16384
+    1024 |    4 |        1060.9 |      3.77 |      109.9 |         16404
+    1024 |    8 |        1714.5 |      4.67 |      216.5 |         16406
+    1024 |   16 |        3733.2 |      4.29 |      429.6 |         16406
+    1024 |   32 |        3297.5 |      9.70 |      850.8 |         16406
+    1024 |   64 |        6393.8 |     10.01 |     1703.1 |         16408
+==================================================================================

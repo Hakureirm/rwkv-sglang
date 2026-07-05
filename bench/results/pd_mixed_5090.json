@@ -1,0 +1,69 @@
+{
+  "rows": [
+    {
+      "rate": 2.0,
+      "completed": 300,
+      "wall_s": 146.47,
+      "out_tok_per_s": 524.3,
+      "req_per_s": 2.048,
+      "ttft_p50_ms": 23.6,
+      "ttft_p99_ms": 43.4,
+      "tpot_p50_ms": 3.84,
+      "tpot_p99_ms": 5.05
+    },
+    {
+      "rate": 4.0,
+      "completed": 300,
+      "wall_s": 73.76,
+      "out_tok_per_s": 1041.2,
+      "req_per_s": 4.067,
+      "ttft_p50_ms": 25.8,
+      "ttft_p99_ms": 44.0,
+      "tpot_p50_ms": 4.78,
+      "tpot_p99_ms": 5.33
+    },
+    {
+      "rate": 8.0,
+      "completed": 300,
+      "wall_s": 37.52,
+      "out_tok_per_s": 2046.8,
+      "req_per_s": 7.995,
+      "ttft_p50_ms": 26.6,
+      "ttft_p99_ms": 52.2,
+      "tpot_p50_ms": 5.06,
+      "tpot_p99_ms": 5.5
+    },
+    {
+      "rate": 16.0,
+      "completed": 300,
+      "wall_s": 19.31,
+      "out_tok_per_s": 3976.8,
+      "req_per_s": 15.534,
+      "ttft_p50_ms": 27.3,
+      "ttft_p99_ms": 58.4,
+      "tpot_p50_ms": 5.66,
+      "tpot_p99_ms": 6.88
+    },
+    {
+      "rate": "inf",
+      "completed": 300,
+      "wall_s": 6.47,
+      "out_tok_per_s": 11865.1,
+      "req_per_s": 46.348,
+      "ttft_p50_ms": 1721.5,
+      "ttft_p99_ms": 3269.8,
+      "tpot_p50_ms": 18.56,
+      "tpot_p99_ms": 24.65
+    }
+  ],
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "rates": "2,4,8,16,inf",
+    "in_len": 512,
+    "out_len": 256,
+    "num_prompts": 300,
+    "seed": 1234,
+    "out": "/data/bench5090/results/pd_mixed_5090.json"
+  }
+}
