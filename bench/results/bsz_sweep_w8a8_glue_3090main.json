@@ -1,0 +1,113 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 10.55,
+      "out_tokens": 2048,
+      "out_tok_per_s": 194.1,
+      "req_per_s": 0.758,
+      "lat_p50_s": 1.317,
+      "lat_p99_s": 1.327,
+      "per_stream_tok_s": 194.1
+    },
+    {
+      "concurrency": 8,
+      "requests": 32,
+      "wall_s": 6.34,
+      "out_tokens": 8192,
+      "out_tok_per_s": 1293.0,
+      "req_per_s": 5.051,
+      "lat_p50_s": 1.575,
+      "lat_p99_s": 1.584,
+      "per_stream_tok_s": 161.6
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 7.7,
+      "out_tokens": 32768,
+      "out_tok_per_s": 4253.3,
+      "req_per_s": 16.614,
+      "lat_p50_s": 1.888,
+      "lat_p99_s": 1.933,
+      "per_stream_tok_s": 132.9
+    },
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 10.06,
+      "out_tokens": 65536,
+      "out_tok_per_s": 6512.3,
+      "req_per_s": 25.439,
+      "lat_p50_s": 2.444,
+      "lat_p99_s": 2.555,
+      "per_stream_tok_s": 101.8
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 16.76,
+      "out_tokens": 131072,
+      "out_tok_per_s": 7821.4,
+      "req_per_s": 30.552,
+      "lat_p50_s": 4.029,
+      "lat_p99_s": 4.395,
+      "per_stream_tok_s": 61.1
+    },
+    {
+      "concurrency": 256,
+      "requests": 1024,
+      "wall_s": 26.61,
+      "out_tokens": 262144,
+      "out_tok_per_s": 9850.9,
+      "req_per_s": 38.48,
+      "lat_p50_s": 6.352,
+      "lat_p99_s": 6.749,
+      "per_stream_tok_s": 38.5
+    },
+    {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 40.58,
+      "out_tokens": 393216,
+      "out_tok_per_s": 9688.7,
+      "req_per_s": 37.847,
+      "lat_p50_s": 9.662,
+      "lat_p99_s": 10.192,
+      "per_stream_tok_s": 25.2
+    },
+    {
+      "concurrency": 512,
+      "requests": 2048,
+      "wall_s": 56.35,
+      "out_tokens": 524288,
+      "out_tok_per_s": 9304.4,
+      "req_per_s": 36.345,
+      "lat_p50_s": 13.488,
+      "lat_p99_s": 14.338,
+      "per_stream_tok_s": 18.2
+    }
+  ],
+  "peak": {
+    "concurrency": 256,
+    "requests": 1024,
+    "wall_s": 26.61,
+    "out_tokens": 262144,
+    "out_tok_per_s": 9850.9,
+    "req_per_s": 38.48,
+    "lat_p50_s": 6.352,
+    "lat_p99_s": 6.749,
+    "per_stream_tok_s": 38.5
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "concurrencies": "1,8,32,64,128,256,384,512",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "/tmp/bench3090main/results/bsz_sweep_w8a8_glue_3090main.json"
+  }
+}

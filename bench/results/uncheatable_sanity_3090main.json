@@ -1,0 +1,71 @@
+{
+  "model": "/models/rwkv7-1.5b-fla",
+  "ctx_len": 4000,
+  "max_docs": 100,
+  "datasets": {
+    "github_cpp": {
+      "neg_log_prob_sum": 1410.0096149932,
+      "avg tokens": 1892.25,
+      "avg character count": 5989.4,
+      "avg bytes": 6017.3,
+      "sample_count": 20,
+      "total_nll_nats": 28200.192299864004,
+      "total_bytes": 120346,
+      "bpc": 0.33963566954226576,
+      "bpb": 0.33806090425214735,
+      "compression_rate": 4.225761303151842
+    },
+    "wikipedia_english": {
+      "neg_log_prob_sum": 1125.5416237492948,
+      "avg tokens": 547.1,
+      "avg character count": 2369.0,
+      "avg bytes": 2376.7,
+      "sample_count": 20,
+      "total_nll_nats": 22510.832474985895,
+      "total_bytes": 47534,
+      "bpc": 0.6854425153639591,
+      "bpb": 0.6832218281218577,
+      "compression_rate": 8.540272851523222
+    }
+  },
+  "overall": {
+    "mean_compression_rate": 6.383017077337532,
+    "pooled_compression_rate": 5.447383842705602,
+    "pooled_bpb": 0.4357907074164481,
+    "total_docs": 40,
+    "wall_time_s": 4.666375637054443
+  },
+  "position_curve": [
+    {
+      "bucket": "[0-64)",
+      "tokens": 2560,
+      "mean_neg_log2_p": 2.737722868032395
+    },
+    {
+      "bucket": "[64-128)",
+      "tokens": 2560,
+      "mean_neg_log2_p": 2.1136956532979405
+    },
+    {
+      "bucket": "[128-256)",
+      "tokens": 5085,
+      "mean_neg_log2_p": 1.9461503747302753
+    },
+    {
+      "bucket": "[256-512)",
+      "tokens": 8080,
+      "mean_neg_log2_p": 1.8868116199233962
+    },
+    {
+      "bucket": "[512-1024)",
+      "tokens": 10607,
+      "mean_neg_log2_p": 1.5384164837567893
+    },
+    {
+      "bucket": "[1024+)",
+      "tokens": 19895,
+      "mean_neg_log2_p": 0.9691538757866197
+    }
+  ],
+  "methodology": "uncheatable_eval (Jellyfish042) via sglang /generate input_token_logprobs"
+}
