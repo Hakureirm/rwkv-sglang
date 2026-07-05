@@ -1,0 +1,102 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 34.02,
+      "out_tokens": 2048,
+      "out_tok_per_s": 60.2,
+      "req_per_s": 0.235,
+      "lat_p50_s": 4.253,
+      "lat_p99_s": 4.253,
+      "per_stream_tok_s": 60.2
+    },
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 21.47,
+      "out_tokens": 65536,
+      "out_tok_per_s": 3052.9,
+      "req_per_s": 11.925,
+      "lat_p50_s": 5.35,
+      "lat_p99_s": 5.375,
+      "per_stream_tok_s": 47.7
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 28.24,
+      "out_tokens": 131072,
+      "out_tok_per_s": 4641.6,
+      "req_per_s": 18.131,
+      "lat_p50_s": 7.028,
+      "lat_p99_s": 7.072,
+      "per_stream_tok_s": 36.3
+    },
+    {
+      "concurrency": 221,
+      "requests": 884,
+      "wall_s": 42.36,
+      "out_tokens": 226304,
+      "out_tok_per_s": 5342.3,
+      "req_per_s": 20.868,
+      "lat_p50_s": 10.534,
+      "lat_p99_s": 10.593,
+      "per_stream_tok_s": 24.2
+    },
+    {
+      "concurrency": 320,
+      "requests": 1280,
+      "wall_s": 52.22,
+      "out_tokens": 327680,
+      "out_tok_per_s": 6275.1,
+      "req_per_s": 24.512,
+      "lat_p50_s": 12.976,
+      "lat_p99_s": 13.053,
+      "per_stream_tok_s": 19.6
+    },
+    {
+      "concurrency": 448,
+      "requests": 1792,
+      "wall_s": 68.88,
+      "out_tokens": 458752,
+      "out_tok_per_s": 6660.2,
+      "req_per_s": 26.017,
+      "lat_p50_s": 17.098,
+      "lat_p99_s": 17.186,
+      "per_stream_tok_s": 14.9
+    },
+    {
+      "concurrency": 512,
+      "requests": 2048,
+      "wall_s": 75.04,
+      "out_tokens": 524288,
+      "out_tok_per_s": 6987.1,
+      "req_per_s": 27.293,
+      "lat_p50_s": 18.621,
+      "lat_p99_s": 18.72,
+      "per_stream_tok_s": 13.6
+    }
+  ],
+  "peak": {
+    "concurrency": 512,
+    "requests": 2048,
+    "wall_s": 75.04,
+    "out_tokens": 524288,
+    "out_tok_per_s": 6987.1,
+    "req_per_s": 27.293,
+    "lat_p50_s": 18.621,
+    "lat_p99_s": 18.72,
+    "per_stream_tok_s": 13.6
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "concurrencies": "1,64,128,221,320,448,512",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "/tmp/b72/sweep_72b_w8a8_max.json"
+  }
+}

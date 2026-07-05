@@ -1,0 +1,91 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 16.55,
+      "out_tokens": 2048,
+      "out_tok_per_s": 123.7,
+      "req_per_s": 0.483,
+      "lat_p50_s": 2.069,
+      "lat_p99_s": 2.07,
+      "per_stream_tok_s": 123.7
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 13.86,
+      "out_tokens": 32768,
+      "out_tok_per_s": 2364.1,
+      "req_per_s": 9.235,
+      "lat_p50_s": 3.456,
+      "lat_p99_s": 3.471,
+      "per_stream_tok_s": 73.9
+    },
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 16.3,
+      "out_tokens": 65536,
+      "out_tok_per_s": 4021.7,
+      "req_per_s": 15.71,
+      "lat_p50_s": 4.057,
+      "lat_p99_s": 4.08,
+      "per_stream_tok_s": 62.8
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 23.12,
+      "out_tokens": 131072,
+      "out_tok_per_s": 5668.3,
+      "req_per_s": 22.142,
+      "lat_p50_s": 5.748,
+      "lat_p99_s": 5.788,
+      "per_stream_tok_s": 44.3
+    },
+    {
+      "concurrency": 192,
+      "requests": 768,
+      "wall_s": 32.86,
+      "out_tokens": 196608,
+      "out_tok_per_s": 5983.3,
+      "req_per_s": 23.372,
+      "lat_p50_s": 8.148,
+      "lat_p99_s": 8.471,
+      "per_stream_tok_s": 31.2
+    },
+    {
+      "concurrency": 221,
+      "requests": 884,
+      "wall_s": 39.38,
+      "out_tokens": 226304,
+      "out_tok_per_s": 5747.0,
+      "req_per_s": 22.449,
+      "lat_p50_s": 9.785,
+      "lat_p99_s": 9.834,
+      "per_stream_tok_s": 26.0
+    }
+  ],
+  "peak": {
+    "concurrency": 192,
+    "requests": 768,
+    "wall_s": 32.86,
+    "out_tokens": 196608,
+    "out_tok_per_s": 5983.3,
+    "req_per_s": 23.372,
+    "lat_p50_s": 8.148,
+    "lat_p99_s": 8.471,
+    "per_stream_tok_s": 31.2
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "concurrencies": "1,32,64,128,192,221",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "/tmp/b72/sweep_72b_fp16.json"
+  }
+}
