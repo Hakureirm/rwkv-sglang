@@ -1,0 +1,802 @@
+{
+ "T4": {
+  "gpu": "Tesla T4",
+  "sm": 75,
+  "sglang_main": "b28bc10 fix(mimo-vl): pass padded_context_dim to Qwen2_5_VisionPatchMerger (#29994)",
+  "runs": {
+   "throughput_fp16_fullstack": "\n==============================================================================\nTHROUGHPUT  model=fleet_fp16_fullstack  dtype=float16  cuda_graph=OFF  radix_cache=ON\n  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.8\n  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=3 MiB\n------------------------------------------------------------------------------\n bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base\n------------------------------------------------------------------------------\n   1 |          39.1 |         5212.3 |     196.5 |          8451 |       8448\n   8 |         233.0 |         5692.2 |    1439.2 |          8607 |       8604\n  32 |         932.9 |         5718.7 |    5730.0 |          8607 |       8604\n==============================================================================\n",
+   "throughput_w8": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:25:39] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "throughput_w4": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:26:20] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "sweep_mini": "c=   1  out_tok/s=    97.1  per-stream=  97.1  req/s=  0.38  p50=2.63s p99=2.64s  (n=8)\nc=  32  out_tok/s=  1287.0  per-stream=  40.2  req/s=  5.03  p50=6.33s p99=6.42s  (n=128)\nc= 128  out_tok/s=  2800.2  per-stream=  21.9  req/s= 10.94  p50=11.63s p99=11.67s  (n=512)\nc= 384  out_tok/s=  3176.2  per-stream=   8.3  req/s= 12.41  p50=26.33s p99=52.65s  (n=1536)\n\nPEAK: 3176.2 tok/s @ concurrency=384\nwrote /tmp/sweep.json\n",
+   "sweep_json": {
+    "rows": [
+     {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 21.08,
+      "out_tokens": 2048,
+      "out_tok_per_s": 97.1,
+      "req_per_s": 0.379,
+      "lat_p50_s": 2.635,
+      "lat_p99_s": 2.64,
+      "per_stream_tok_s": 97.1
+     },
+     {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 25.46,
+      "out_tokens": 32768,
+      "out_tok_per_s": 1287.0,
+      "req_per_s": 5.027,
+      "lat_p50_s": 6.331,
+      "lat_p99_s": 6.423,
+      "per_stream_tok_s": 40.2
+     },
+     {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 46.81,
+      "out_tokens": 131072,
+      "out_tok_per_s": 2800.2,
+      "req_per_s": 10.938,
+      "lat_p50_s": 11.634,
+      "lat_p99_s": 11.668,
+      "per_stream_tok_s": 21.9
+     },
+     {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 123.8,
+      "out_tokens": 393216,
+      "out_tok_per_s": 3176.2,
+      "req_per_s": 12.407,
+      "lat_p50_s": 26.328,
+      "lat_p99_s": 52.649,
+      "per_stream_tok_s": 8.3
+     }
+    ],
+    "peak": {
+     "concurrency": 384,
+     "requests": 1536,
+     "wall_s": 123.8,
+     "out_tokens": 393216,
+     "out_tok_per_s": 3176.2,
+     "req_per_s": 12.407,
+     "lat_p50_s": 26.328,
+     "lat_p99_s": 52.649,
+     "per_stream_tok_s": 8.3
+    },
+    "config": {
+     "host": "127.0.0.1",
+     "port": 30250,
+     "concurrencies": "1,32,128,384",
+     "in_len": 64,
+     "out_len": 256,
+     "reqs_mult": 4,
+     "min_reqs": 8,
+     "out": "/tmp/sweep.json"
+    }
+   }
+  }
+ },
+ "A10G": {
+  "gpu": "NVIDIA A10G",
+  "sm": 86,
+  "sglang_main": "b28bc10 fix(mimo-vl): pass padded_context_dim to Qwen2_5_VisionPatchMerger (#29994)",
+  "runs": {
+   "throughput_fp16_fullstack": "\n==============================================================================\nTHROUGHPUT  model=fleet_fp16_fullstack  dtype=float16  cuda_graph=OFF  radix_cache=ON\n  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.8\n  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=3 MiB\n------------------------------------------------------------------------------\n bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base\n------------------------------------------------------------------------------\n   1 |          42.7 |        10156.6 |     100.8 |         11495 |      11492\n   8 |         256.4 |        12128.2 |     675.5 |         11671 |      11668\n  32 |        1015.4 |        12259.9 |    2672.8 |         11673 |      11670\n==============================================================================\n",
+   "throughput_w8": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s][2026-07-05 11:25:50] Received sigquit from a child process. It usually means the child failed.\n\nKilled\n",
+   "throughput_w4": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:26:33] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "sweep_mini": "c=   1  out_tok/s=   168.3  per-stream= 168.3  req/s=  0.66  p50=1.52s p99=1.52s  (n=8)\nc=  32  out_tok/s=  2657.6  per-stream=  83.0  req/s= 10.38  p50=3.07s p99=3.08s  (n=128)\nc= 128  out_tok/s=  5962.8  per-stream=  46.6  req/s= 23.29  p50=5.42s p99=5.48s  (n=512)\nc= 384  out_tok/s=  6627.2  per-stream=  17.3  req/s= 25.89  p50=14.61s p99=14.80s  (n=1536)\n\nPEAK: 6627.2 tok/s @ concurrency=384\nwrote /tmp/sweep.json\n",
+   "sweep_json": {
+    "rows": [
+     {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 12.17,
+      "out_tokens": 2048,
+      "out_tok_per_s": 168.3,
+      "req_per_s": 0.657,
+      "lat_p50_s": 1.521,
+      "lat_p99_s": 1.521,
+      "per_stream_tok_s": 168.3
+     },
+     {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 12.33,
+      "out_tokens": 32768,
+      "out_tok_per_s": 2657.6,
+      "req_per_s": 10.381,
+      "lat_p50_s": 3.066,
+      "lat_p99_s": 3.078,
+      "per_stream_tok_s": 83.0
+     },
+     {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 21.98,
+      "out_tokens": 131072,
+      "out_tok_per_s": 5962.8,
+      "req_per_s": 23.292,
+      "lat_p50_s": 5.425,
+      "lat_p99_s": 5.479,
+      "per_stream_tok_s": 46.6
+     },
+     {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 59.33,
+      "out_tokens": 393216,
+      "out_tok_per_s": 6627.2,
+      "req_per_s": 25.888,
+      "lat_p50_s": 14.611,
+      "lat_p99_s": 14.8,
+      "per_stream_tok_s": 17.3
+     }
+    ],
+    "peak": {
+     "concurrency": 384,
+     "requests": 1536,
+     "wall_s": 59.33,
+     "out_tokens": 393216,
+     "out_tok_per_s": 6627.2,
+     "req_per_s": 25.888,
+     "lat_p50_s": 14.611,
+     "lat_p99_s": 14.8,
+     "per_stream_tok_s": 17.3
+    },
+    "config": {
+     "host": "127.0.0.1",
+     "port": 30250,
+     "concurrencies": "1,32,128,384",
+     "in_len": 64,
+     "out_len": 256,
+     "reqs_mult": 4,
+     "min_reqs": 8,
+     "out": "/tmp/sweep.json"
+    }
+   }
+  }
+ },
+ "A100-40GB": {
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "sm": 80,
+  "sglang_main": "b28bc10 fix(mimo-vl): pass padded_context_dim to Qwen2_5_VisionPatchMerger (#29994)",
+  "runs": {
+   "throughput_fp16_fullstack": "\n==============================================================================\nTHROUGHPUT  model=fleet_fp16_fullstack  dtype=float16  cuda_graph=OFF  radix_cache=ON\n  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.8\n  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=4 MiB\n------------------------------------------------------------------------------\n bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base\n------------------------------------------------------------------------------\n   1 |          44.1 |        12587.8 |      81.3 |         18394 |      18390\n   8 |         251.1 |        32353.0 |     253.2 |         18838 |      18834\n  32 |        1005.7 |        33367.4 |     982.0 |         18838 |      18834\n==============================================================================\n",
+   "throughput_w8": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n[2026-07-05 11:25:00] Received sigquit from a child process. It usually means the child failed.\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\nKilled\n",
+   "throughput_w4": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:25:44] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "sweep_mini": "c=   1  out_tok/s=   257.0  per-stream= 257.0  req/s=  1.00  p50=1.00s p99=1.00s  (n=8)\nc=  32  out_tok/s=  4421.1  per-stream= 138.2  req/s= 17.27  p50=1.83s p99=1.85s  (n=128)\nc= 128  out_tok/s= 11349.8  per-stream=  88.7  req/s= 44.34  p50=2.81s p99=2.90s  (n=512)\nc= 384  out_tok/s= 17042.2  per-stream=  44.4  req/s= 66.57  p50=5.54s p99=6.31s  (n=1536)\n\nPEAK: 17042.2 tok/s @ concurrency=384\nwrote /tmp/sweep.json\n",
+   "sweep_json": {
+    "rows": [
+     {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 7.97,
+      "out_tokens": 2048,
+      "out_tok_per_s": 257.0,
+      "req_per_s": 1.004,
+      "lat_p50_s": 0.996,
+      "lat_p99_s": 1.001,
+      "per_stream_tok_s": 257.0
+     },
+     {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 7.41,
+      "out_tokens": 32768,
+      "out_tok_per_s": 4421.1,
+      "req_per_s": 17.27,
+      "lat_p50_s": 1.835,
+      "lat_p99_s": 1.849,
+      "per_stream_tok_s": 138.2
+     },
+     {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 11.55,
+      "out_tokens": 131072,
+      "out_tok_per_s": 11349.8,
+      "req_per_s": 44.335,
+      "lat_p50_s": 2.808,
+      "lat_p99_s": 2.905,
+      "per_stream_tok_s": 88.7
+     },
+     {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 23.07,
+      "out_tokens": 393216,
+      "out_tok_per_s": 17042.2,
+      "req_per_s": 66.571,
+      "lat_p50_s": 5.539,
+      "lat_p99_s": 6.314,
+      "per_stream_tok_s": 44.4
+     }
+    ],
+    "peak": {
+     "concurrency": 384,
+     "requests": 1536,
+     "wall_s": 23.07,
+     "out_tokens": 393216,
+     "out_tok_per_s": 17042.2,
+     "req_per_s": 66.571,
+     "lat_p50_s": 5.539,
+     "lat_p99_s": 6.314,
+     "per_stream_tok_s": 44.4
+    },
+    "config": {
+     "host": "127.0.0.1",
+     "port": 30250,
+     "concurrencies": "1,32,128,384",
+     "in_len": 64,
+     "out_len": 256,
+     "reqs_mult": 4,
+     "min_reqs": 8,
+     "out": "/tmp/sweep.json"
+    }
+   }
+  }
+ },
+ "A100-80GB": {
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "sm": 80,
+  "sglang_main": "b28bc10 fix(mimo-vl): pass padded_context_dim to Qwen2_5_VisionPatchMerger (#29994)",
+  "runs": {
+   "throughput_fp16_fullstack": "\n==============================================================================\nTHROUGHPUT  model=fleet_fp16_fullstack  dtype=float16  cuda_graph=OFF  radix_cache=ON\n  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.8\n  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=4 MiB\n------------------------------------------------------------------------------\n bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base\n------------------------------------------------------------------------------\n   1 |          38.3 |        11516.5 |      88.9 |         33846 |      33842\n   8 |         211.8 |        34813.0 |     235.3 |         34798 |      34794\n  32 |         877.3 |        35674.4 |     918.5 |         34838 |      34834\n==============================================================================\n",
+   "throughput_w8": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:25:25] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "throughput_w4": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:26:04] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "sweep_mini": "c=   1  out_tok/s=   278.9  per-stream= 278.9  req/s=  1.09  p50=0.92s p99=0.92s  (n=8)\nc=  32  out_tok/s=  4767.3  per-stream= 149.0  req/s= 18.62  p50=1.70s p99=1.71s  (n=128)\nc= 128  out_tok/s= 12151.3  per-stream=  94.9  req/s= 47.47  p50=2.62s p99=2.71s  (n=512)\nc= 384  out_tok/s= 18420.3  per-stream=  48.0  req/s= 71.95  p50=5.13s p99=5.83s  (n=1536)\n\nPEAK: 18420.3 tok/s @ concurrency=384\nwrote /tmp/sweep.json\n",
+   "sweep_json": {
+    "rows": [
+     {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 7.34,
+      "out_tokens": 2048,
+      "out_tok_per_s": 278.9,
+      "req_per_s": 1.09,
+      "lat_p50_s": 0.918,
+      "lat_p99_s": 0.919,
+      "per_stream_tok_s": 278.9
+     },
+     {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 6.87,
+      "out_tokens": 32768,
+      "out_tok_per_s": 4767.3,
+      "req_per_s": 18.622,
+      "lat_p50_s": 1.703,
+      "lat_p99_s": 1.714,
+      "per_stream_tok_s": 149.0
+     },
+     {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 10.79,
+      "out_tokens": 131072,
+      "out_tok_per_s": 12151.3,
+      "req_per_s": 47.466,
+      "lat_p50_s": 2.623,
+      "lat_p99_s": 2.707,
+      "per_stream_tok_s": 94.9
+     },
+     {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 21.35,
+      "out_tokens": 393216,
+      "out_tok_per_s": 18420.3,
+      "req_per_s": 71.954,
+      "lat_p50_s": 5.134,
+      "lat_p99_s": 5.835,
+      "per_stream_tok_s": 48.0
+     }
+    ],
+    "peak": {
+     "concurrency": 384,
+     "requests": 1536,
+     "wall_s": 21.35,
+     "out_tokens": 393216,
+     "out_tok_per_s": 18420.3,
+     "req_per_s": 71.954,
+     "lat_p50_s": 5.134,
+     "lat_p99_s": 5.835,
+     "per_stream_tok_s": 48.0
+    },
+    "config": {
+     "host": "127.0.0.1",
+     "port": 30250,
+     "concurrencies": "1,32,128,384",
+     "in_len": 64,
+     "out_len": 256,
+     "reqs_mult": 4,
+     "min_reqs": 8,
+     "out": "/tmp/sweep.json"
+    }
+   }
+  }
+ },
+ "L40S": {
+  "gpu": "NVIDIA L40S",
+  "sm": 89,
+  "sglang_main": "b28bc10 fix(mimo-vl): pass padded_context_dim to Qwen2_5_VisionPatchMerger (#29994)",
+  "runs": {
+   "throughput_fp16_fullstack": "\n==============================================================================\nTHROUGHPUT  model=fleet_fp16_fullstack  dtype=float16  cuda_graph=OFF  radix_cache=ON\n  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.8\n  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=3 MiB\n------------------------------------------------------------------------------\n bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base\n------------------------------------------------------------------------------\n   1 |          72.4 |        19712.9 |      51.9 |         20285 |      20282\n   8 |         489.6 |        38583.0 |     212.3 |         20729 |      20726\n  32 |        1810.8 |        39621.1 |     827.0 |         20729 |      20726\n==============================================================================\n",
+   "throughput_w8": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:23:42] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "throughput_w4": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:24:09] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "sweep_mini": "c=   1  out_tok/s=   238.0  per-stream= 238.0  req/s=  0.93  p50=1.08s p99=1.08s  (n=8)\nc=  32  out_tok/s=  4198.4  per-stream= 131.2  req/s= 16.40  p50=1.94s p99=1.95s  (n=128)\nc= 128  out_tok/s= 10081.6  per-stream=  78.8  req/s= 39.38  p50=3.19s p99=3.23s  (n=512)\nc= 384  out_tok/s= 13352.1  per-stream=  34.8  req/s= 52.16  p50=7.21s p99=7.30s  (n=1536)\n\nPEAK: 13352.1 tok/s @ concurrency=384\nwrote /tmp/sweep.json\n",
+   "sweep_json": {
+    "rows": [
+     {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 8.61,
+      "out_tokens": 2048,
+      "out_tok_per_s": 238.0,
+      "req_per_s": 0.93,
+      "lat_p50_s": 1.076,
+      "lat_p99_s": 1.077,
+      "per_stream_tok_s": 238.0
+     },
+     {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 7.8,
+      "out_tokens": 32768,
+      "out_tok_per_s": 4198.4,
+      "req_per_s": 16.4,
+      "lat_p50_s": 1.939,
+      "lat_p99_s": 1.948,
+      "per_stream_tok_s": 131.2
+     },
+     {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 13.0,
+      "out_tokens": 131072,
+      "out_tok_per_s": 10081.6,
+      "req_per_s": 39.381,
+      "lat_p50_s": 3.193,
+      "lat_p99_s": 3.231,
+      "per_stream_tok_s": 78.8
+     },
+     {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 29.45,
+      "out_tokens": 393216,
+      "out_tok_per_s": 13352.1,
+      "req_per_s": 52.156,
+      "lat_p50_s": 7.211,
+      "lat_p99_s": 7.302,
+      "per_stream_tok_s": 34.8
+     }
+    ],
+    "peak": {
+     "concurrency": 384,
+     "requests": 1536,
+     "wall_s": 29.45,
+     "out_tokens": 393216,
+     "out_tok_per_s": 13352.1,
+     "req_per_s": 52.156,
+     "lat_p50_s": 7.211,
+     "lat_p99_s": 7.302,
+     "per_stream_tok_s": 34.8
+    },
+    "config": {
+     "host": "127.0.0.1",
+     "port": 30250,
+     "concurrencies": "1,32,128,384",
+     "in_len": 64,
+     "out_len": 256,
+     "reqs_mult": 4,
+     "min_reqs": 8,
+     "out": "/tmp/sweep.json"
+    }
+   }
+  }
+ },
+ "H100": {
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "sm": 90,
+  "sglang_main": "b28bc10 fix(mimo-vl): pass padded_context_dim to Qwen2_5_VisionPatchMerger (#29994)",
+  "runs": {
+   "throughput_fp16_fullstack": "\n==============================================================================\nTHROUGHPUT  model=fleet_fp16_fullstack  dtype=float16  cuda_graph=OFF  radix_cache=ON\n  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.8\n  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=4 MiB\n------------------------------------------------------------------------------\n bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base\n------------------------------------------------------------------------------\n   1 |          59.3 |        16043.3 |      63.8 |         34004 |      34000\n   8 |         355.4 |        71271.3 |     114.9 |         34956 |      34952\n  32 |        1409.2 |        73154.8 |     447.9 |         34996 |      34992\n==============================================================================\n",
+   "throughput_w8": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n[2026-07-05 11:24:11] Received sigquit from a child process. It usually means the child failed.\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\nKilled\n",
+   "throughput_w4": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:24:43] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "sweep_mini": "c=   1  out_tok/s=   361.1  per-stream= 361.1  req/s=  1.41  p50=0.71s p99=0.71s  (n=8)\nc=  32  out_tok/s=  6774.2  per-stream= 211.7  req/s= 26.46  p50=1.19s p99=1.21s  (n=128)\nc= 128  out_tok/s= 18535.0  per-stream= 144.8  req/s= 72.40  p50=1.69s p99=1.81s  (n=512)\nc= 384  out_tok/s= 28578.1  per-stream=  74.4  req/s=111.63  p50=3.07s p99=3.88s  (n=1536)\n\nPEAK: 28578.1 tok/s @ concurrency=384\nwrote /tmp/sweep.json\n",
+   "sweep_json": {
+    "rows": [
+     {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 5.67,
+      "out_tokens": 2048,
+      "out_tok_per_s": 361.1,
+      "req_per_s": 1.411,
+      "lat_p50_s": 0.71,
+      "lat_p99_s": 0.71,
+      "per_stream_tok_s": 361.1
+     },
+     {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 4.84,
+      "out_tokens": 32768,
+      "out_tok_per_s": 6774.2,
+      "req_per_s": 26.462,
+      "lat_p50_s": 1.191,
+      "lat_p99_s": 1.213,
+      "per_stream_tok_s": 211.7
+     },
+     {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 7.07,
+      "out_tokens": 131072,
+      "out_tok_per_s": 18535.0,
+      "req_per_s": 72.402,
+      "lat_p50_s": 1.687,
+      "lat_p99_s": 1.808,
+      "per_stream_tok_s": 144.8
+     },
+     {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 13.76,
+      "out_tokens": 393216,
+      "out_tok_per_s": 28578.1,
+      "req_per_s": 111.633,
+      "lat_p50_s": 3.071,
+      "lat_p99_s": 3.875,
+      "per_stream_tok_s": 74.4
+     }
+    ],
+    "peak": {
+     "concurrency": 384,
+     "requests": 1536,
+     "wall_s": 13.76,
+     "out_tokens": 393216,
+     "out_tok_per_s": 28578.1,
+     "req_per_s": 111.633,
+     "lat_p50_s": 3.071,
+     "lat_p99_s": 3.875,
+     "per_stream_tok_s": 74.4
+    },
+    "config": {
+     "host": "127.0.0.1",
+     "port": 30250,
+     "concurrencies": "1,32,128,384",
+     "in_len": 64,
+     "out_len": 256,
+     "reqs_mult": 4,
+     "min_reqs": 8,
+     "out": "/tmp/sweep.json"
+    }
+   }
+  }
+ },
+ "H200": {
+  "gpu": "NVIDIA H200",
+  "sm": 90,
+  "sglang_main": "b28bc10 fix(mimo-vl): pass padded_context_dim to Qwen2_5_VisionPatchMerger (#29994)",
+  "runs": {
+   "throughput_fp16_fullstack": "\n==============================================================================\nTHROUGHPUT  model=fleet_fp16_fullstack  dtype=float16  cuda_graph=OFF  radix_cache=ON\n  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.8\n  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=4 MiB\n------------------------------------------------------------------------------\n bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base\n------------------------------------------------------------------------------\n   1 |          71.0 |        19824.5 |      51.7 |         57542 |      57538\n   8 |         428.2 |        74591.4 |     109.8 |         58494 |      58490\n  32 |        1707.1 |        77207.0 |     424.4 |         58534 |      58530\n==============================================================================\n",
+   "throughput_w8": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n[2026-07-05 11:23:49] Received sigquit from a child process. It usually means the child failed.\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\nKilled\n",
+   "throughput_w4": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s][2026-07-05 11:24:22] Received sigquit from a child process. It usually means the child failed.\n\nKilled\n",
+   "sweep_mini": "c=   1  out_tok/s=   399.3  per-stream= 399.3  req/s=  1.56  p50=0.64s p99=0.64s  (n=8)\nc=  32  out_tok/s=  7253.2  per-stream= 226.7  req/s= 28.33  p50=1.11s p99=1.13s  (n=128)\nc= 128  out_tok/s= 20364.1  per-stream= 159.1  req/s= 79.55  p50=1.54s p99=1.60s  (n=512)\nc= 384  out_tok/s= 32289.1  per-stream=  84.1  req/s=126.13  p50=2.79s p99=3.41s  (n=1536)\n\nPEAK: 32289.1 tok/s @ concurrency=384\nwrote /tmp/sweep.json\n",
+   "sweep_json": {
+    "rows": [
+     {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 5.13,
+      "out_tokens": 2048,
+      "out_tok_per_s": 399.3,
+      "req_per_s": 1.56,
+      "lat_p50_s": 0.641,
+      "lat_p99_s": 0.642,
+      "per_stream_tok_s": 399.3
+     },
+     {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 4.52,
+      "out_tokens": 32768,
+      "out_tok_per_s": 7253.2,
+      "req_per_s": 28.333,
+      "lat_p50_s": 1.114,
+      "lat_p99_s": 1.134,
+      "per_stream_tok_s": 226.7
+     },
+     {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 6.44,
+      "out_tokens": 131072,
+      "out_tok_per_s": 20364.1,
+      "req_per_s": 79.547,
+      "lat_p50_s": 1.545,
+      "lat_p99_s": 1.597,
+      "per_stream_tok_s": 159.1
+     },
+     {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 12.18,
+      "out_tokens": 393216,
+      "out_tok_per_s": 32289.1,
+      "req_per_s": 126.129,
+      "lat_p50_s": 2.788,
+      "lat_p99_s": 3.412,
+      "per_stream_tok_s": 84.1
+     }
+    ],
+    "peak": {
+     "concurrency": 384,
+     "requests": 1536,
+     "wall_s": 12.18,
+     "out_tokens": 393216,
+     "out_tok_per_s": 32289.1,
+     "req_per_s": 126.129,
+     "lat_p50_s": 2.788,
+     "lat_p99_s": 3.412,
+     "per_stream_tok_s": 84.1
+    },
+    "config": {
+     "host": "127.0.0.1",
+     "port": 30250,
+     "concurrencies": "1,32,128,384",
+     "in_len": 64,
+     "out_len": 256,
+     "reqs_mult": 4,
+     "min_reqs": 8,
+     "out": "/tmp/sweep.json"
+    }
+   }
+  }
+ },
+ "B200": {
+  "gpu": "NVIDIA B200",
+  "sm": 100,
+  "sglang_main": "b28bc10 fix(mimo-vl): pass padded_context_dim to Qwen2_5_VisionPatchMerger (#29994)",
+  "runs": {
+   "throughput_fp16_fullstack": "\n==============================================================================\nTHROUGHPUT  model=fleet_fp16_fullstack  dtype=float16  cuda_graph=OFF  radix_cache=ON\n  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.8\n  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=4 MiB\n------------------------------------------------------------------------------\n bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base\n------------------------------------------------------------------------------\n   1 |          67.4 |        19405.5 |      52.8 |         72475 |      72471\n   8 |         394.2 |        91657.0 |      89.4 |         73407 |      73403\n  32 |        1592.3 |       101055.7 |     324.3 |         74751 |      74747\n==============================================================================\n",
+   "throughput_w8": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:23:50] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "throughput_w4": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:24:19] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "sweep_mini": "c=   1  out_tok/s=   381.6  per-stream= 381.6  req/s=  1.49  p50=0.65s p99=0.83s  (n=8)\nc=  32  out_tok/s=  7549.5  per-stream= 235.9  req/s= 29.49  p50=1.07s p99=1.11s  (n=128)\nc= 128  out_tok/s= 22556.2  per-stream= 176.2  req/s= 88.11  p50=1.39s p99=1.49s  (n=512)\nc= 384  out_tok/s= 40544.2  per-stream= 105.6  req/s=158.38  p50=2.22s p99=2.88s  (n=1536)\n\nPEAK: 40544.2 tok/s @ concurrency=384\nwrote /tmp/sweep.json\n",
+   "sweep_json": {
+    "rows": [
+     {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 5.37,
+      "out_tokens": 2048,
+      "out_tok_per_s": 381.6,
+      "req_per_s": 1.491,
+      "lat_p50_s": 0.653,
+      "lat_p99_s": 0.828,
+      "per_stream_tok_s": 381.6
+     },
+     {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 4.34,
+      "out_tokens": 32768,
+      "out_tok_per_s": 7549.5,
+      "req_per_s": 29.49,
+      "lat_p50_s": 1.067,
+      "lat_p99_s": 1.114,
+      "per_stream_tok_s": 235.9
+     },
+     {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 5.81,
+      "out_tokens": 131072,
+      "out_tok_per_s": 22556.2,
+      "req_per_s": 88.11,
+      "lat_p50_s": 1.389,
+      "lat_p99_s": 1.486,
+      "per_stream_tok_s": 176.2
+     },
+     {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 9.7,
+      "out_tokens": 393216,
+      "out_tok_per_s": 40544.2,
+      "req_per_s": 158.376,
+      "lat_p50_s": 2.217,
+      "lat_p99_s": 2.885,
+      "per_stream_tok_s": 105.6
+     }
+    ],
+    "peak": {
+     "concurrency": 384,
+     "requests": 1536,
+     "wall_s": 9.7,
+     "out_tokens": 393216,
+     "out_tok_per_s": 40544.2,
+     "req_per_s": 158.376,
+     "lat_p50_s": 2.217,
+     "lat_p99_s": 2.885,
+     "per_stream_tok_s": 105.6
+    },
+    "config": {
+     "host": "127.0.0.1",
+     "port": 30250,
+     "concurrencies": "1,32,128,384",
+     "in_len": 64,
+     "out_len": 256,
+     "reqs_mult": 4,
+     "min_reqs": 8,
+     "out": "/tmp/sweep.json"
+    }
+   }
+  }
+ },
+ "RTX-PRO-6000": {
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "sm": 120,
+  "sglang_main": "b28bc10 fix(mimo-vl): pass padded_context_dim to Qwen2_5_VisionPatchMerger (#29994)",
+  "runs": {
+   "throughput_fp16_fullstack": "\n==============================================================================\nTHROUGHPUT  model=fleet_fp16_fullstack  dtype=float16  cuda_graph=OFF  radix_cache=ON\n  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.8\n  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=3 MiB\n------------------------------------------------------------------------------\n bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base\n------------------------------------------------------------------------------\n   1 |         118.9 |        25043.8 |      40.9 |         40053 |      40050\n   8 |         747.2 |        56311.8 |     145.5 |         41005 |      41002\n  32 |        2834.1 |        57106.5 |     573.8 |         41045 |      41042\n==============================================================================\n",
+   "throughput_w8": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:23:16] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "throughput_w4": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:23:43] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "sweep_mini": "c=   1  out_tok/s=   315.0  per-stream= 315.0  req/s=  1.23  p50=0.81s p99=0.81s  (n=8)\nc=  32  out_tok/s=  5766.7  per-stream= 180.2  req/s= 22.53  p50=1.41s p99=1.43s  (n=128)\nc= 128  out_tok/s= 15582.2  per-stream= 121.7  req/s= 60.87  p50=2.05s p99=2.10s  (n=512)\nc= 384  out_tok/s= 21566.3  per-stream=  56.2  req/s= 84.24  p50=4.33s p99=5.17s  (n=1536)\n\nPEAK: 21566.3 tok/s @ concurrency=384\nwrote /tmp/sweep.json\n",
+   "sweep_json": {
+    "rows": [
+     {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 6.5,
+      "out_tokens": 2048,
+      "out_tok_per_s": 315.0,
+      "req_per_s": 1.23,
+      "lat_p50_s": 0.813,
+      "lat_p99_s": 0.813,
+      "per_stream_tok_s": 315.0
+     },
+     {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 5.68,
+      "out_tokens": 32768,
+      "out_tok_per_s": 5766.7,
+      "req_per_s": 22.526,
+      "lat_p50_s": 1.41,
+      "lat_p99_s": 1.429,
+      "per_stream_tok_s": 180.2
+     },
+     {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 8.41,
+      "out_tokens": 131072,
+      "out_tok_per_s": 15582.2,
+      "req_per_s": 60.868,
+      "lat_p50_s": 2.052,
+      "lat_p99_s": 2.096,
+      "per_stream_tok_s": 121.7
+     },
+     {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 18.23,
+      "out_tokens": 393216,
+      "out_tok_per_s": 21566.3,
+      "req_per_s": 84.243,
+      "lat_p50_s": 4.332,
+      "lat_p99_s": 5.166,
+      "per_stream_tok_s": 56.2
+     }
+    ],
+    "peak": {
+     "concurrency": 384,
+     "requests": 1536,
+     "wall_s": 18.23,
+     "out_tokens": 393216,
+     "out_tok_per_s": 21566.3,
+     "req_per_s": 84.243,
+     "lat_p50_s": 4.332,
+     "lat_p99_s": 5.166,
+     "per_stream_tok_s": 56.2
+    },
+    "config": {
+     "host": "127.0.0.1",
+     "port": 30250,
+     "concurrencies": "1,32,128,384",
+     "in_len": 64,
+     "out_len": 256,
+     "reqs_mult": 4,
+     "min_reqs": 8,
+     "out": "/tmp/sweep.json"
+    }
+   }
+  }
+ },
+ "L4": {
+  "gpu": "NVIDIA L4",
+  "sm": 89,
+  "sglang_main": "b28bc10 fix(mimo-vl): pass padded_context_dim to Qwen2_5_VisionPatchMerger (#29994)",
+  "runs": {
+   "throughput_fp16_fullstack": "\n==============================================================================\nTHROUGHPUT  model=fleet_fp16_fullstack  dtype=float16  cuda_graph=OFF  radix_cache=ON\n  decode=128tok (steady-state, prefill-subtracted)  prefill_len=1024  mem_fraction=0.8\n  VRAM via nvidia-smi GPU0; baseline(pre-Engine)=3 MiB\n------------------------------------------------------------------------------\n bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base\n------------------------------------------------------------------------------\n   1 |          45.6 |         9171.1 |     111.7 |         11443 |      11440\n   8 |         261.8 |        10732.1 |     763.3 |         11619 |      11616\n  32 |        1033.0 |        10971.4 |    2986.7 |         11619 |      11616\n==============================================================================\n",
+   "throughput_w8": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:39:55] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "throughput_w4": "\nSTDERR_TAIL:p_worker = TpModelWorker(**worker_kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 273, in __init__\n    self._init_model_runner()\n  File \"/sgl-workspace/sglang/python/sglang/srt/managers/tp_worker.py\", line 385, in _init_model_runner\n    self._model_runner = ModelRunner(\n                         ^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 583, in __init__\n    self.initialize()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 704, in initialize\n    self.load_model()\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_executor/model_runner.py\", line 1505, in load_model\n    self.model = self.loader.load_model(\n                 ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 765, in load_model\n    self.load_weights_and_postprocess(\n  File \"/sgl-workspace/sglang/python/sglang/srt/model_loader/loader.py\", line 800, in load_weights_and_postprocess\n    model.load_weights(weights)\n  File \"/sgl-workspace/sglang/python/sglang/srt/models/rwkv7.py\", line 1140, in load_weights\n    raise KeyError(\nKeyError: '[rwkv7.load_weights] unexpected checkpoint key: model.layers.0.attn.k_proj.weight'\n\n\nMulti-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]\n[2026-07-05 11:40:42] Received sigquit from a child process. It usually means the child failed.\nKilled\n",
+   "sweep_mini": "c=   1  out_tok/s=   102.2  per-stream= 102.2  req/s=  0.40  p50=2.51s p99=2.51s  (n=8)\nc=  32  out_tok/s=  1691.8  per-stream=  52.9  req/s=  6.61  p50=4.83s p99=4.84s  (n=128)\nc= 128  out_tok/s=  3616.6  per-stream=  28.3  req/s= 14.13  p50=8.99s p99=9.06s  (n=512)\nc= 384  out_tok/s=  4627.1  per-stream=  12.0  req/s= 18.07  p50=20.85s p99=21.97s  (n=1536)\n\nPEAK: 4627.1 tok/s @ concurrency=384\nwrote /tmp/sweep.json\n",
+   "sweep_json": {
+    "rows": [
+     {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 20.04,
+      "out_tokens": 2048,
+      "out_tok_per_s": 102.2,
+      "req_per_s": 0.399,
+      "lat_p50_s": 2.506,
+      "lat_p99_s": 2.507,
+      "per_stream_tok_s": 102.2
+     },
+     {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 19.37,
+      "out_tokens": 32768,
+      "out_tok_per_s": 1691.8,
+      "req_per_s": 6.609,
+      "lat_p50_s": 4.827,
+      "lat_p99_s": 4.841,
+      "per_stream_tok_s": 52.9
+     },
+     {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 36.24,
+      "out_tokens": 131072,
+      "out_tok_per_s": 3616.6,
+      "req_per_s": 14.127,
+      "lat_p50_s": 8.99,
+      "lat_p99_s": 9.064,
+      "per_stream_tok_s": 28.3
+     },
+     {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 84.98,
+      "out_tokens": 393216,
+      "out_tok_per_s": 4627.1,
+      "req_per_s": 18.075,
+      "lat_p50_s": 20.853,
+      "lat_p99_s": 21.97,
+      "per_stream_tok_s": 12.0
+     }
+    ],
+    "peak": {
+     "concurrency": 384,
+     "requests": 1536,
+     "wall_s": 84.98,
+     "out_tokens": 393216,
+     "out_tok_per_s": 4627.1,
+     "req_per_s": 18.075,
+     "lat_p50_s": 20.853,
+     "lat_p99_s": 21.97,
+     "per_stream_tok_s": 12.0
+    },
+    "config": {
+     "host": "127.0.0.1",
+     "port": 30250,
+     "concurrencies": "1,32,128,384",
+     "in_len": 64,
+     "out_len": 256,
+     "reqs_mult": 4,
+     "min_reqs": 8,
+     "out": "/tmp/sweep.json"
+    }
+   }
+  }
+ }
+}
