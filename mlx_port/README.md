@@ -19,9 +19,18 @@ safetensors checkpoint.
   `bench/fixtures/oracle_rwkv7_{01b,15b}_eiffel.json` exactly like
   `bench/greedy_check.py`). Also carries a standalone World-vocab tokenizer
   (trie-equivalent greedy longest-match; no transformers).
-- `bench_mlx.py` — bsz1 decode + 1024-token prefill throughput. Re-runs the
-  oracle gate in-process before timing and aborts on mismatch, so a number
-  from an ungated configuration cannot be printed.
+- `bench_mlx.py` — bsz1 decode + 1024-token prefill throughput (`--quant w8|w4`
+  supported). Re-runs the oracle gate in-process before timing; for fp16 it
+  aborts on any mismatch (the exact default), for quant it reports the
+  greedy-vs-oracle match without aborting (quant is graded by compression).
+- `compression_mlx.py` — direct-call **uncheatable-eval compression rate**
+  (bits/byte), the accuracy ruler; same methodology as `bench/uncheatable_eval.py`
+  so numbers are comparable to the CUDA column. Works for fp16 and `--quant`
+  (F0040). No server needed (MLX has none).
+- `sharegpt_mlx.py` — **real-workload** single-stream (bsz1) bench over real
+  ShareGPT prompts: TTFT + inter-token-latency distribution and prefill/decode
+  throughput over the true prompt-length mix (F0041).
+- `results/` — committed compression + ShareGPT result JSONs (reproducibility).
 
 ## Correctness gate (oracle-exact)
 
