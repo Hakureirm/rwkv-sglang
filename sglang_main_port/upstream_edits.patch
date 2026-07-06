@@ -1,5 +1,5 @@
 diff --git a/python/sglang/srt/configs/__init__.py b/python/sglang/srt/configs/__init__.py
-index aa05b73..4216711 100644
+index aa05b73be..4216711a3 100644
 --- a/python/sglang/srt/configs/__init__.py
 +++ b/python/sglang/srt/configs/__init__.py
 @@ -33,6 +33,7 @@ from sglang.srt.configs.olmo3 import Olmo3Config
@@ -19,7 +19,7 @@ index aa05b73..4216711 100644
      "Qwen3_5MoeConfig",
      "InternS2PreviewConfig",
 diff --git a/python/sglang/srt/configs/mamba_utils.py b/python/sglang/srt/configs/mamba_utils.py
-index 702fabd..1c080f0 100644
+index 702fabd31..1c080f07a 100644
 --- a/python/sglang/srt/configs/mamba_utils.py
 +++ b/python/sglang/srt/configs/mamba_utils.py
 @@ -273,3 +273,46 @@ class KimiLinearCacheParams(BaseLinearStateParams):
@@ -70,7 +70,7 @@ index 702fabd..1c080f0 100644
 +class Rwkv7CacheParams(BaseLinearStateParams):
 +    shape: Rwkv7StateShape
 diff --git a/python/sglang/srt/layers/attention/attention_registry.py b/python/sglang/srt/layers/attention/attention_registry.py
-index 45b1038..4ecc0b3 100644
+index 45b1038e0..4ecc0b338 100644
 --- a/python/sglang/srt/layers/attention/attention_registry.py
 +++ b/python/sglang/srt/layers/attention/attention_registry.py
 @@ -264,6 +264,7 @@ def attn_backend_wrapper(runner: "ModelRunner", full_attn_backend: "AttentionBac
@@ -91,8 +91,24 @@ index 45b1038..4ecc0b3 100644
          else:
              spec_result = get_linear_attn_config(runner.model_config.hf_config)
              if spec_result is not None:
+diff --git a/python/sglang/srt/model_executor/cuda_graph_buffer_registry.py b/python/sglang/srt/model_executor/cuda_graph_buffer_registry.py
+index eaaf8b858..1b086347a 100644
+--- a/python/sglang/srt/model_executor/cuda_graph_buffer_registry.py
++++ b/python/sglang/srt/model_executor/cuda_graph_buffer_registry.py
+@@ -741,7 +741,10 @@ def build_decode_registry(
+             def _pp_source(key):
+                 def _fn(_fb, ctx):
+                     ppx = ctx.pp_proxy_tensors
+-                    return None if ppx is None else ppx.tensors[key]
++                    # .get: a buffer key the running model does not send this step
++                    # (e.g. the default "residual" slot for a model that hands
++                    # "v_first" instead) sources to None and is skipped, not raised.
++                    return None if ppx is None else ppx.tensors.get(key)
+ 
+                 return _fn
+ 
 diff --git a/python/sglang/srt/model_executor/model_runner.py b/python/sglang/srt/model_executor/model_runner.py
-index 86eaf61..7a00150 100644
+index 86eaf61a3..46facabe6 100644
 --- a/python/sglang/srt/model_executor/model_runner.py
 +++ b/python/sglang/srt/model_executor/model_runner.py
 @@ -48,6 +48,7 @@ from sglang.srt.configs import (
@@ -103,7 +119,27 @@ index 86eaf61..7a00150 100644
      Qwen3NextConfig,
      ZayaConfig,
  )
-@@ -2367,6 +2368,13 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+@@ -817,6 +818,19 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+             return None
+         return getattr(hf_config, "index_topk", None)
+ 
++    def get_pp_proxy_v_first_size(self) -> Optional[int]:
++        # RWKV-7 carries layer-0's value projection (v_first) across the PP stage
++        # boundary in PPProxyTensors; the decode cuda-graph buffer needs a stable
++        # slot for it (same mechanism as get_pp_proxy_topk_size). Full hidden width
++        # (the receiver slices to its tp head range inside forward).
++        hf_config = self.model_config.hf_text_config
++        if self.pp_size <= 1 or self.pp_rank == 0:
++            return None
++        archs = getattr(hf_config, "architectures", None) or []
++        if not any(a in ("RWKV7ForCausalLM", "Rwkv7ForCausalLM") for a in archs):
++            return None
++        return getattr(hf_config, "hidden_size", None)
++
+     def alloc_memory_pool(self, memory_pool_config: Optional[MemoryPoolConfig] = None):
+         """Allocate KV cache memory pools only (no backends or cuda graphs)."""
+         if memory_pool_config is not None:
+@@ -2367,6 +2381,13 @@ class ModelRunner(ModelRunnerKVCacheMixin):
              return config
          return None
  
@@ -117,7 +153,7 @@ index 86eaf61..7a00150 100644
      def _get_linear_attn_registry_result(self):
          if self._linear_attn_registry_cache is _UNSET:
              self._linear_attn_registry_cache = get_linear_attn_config(
-@@ -2386,6 +2394,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+@@ -2386,6 +2407,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
              or self.hybrid_gdn_config
              or self.kimi_linear_config
              or self.hybrid_lightning_config
@@ -125,7 +161,7 @@ index 86eaf61..7a00150 100644
          )
          if existing:
              return existing
-@@ -2527,7 +2536,17 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+@@ -2527,7 +2549,17 @@ class ModelRunner(ModelRunnerKVCacheMixin):
          if backend_str not in ATTENTION_BACKENDS:
              raise ValueError(f"Invalid attention backend: {backend_str}")
          self.init_new_workspace = init_new_workspace
@@ -145,7 +181,7 @@ index 86eaf61..7a00150 100644
  
      def maybe_init_ngram_embedding(self):
 diff --git a/python/sglang/srt/model_executor/pool_configurator.py b/python/sglang/srt/model_executor/pool_configurator.py
-index 50c3733..1ab18a4 100644
+index 50c37332e..1ab18a4e7 100644
 --- a/python/sglang/srt/model_executor/pool_configurator.py
 +++ b/python/sglang/srt/model_executor/pool_configurator.py
 @@ -135,6 +135,19 @@ class DefaultPoolConfigurator(MemoryPoolConfigurator):
@@ -180,8 +216,60 @@ index 50c3733..1ab18a4 100644
          max_total_num_tokens = max_total_num_tokens // page_size * page_size
          return MemoryPoolConfig(max_total_num_tokens=max_total_num_tokens)
  
+diff --git a/python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py b/python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py
+index 4c0b3affc..1028ba9fa 100644
+--- a/python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py
++++ b/python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py
+@@ -332,6 +332,7 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
+                 self.model_runner.model_config, "hc_hidden_size", None
+             ),
+             pp_proxy_topk_size=self.model_runner.get_pp_proxy_topk_size(),
++            pp_proxy_v_first_size=self.model_runner.get_pp_proxy_v_first_size(),
+         )
+         self.buffers.share_buffers()
+         # FB-shared slot registry adopting DecodeInputBuffers storage (same
+diff --git a/python/sglang/srt/model_executor/runner_utils/buffers.py b/python/sglang/srt/model_executor/runner_utils/buffers.py
+index 728310d66..c25eed755 100644
+--- a/python/sglang/srt/model_executor/runner_utils/buffers.py
++++ b/python/sglang/srt/model_executor/runner_utils/buffers.py
+@@ -106,6 +106,7 @@ class DecodeInputBuffers(ForwardInputBuffers):
+         ne_token_table: Optional[torch.Tensor] = None,
+         hc_hidden_size: Optional[int] = None,
+         pp_proxy_topk_size: Optional[int] = None,
++        pp_proxy_v_first_size: Optional[int] = None,
+     ) -> DecodeInputBuffers:
+         with torch.device(device):
+             input_ids = torch.zeros((max_num_token,), dtype=torch.int64)
+@@ -147,6 +148,13 @@ class DecodeInputBuffers(ForwardInputBuffers):
+                     pp_proxy_tensors["topk_indices"] = torch.zeros(
+                         (max_num_token, pp_proxy_topk_size), dtype=torch.int32
+                     )
++                if pp_proxy_v_first_size is not None:
++                    # RWKV-7 hands layer-0's value projection (v_first) across the
++                    # PP stage boundary. A persistent capture/replay slot is needed
++                    # so the cuda-graph sees a stable pointer (mirrors topk_indices).
++                    pp_proxy_tensors["v_first"] = torch.zeros(
++                        (max_bs, pp_proxy_v_first_size), dtype=dtype
++                    )
+             else:
+                 pp_proxy_tensors = None
+ 
+@@ -313,7 +321,12 @@ class DecodeInputBuffers(ForwardInputBuffers):
+         # Pipeline-parallel proxy tensors.
+         if pp_proxy_tensors is not None and self.pp_proxy_tensors is not None:
+             for key, buf in self.pp_proxy_tensors.items():
+-                src = pp_proxy_tensors.tensors[key]
++                # A buffer key the running model does not actually send (e.g. the
++                # default "residual" slot for a model that hands "v_first" instead)
++                # has no source this step — skip it rather than KeyError.
++                src = pp_proxy_tensors.tensors.get(key)
++                if src is None:
++                    continue
+                 dim = src.shape[0]
+                 dsts.append(buf[:dim])
+                 srcs.append(src)
 diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
-index e6bc493..50f36c9 100644
+index e6bc49376..50f36c987 100644
 --- a/python/sglang/srt/server_args.py
 +++ b/python/sglang/srt/server_args.py
 @@ -4325,6 +4325,15 @@ class ServerArgs:
@@ -201,7 +289,7 @@ index e6bc493..50f36c9 100644
              from sglang.srt.arg_groups.nemotron_h_hook import (
                  apply_nemotron_h_defaults,
 diff --git a/python/sglang/srt/utils/hf_transformers/common.py b/python/sglang/srt/utils/hf_transformers/common.py
-index eef80dc..fe59858 100644
+index eef80dc7a..fe59858a1 100644
 --- a/python/sglang/srt/utils/hf_transformers/common.py
 +++ b/python/sglang/srt/utils/hf_transformers/common.py
 @@ -1,3 +1,4 @@

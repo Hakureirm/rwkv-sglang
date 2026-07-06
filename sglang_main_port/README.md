@@ -6,10 +6,16 @@ container (`lmsysorg/sglang:dev-cu12`) — **greedy 24/24 token-EXACT vs the
 numpy oracle at 0.1B and 1.5B (bf16)**, same result as on v0.5.10.post1.
 
 Contents:
-- `upstream_edits.patch` — the diff against sglang main for the 7 upstream files
+- `upstream_edits.patch` — the diff against sglang main for the 10 upstream files
   (config registry now in `utils/hf_transformers/common.py`; radix-off for
   RWKV-7 under the new `_handle_mamba_radix_cache` semantics; all-linear
-  `cell_size==0` guard now in `model_executor/pool_configurator.py`).
+  `cell_size==0` guard now in `model_executor/pool_configurator.py`). Includes the
+  PP + cuda-graph fix (F0036): a persistent `v_first` proxy-tensor slot in the
+  decode cuda-graph buffer, so pipeline-parallel runs with cuda-graph ON no longer
+  KeyError during capture — touches `model_runner.py`,
+  `model_executor/runner_utils/buffers.py`,
+  `model_executor/cuda_graph_buffer_registry.py`, and
+  `model_executor/runner/decode_cuda_graph_runner.py`.
 - `new_files.txt` / `new_files.tgz` — the RWKV-7-only additive files, as
   verified in the container. Canonical source: `../sglang_overlay/` (the model,
   backend, and kernels are byte-identical; `_linear_backend()` in
