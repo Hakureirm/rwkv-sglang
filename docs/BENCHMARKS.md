@@ -239,7 +239,7 @@ so these ratios are conservative lower bounds.
 
 | GPU | Albatross (tok/s) | ours (tok/s) | ours / Albatross |
 |---|---|---|---|
-| T4 | **does not compile** (its WKV kernel hardcodes sm80+ `cp.async` instructions) | 97.1 | only we run |
+| T4 | **stock kernel won't compile** (sm80+ `cp.async`; removable — see note†) | 97.1 | out-of-box, only we run |
 | L4 | 113.5 | 102.2 | **0.9004** |
 | A10G | 203.4 | 168.3 | 0.8274 |
 | L40S | 291.8 | 238.0 | 0.8156 |
@@ -251,6 +251,11 @@ so these ratios are conservative lower bounds.
 | H100 | 607.3 | 361.1 | 0.5946 |
 | H200 | 684.3 | 399.3 | 0.5835 |
 | B200 | 744.0 | 381.6 | 0.5129 |
+
+† The T4 gap is the *shipped* Albatross WKV kernel's `cp.async` (an sm80+ instruction); BlinkDL
+notes this is removable — a patched kernel runs on T4 — so it's a packaging limit, not a fundamental
+one. The claim here is strictly out-of-the-box: our stack serves T4 unmodified, and we have not
+benchmarked a hand-patched Albatross on T4.
 
 How to read it: the gap tracks memory bandwidth. On inference cards we are close (0.90 on
 L4); on HBM monsters its whole-layer fused kernel stretches ahead (0.51 on B200) because our

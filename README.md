@@ -57,8 +57,9 @@ lets 7.2B scale to 2.90× the concurrency — the full story is in [BENCHMARKS �
   benchmark loop without request scheduling or an API): our single-request speed is
   0.9004× (L4) to 0.5129× (B200) of its decode speed — the higher the GPU's memory
   bandwidth, the more its fused-layer design gains. On the author's own RTX 5090 our int4
-  reaches **0.9908×** of its fp16 speed. On T4-class GPUs Albatross does not compile
-  (it requires sm80+ instructions); this stack serves normally there. Per-card data:
+  reaches **0.9908×** of its fp16 speed. On T4-class GPUs the *stock* Albatross kernel
+  doesn't compile (it uses sm80+ `cp.async` — a removable limit; BlinkDL notes a patched
+  kernel runs on T4), so out-of-the-box only this stack serves T4. Per-card data:
   [`albatross_fleet_10cards.json`](bench/results/albatross_fleet_10cards.json).
 
 ## Quickstart
