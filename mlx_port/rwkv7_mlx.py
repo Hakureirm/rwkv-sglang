@@ -126,11 +126,17 @@ _METAL_SRC = """
         s[kx] = s0h[kx * D + v_i];
     }
 
-    threadgroup float shr[D], shw[D], shk[D], shkk[D], sha[D];
+    threadgroup float shr[D], shdecay[D], shk[D], shkk[D], sha[D];
     for (int t = 0; t < T; t++) {
         const uint off = (uint(t) * H + h) * D;
         shr[v_i] = r[off + v_i];
-        shw[v_i] = w[off + v_i];
+        // decay = precise::exp(w): computed ONCE per K-element here (D exps per
+        // step) instead of once per (v-column, K-element) inside the k-loop (was
+        // D*D exps per step — the D V-threads each recomputed the same D decays).
+        // Same metal::precise::exp on the same fp32 input, so bit-identical to
+        // the old in-loop exp — only the call count drops (verified by the
+        // oracle gate: 24/24 unchanged). precise:: keeps it matching mx.exp.
+        shdecay[v_i] = metal::precise::exp(w[off + v_i]);
         shk[v_i] = k[off + v_i];
         shkk[v_i] = kk[off + v_i];
         sha[v_i] = a[off + v_i];
@@ -143,9 +149,8 @@ _METAL_SRC = """
         }
         float out = 0.0f;
         for (uint kx = 0; kx < D; kx++) {
-            // all-old-S RHS: decay*S + (kk*a)*sa + k*v (precise exp: the
-            // decay must not pick up fast-math ULP drift vs mx.exp).
-            float sk = metal::precise::exp(shw[kx]) * s[kx]
+            // all-old-S RHS: decay*S + (kk*a)*sa + k*v
+            float sk = shdecay[kx] * s[kx]
                      + shkk[kx] * sha[kx] * sa + shk[kx] * vv;
             s[kx] = sk;
             out += sk * shr[kx];                    // y[v] = sum_k S[k,v] r[k]
@@ -290,7 +295,9 @@ class Rwkv7MLX:
             *[p for L in self.layers for p in L.values()
               if isinstance(p, mx.array)],
         )
-        # decode step, compiled once per model (T==1 shapes are static).
+        # decode step, compiled once per model (T==1 shapes are static). NB only
+        # the T==1 decode path is compiled: compiling the T>1 prefill reorders fp
+        # ops and breaks oracle bit-exactness on 0.1B (see prefill()).
         self._step = mx.compile(self._forward_seq)
 
     # ---- state ----------------------------------------------------------
@@ -412,6 +419,13 @@ class Rwkv7MLX:
         evaluated in bounded pieces; chunking is exact (the recurrence carries
         all cross-chunk context in `state`)."""
         chunk = chunk or (256 if self.wkv_mode == "metal" else 32)
+        # Prefill runs the EAGER forward (not the compiled self._step): mx.compile
+        # fuses/reorders the fp ops, which shifts rounding by ~1 ULP (state diff
+        # ~2e-7). Harmless for the big models but enough to flip a greedy token on
+        # 0.1B (logits are closer together), so compiling the T>1 prefill breaks
+        # the oracle bit-exactness — measured +13% prefill but 0.1B fell to 5/24.
+        # Bit-exactness is the red line; prefill stays eager. (Decode's compiled
+        # T==1 step is separately gate-validated as exact.)
         logits = None
         for s in range(0, len(tokens), chunk):
             part = mx.array(tokens[s:s + chunk], dtype=mx.int32)
