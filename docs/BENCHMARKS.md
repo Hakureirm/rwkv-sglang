@@ -450,9 +450,15 @@ The fused **Metal WKV kernel is the default**: it reads the prompt **4.4–8.1×
 pure-ops scan (0.1B 8.1× / 1.5B 5.6× / 7.2B 4.4×) at equal-within-noise decode (both bandwidth-bound
 on the per-token weight read). `RWKV_MLX_WKV=pure` is a JIT-free fallback. Peak memory is measured
 per-model (a prior number double-counted a retained compiled-decode closure — corrected). See
-[F0037](findings/0037-mlx-fused-metal-default.md) and [`../mlx_port/`](../mlx_port/). Deeper
-Apple-Silicon work (kernel tuning for the M5 GPU, quantization, accuracy rulers, real-workload) is in
-progress.
+[F0037](findings/0037-mlx-fused-metal-default.md) and [`../mlx_port/`](../mlx_port/).
+
+**MLX now matches the CUDA platform's coverage** (F0038–F0041, all oracle-exact 24/24 on the fp16
+default): M5 kernel profiling (bsz1 decode is weight-bandwidth-bound, ~79% of the hard ceiling) plus a
+bit-exact decay-precompute WKV win; **opt-in w8/w4 weight quant** (`RWKV_MLX_QUANT`, `mx.quantize` g64,
+mirrors CUDA w8g64/w4g64) — **w8 greedy-lossless, decode +49% (1.5B) / +68% (7.2B), peak memory −33%
+(w8) / −55% (w4)**; a direct-call compression-rate ruler (w8 +0.0003 bpb = lossless, w4 +0.0504 —
+matching the CUDA column); and a real ShareGPT single-stream bench (w8 halves inter-token latency).
+fp16/bf16 remains the exact default.
 
 ---
 

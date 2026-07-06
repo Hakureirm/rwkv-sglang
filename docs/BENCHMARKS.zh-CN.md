@@ -416,8 +416,13 @@ token 精确**。**7.2B fp16 装进 32 GB 统一内存还有余量。**
 融合 **Metal WKV 核现为默认**:读题比普通算子扫描**快 4.4–8.1 倍**(0.1B 8.1× / 1.5B 5.6× / 7.2B
 4.4×),解码在噪声内持平(都受每 token 权重读的带宽限制)。`RWKV_MLX_WKV=pure` 为免 JIT 的回退路径。
 峰值内存按单模型测量(此前一个数把驻留的已编译解码闭包重复计了——已修正)。详见
-[F0037](findings/0037-mlx-fused-metal-default.md) 与 [`../mlx_port/`](../mlx_port/)。更深的 Apple
-Silicon 工作(针对 M5 GPU 的核调优、量化、精度尺、真实负载)进行中。
+[F0037](findings/0037-mlx-fused-metal-default.md) 与 [`../mlx_port/`](../mlx_port/)。
+
+**MLX 现已与 CUDA 平台覆盖对齐**(F0038–F0041,fp16 默认全程 oracle 24/24 精确):M5 核 profiling
+(bsz1 解码受权重带宽限,约达硬上限 79%)+ 位精确的 decay-precompute WKV 优化;**可选 w8/w4 权重量化**
+(`RWKV_MLX_QUANT`,`mx.quantize` g64,对齐 CUDA w8g64/w4g64)——**w8 贪心无损,解码 +49%(1.5B)/
++68%(7.2B),峰值内存 −33%(w8)/ −55%(w4)**;直算压缩率尺(w8 +0.0003 bpb=无损,w4 +0.0504,
+与 CUDA 一致);以及真实 ShareGPT 单流基准(w8 把每字间隔砍半)。fp16/bf16 仍为精确默认。
 
 ---
 
