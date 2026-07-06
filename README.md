@@ -39,10 +39,15 @@ of extra VRAM. High concurrency and long context are where this architecture win
 1.5B model, one GPU, sglang main. "Single request" = one stream, sustained decode speed.
 "Peak" = best total throughput across a concurrency sweep (64-token prompts, 256-token outputs).
 
-| GPU | single request | peak serving throughput |
+| GPU (1.5B) | single request | peak serving throughput |
 |---|---|---|
 | RTX 3090 | 230.7 tok/s | 7,205 tok/s fp16 · **9,851 tok/s int8** |
 | RTX 5090 | **409.8 tok/s** fp16 · **548.8** int4 | **22,175 tok/s** |
+
+**7.2B, one RTX 5090 (32 GB):** single request 123.7 tok/s (fp16). Peak serving:
+5,983 tok/s (fp16, but capped at 221 concurrent — it OOMs above) vs **6,987 tok/s
+(int8, 512 concurrent)**. At bsz 1 fp16 is faster; int8's win is the VRAM headroom that
+lets 7.2B scale to 2.32× the concurrency — the full story is in [BENCHMARKS §4](docs/BENCHMARKS.md#4-quantization-what-you-trade-and-what-you-get).
 
 - The same stack runs on T4, L4, A10G, A100 (40/80GB), L40S, H100, H200, B200 —
   per-card results in [`fleet_main_10cards.json`](bench/results/fleet_main_10cards.json).
