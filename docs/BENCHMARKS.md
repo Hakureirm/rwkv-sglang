@@ -71,6 +71,14 @@ keeps absorbing context: 3.65 bits at position 0-64 → 2.24 bits past 1024) are
 | greedy avg@1, v0.5.10 | 0.3920 (196/500) | deterministic |
 | greedy avg@1, **main** | **0.3940 (197/500)** | Δ +0.0020, far inside the ±0.0220 noise band → no regression (`bench/results/math500_greedy_5090main.json`) |
 | avg@64, **main** | **0.4042** (RTX 5090) / **0.4063** (RTX 3090) | both inside the ±0.0027 per-run band around v0.5.10's 0.4060 → no regression on either card (`bench/results/math500_avg64_{5090main,3090main}.json`) |
+| **w8a8** avg@64, main | **0.3812** (12,197/32,000) | vs fp16 0.4042 = **−2.3pt** — a real int8 reasoning cost the low-variance ruler resolves; compression (0.6161) and greedy hid it (`bench/results/math500_avg64_w8a8_5090main.json`) |
+| **w8a8** greedy avg@1, main | 0.3800 (190/500) | vs fp16 0.3940 = −1.4pt (within 1 binomial SE at n=500) |
+| **int4 GPTQ** greedy avg@1, main | 0.1560 (78/500) | vs fp16 0.3940 = **−24pt collapse** — perplexity-style rulers badly understate int4's reasoning damage (see §4 warning) |
+
+The three quantization tiers on the *reasoning* ruler, ordered by damage: w8g64 (weight-only,
+greedy-lossless) → w8a8 (−2.3pt) → int4 (−24pt). Compression rate alone would rank them
++0.0001 / +0.0076 / +0.0429 — the same order but wildly understating int4, which is why MATH500
+is the ruler that decides quantization quality here.
 
 ## 3. Single-request speed ladder (steady-state, 1.5B fp16)
 
@@ -105,7 +113,7 @@ quant flags at an fp16 dir errors out by design).
 state is constant-size, so the state-pool slot count is the max concurrency (per-request
 state ≈ 33 MB, identical for both — it is fp32 model state, independent of weight
 quantization). fp16 weights (14.4 GB) leave the pool room for only 221 concurrent and it
-OOMs above; w8a8 weights (7.75 GB) free enough headroom for 512. Same launch, cuda-graph
+OOMs above; w8a8 weights (7.75 GB) free enough headroom for 640. Same launch, cuda-graph
 ON, 64-in/256-out:
 
 | 7.2B on one 5090 | max concurrency | peak output throughput |
@@ -113,10 +121,19 @@ ON, 64-in/256-out:
 | fp16 | 221 | 5,983 tok/s @c192 |
 | **w8a8** | **640 (2.90×)** | **7,587 tok/s @c640 (1.268×, still climbing at 640)** |
 
-So int8 serves 7.2B at **2.90× the concurrency and a 26.8% higher peak than fp16 can reach
-on this card** — fp16 is pinned at the memory limit. Honest mechanism: at matched
-concurrency ≤221 fp16 is faster per step (no activation-quant tax); w8a8 wins purely by
-reaching concurrency fp16 physically cannot. Raw: `bench/results/72b/`.
+Full concurrency sweep (output tok/s) — fp16 tops out and OOMs where w8a8 keeps scaling:
+
+| concurrency | 1 | 128 | 192 | 221 | 320 | 448 | 512 | 576 | 640 |
+|---|---|---|---|---|---|---|---|---|---|
+| fp16 | 124 | 5,668 | 5,983 | 5,747 | — OOM above 221 → | | | | |
+| **w8a8** | 60 | 4,657 | — | 5,342 | 6,304 | 6,679 | 6,997 | 7,346 | **7,587** |
+
+w8a8's curve is still rising at 640 (its own memory ceiling: 20.03 GB state pool, 1.92 GB
+free); the 7,587 is a memory-bound floor, not a compute plateau. So int8 serves 7.2B at
+**2.90× the concurrency and a 26.8% higher peak than fp16 can reach on this card** — fp16 is
+pinned at the memory limit. Honest mechanism: at matched concurrency ≤221 fp16 is faster
+per step (no activation-quant tax); w8a8 wins purely by reaching concurrency fp16 physically
+cannot. Raw: `bench/results/72b/`.
 
 **An honest int4 warning (measured 2026-07-05):** perplexity-style metrics understate int4's
 damage to multi-step reasoning. On the 1.5B GPTQ checkpoint, compression looks mild (0.6514)
@@ -124,6 +141,23 @@ but **MATH500 greedy collapses to 0.1560** (78/500, vs fp16's 0.3940) — the qu
 loses the thread mid-derivation and rambles to the token cap (60% truncation vs 14%). Treat
 1.5B int4 as a memory tool for non-reasoning workloads; the 7.2B GPTQ (much smaller lambada
 loss) is being re-checked on the same ruler. Raw: `bench/results/math500_greedy_w4gptq_5090main.json`.
+
+**The sm120 w8a8 kernel (GEMM microbench).** Upstream cutlass `int8_scaled_mm` does not
+compile for sm120, so on Blackwell consumer cards our hand-written s8-wmma GEMM (register-
+blocked "V2", bit-exact vs a per-row reference, batch-invariant) is the only int8 path. It
+beats fp16 cuBLAS on the projection shapes at decode/prefill batch (RTX 5090, standalone
+GEMM, × = our speedup over fp16):
+
+| projection shape | M=512 | M=1024 | M=4096 |
+|---|---|---|---|
+| attn 2048×2048 | 1.08× | 1.33× | 1.52× |
+| ffn.k 8192×2048 | 1.45× | 1.52× | 1.55× |
+| ffn.v 2048×8192 | 1.03× | 1.28× | 1.53× |
+
+The GEMM wins, but 1.5B e2e is 0.9466× fp16 (§5): the per-token activation-quant launch,
+not amortized across ~144 heterogeneous decode kernels, plus an already-excellent fp16
+baseline, eat the kernel's margin. That tax is latent on the VRAM-bound 7.2B case above,
+where int8's real win (2.90× concurrency) lives. Raw: `bench/verify_w8a8.py --bench`.
 
 ## 5. Serving throughput (wall-clock, 64-in/256-out, concurrency sweep)
 
@@ -353,9 +387,12 @@ Draft model proposes K tokens, target verifies them in one pass, rejected tokens
 restoring an O(1) state snapshot. Status: functional; 9/10 gate prompts token-identical to
 normal decoding, mean 3.17 tokens accepted per round (measured acceptance rate α = 0.738).
 The single differing token was traced to float rounding-order (the probe: it occurred exactly
-at the sequence's smallest top-2 logit gap, 0.005 nats) — same benign class as dynamic-batch
-nondeterminism. Speed phase (CUDA graphs) is next. Full analysis:
-[F0031](findings/0031-spec-decode-increment-i.md), F0029 (viability), ADR-0006 (design).
+at the sequence's smallest top-2 logit gap, 0.005 nats) — the verify's M=K GEMM reduces in a
+different order than the M=1 baseline decode. The exactness fix is built and gated: `gemv_mb`,
+a batch-invariant M-row GEMV whose every row is bit-identical to the decode kernel (`gemv_m1`)
+— routing the verify's projections through it makes spec-on ≡ spec-off. Remaining: wire it in,
+port the worker to sglang main, and add the draft/verify CUDA graphs (the speedup). Full
+analysis: [F0031](findings/0031-spec-decode-increment-i.md), F0029 (viability), ADR-0006.
 
 ## 12. Apple Silicon (MLX)
 
