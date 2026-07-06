@@ -1,13 +1,13 @@
 # F0036 — PP + cuda-graph was broken on main (v_first proxy); fix + first TP/PP production throughput
 
-**Date:** 2026-07-06 · **Status:** FIX WRITTEN + compiles; Modal 2×L4 re-verify in flight · **Prior:** F0019 (TP/PP correctness, v0.5.10, cuda-graph OFF)
+**Date:** 2026-07-06 · **Status:** FIX WRITTEN + compiles; 2×L4 re-verify in flight · **Prior:** F0019 (TP/PP correctness, v0.5.10, cuda-graph OFF)
 
 ## What the TP/PP audit uncovered
 
 The user asked whether TP/PP was stale. It was: F0019 verified TP 2/4/8 + PP 2/4/8 +
 tp2×pp2 **greedy-exact on real multi-GPU, but with cuda-graph OFF** (functional gate
 config — the tok/s there are gate numbers, not production throughput). Nobody had ever
-run **PP with cuda-graph ON**. First attempt on Modal 2×L4 (pp=2, production config)
+run **PP with cuda-graph ON**. First attempt on 2×L4 (pp=2, production config)
 crashed during decode cuda-graph capture:
 
 ```
@@ -46,7 +46,7 @@ unaffected: the guard is a no-op when every buffer key is present in the real pr
 
 ## Verification
 
-All four edited files compile. Correctness/throughput on Modal 2×L4 (pp=2, cuda-graph ON,
+All four edited files compile. Correctness/throughput on 2×L4 (pp=2, cuda-graph ON,
 greedy vs tp=1) is the gate — running on branch `rwkv7-pp-cudagraph-fix`; folds into
 PR #30115 and unblocks the first TP/PP **production** throughput numbers (req#4, which had
 correctness but zero cuda-graph-ON serving data).
