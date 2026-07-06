@@ -51,10 +51,18 @@ import mlx.core as mx
 # fp32(sqrt(e))) so the op sequence matches oracle_numpy.py line-for-line.
 _SQRT_E = math.e ** 0.5
 
-# WKV path default: "pure" (plain MLX ops) or "metal" (fused scan kernel).
+# WKV path default: "metal" (fused scan kernel) or "pure" (plain MLX ops).
 # Per-instance (constructor arg) because the compiled decode step bakes the
 # traced path — switching modes requires a fresh model instance.
-WKV_DEFAULT = os.environ.get("RWKV_MLX_WKV", "pure")
+#
+# Default is "metal": at equal peak memory and equal (within-noise) bsz1 decode
+# it prefills 5-8x faster than "pure" (whole-chunk scan in one dispatch vs a
+# Python-level T-loop), and its decode tok/s is tighter run-to-run (no fp
+# reduction difference — both paths are oracle-exact 24/24). "pure" stays a
+# dependency-free fallback (no Metal JIT) via RWKV_MLX_WKV=pure. The metal
+# kernel uses only portable Metal (threadgroup mem, barriers, precise::exp), so
+# it is expected to build on M1/M2/M3/M4 as well; measured here on M5.
+WKV_DEFAULT = os.environ.get("RWKV_MLX_WKV", "metal")
 
 
 def _layer_norm(x, w, b, eps=1e-5):

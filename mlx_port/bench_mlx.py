@@ -20,6 +20,7 @@ Protocol (honest-numbers discipline):
 Markers: BENCH_<TAG> lines, one per (model, wkv) pair.
 """
 import argparse
+import gc
 import json
 import os
 import platform
@@ -42,10 +43,14 @@ def _gate(model, fx, tag, wkv):
     print(f"[{tag}] pre-bench gate re-check PASS 24/24 (wkv={wkv})")
 
 
-def bench_decode(model, prompt_tokens, n_timed=128, n_warm=16, runs=3):
+def bench_decode(model, prompt_tokens, n_timed=128, n_warm=16, runs=5):
     """Steady-state bsz1 greedy decode via the async-pipelined loop (the same
     greedy_loop the gate validates token-exactly). The pipeline is drained
-    (mx.eval on every produced token) before the clock stops."""
+    (mx.eval on every produced token) before the clock stops. Returns
+    (median, best) tok/s: bsz1 greedy decode is bandwidth-bound on the per-token
+    weight read, so on a loaded machine the host-side scheduling adds jitter —
+    `best` is the least-contended (closest-to-hardware) rate, `median` the
+    typical rate. Both are reported for honesty."""
     rates = []
     for _ in range(runs):
         state = model.new_state()
@@ -56,7 +61,7 @@ def bench_decode(model, prompt_tokens, n_timed=128, n_warm=16, runs=3):
         toks, logits, state = model.greedy_loop(logits, state, n_timed)
         mx.eval(*toks)
         rates.append(n_timed / (time.perf_counter() - t0))
-    return statistics.median(rates)
+    return statistics.median(rates), max(rates)
 
 
 def bench_prefill(model, tokens, runs=3):
@@ -105,18 +110,32 @@ def main():
         for wkv in args.wkv.split(","):
             model = load_model(model_dir, dtype=args.dtype, wkv=wkv)
             _gate(model, fx, tag, wkv)
+            if hasattr(mx, "clear_cache"):
+                mx.clear_cache()  # drop the gate's transient buffers
             if hasattr(mx, "reset_peak_memory"):
                 mx.reset_peak_memory()
-            dec = bench_decode(model, prompt, n_timed=args.decode_tokens)
+            dec_med, dec_best = bench_decode(model, prompt,
+                                             n_timed=args.decode_tokens)
             pre = bench_prefill(model, long_prompt)
             peak = (mx.get_peak_memory() / 2**30
                     if hasattr(mx, "get_peak_memory") else float("nan"))
             print(f"BENCH_{tag} wkv={wkv} dtype={args.dtype} "
-                  f"decode={dec:.1f} tok/s (bsz1 greedy, "
-                  f"{args.decode_tokens} steady-state, median of 3)  "
-                  f"prefill={pre:.1f} tok/s ({args.prefill_tokens} tokens, "
+                  f"decode={dec_med:.1f} tok/s (median; best {dec_best:.1f}) "
+                  f"(bsz1 greedy, {args.decode_tokens} steady-state, median of 5)"
+                  f"  prefill={pre:.1f} tok/s ({args.prefill_tokens} tokens, "
                   f"median of 3)  peak_mem={peak:.2f} GiB", flush=True)
+            # Honest per-config peak needs the PREVIOUS config fully released
+            # before the next one loads. `del model` is not enough: the compiled
+            # decode step (mx.compile(self._forward_seq)) captures every weight
+            # by closure, so the ~3 GiB stays live until the compiled callable
+            # is dropped too. Null it, gc the cycle, then return the pool to the
+            # OS — otherwise pure-then-metal reports metal's peak as ~2x (it was
+            # reading the retained pure weights). Confirmed: active mem -> 0.
+            model._step = None
             del model
+            gc.collect()
+            if hasattr(mx, "clear_cache"):
+                mx.clear_cache()
 
 
 if __name__ == "__main__":
