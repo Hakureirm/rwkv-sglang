@@ -36,6 +36,23 @@ TRUE parameter counts (safetensors bytes/2, fp16): draft "0.1B" = **0.191B**, ta
 - vs **1.5B** target, K=4: ≈ 2.98 / (1 + 4/8.0) ≈ **1.99×**
 - vs **7.2B** target, K=4: ≈ 2.98 / (1 + 4/37.7) ≈ **2.69×** (K=8: ≈ 2.95×)
 
+## Update (2026-07-06, Opus) — 7.2B α MEASURED on the 5090 (main); no longer an assumption
+
+Re-ran `bench/spec_accept.py` on the RTX 5090 (sglang main container, fp16, same 8 prompts, gen-len
+128), measuring the 0.1B draft against BOTH targets. The 7.2B row above was previously a same-α
+*assumption*; it is now measured:
+
+| draft → target | measured α | K=4 tok/forward | net bsz1 (K=4, true draft_frac) |
+|---|---|---|---|
+| 0.1B → **7.2B** | **0.7485** (n=811) | 3.04 | 3.04 / (1 + 4/37.7) ≈ **2.75×** |
+| 0.1B → 1.5B | 0.7330 (n=603) | 2.95 | 2.95 / (1 + 4/8.0) ≈ **1.97×** |
+
+Two facts confirmed: (1) the 1.5B α reproduces on main (0.733 vs the original 0.738 — within
+greedy-composition noise); (2) **α is HIGHER against the 7.2B target (0.7485 > 0.733)**, so the
+"best on the big target" hypothesis holds on BOTH axes — larger target ⇒ higher acceptance AND
+smaller relative draft cost. The 7.2B net-speedup projection tightens to **~2.75×** (was ~2.69×
+extrapolated). Raw: `bench/results/spec_acc_{72b,15b}.json`, `bench/logs/spec_alpha_run.log`.
+
 ## Verdict — viability gate PASSES
 α = 0.738 is high (typical draft/target acceptance is 0.6–0.8; the shared RWKV7-G1 family helps), so
 spec-decode yields a **~2.0–2.7× single-stream decode speedup estimate**, best on the **7.2B target**
@@ -53,8 +70,9 @@ capability no other RWKV serving stack has (they have no scheduler), and it is e
 - n = 603 of the 611 generated target tokens: sglang's logprob format prepends None at
   logprob_start_len, so the FIRST target token of each prompt (8 total) is structurally unscored —
   a negligible per-block-boundary bias, noted for exactness.
-- α was measured against the **1.5B** target only; the 7.2B row ASSUMES the same α (same-family
-  drafts usually agree slightly less with a larger target). Measure α vs 7.2B before quoting it.
+- ~~α was measured against the **1.5B** target only; the 7.2B row ASSUMES the same α.~~ **RESOLVED
+  (2026-07-06, see Update above):** measured α(0.1B→7.2B) = **0.7485** (n=811), slightly HIGHER than
+  1.5B — the same-family draft agrees *more* with the larger target here, not less.
 - Speedup figures are parameter-ratio (≈ weight-bandwidth) estimates; at bsz1 the 12-layer draft
   also has a fixed per-token launch/overhead floor, so its real cost exceeds its parameter fraction —
   these estimates are OPTIMISTIC upper-ish bounds. The build measures the real number.

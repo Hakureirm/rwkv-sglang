@@ -11,6 +11,41 @@ superseded_by: []
 
 # ADR-0006: RWKV-7 speculative decoding
 
+## 2026-07-06 PIVOT (Opus) — main gained recurrent spec-V2; reuse upstream verify, build only the draft (Strategy B)
+
+The bespoke chain-verify worker below (increment (i), v0.5.10, F0031) was written when sglang
+had no recurrent spec support. **Current main (`b28bc10`) has since rewritten the whole spec
+subsystem to "spec-V2" and it already implements recurrent/mamba speculative verify+commit**,
+which changes the build from "port 595-line worker" to "reuse upstream verify, add only the draft":
+
+- **The RWKV-7 backend already verifies.** `layers/attention/hybrid_linear_attn_backend.py`
+  handles `ForwardMode.TARGET_VERIFY`, captures per-draft-token state in
+  `MambaPool.SpeculativeState.intermediate_ssm` / `intermediate_conv_window`, and exposes
+  `update_mamba_state_after_mtp_verify`.
+- **The commit is upstream + target-agnostic.** `speculative/spec_utils.commit_mamba_states_after_verify`
+  commits the accepted step's recurrent state (`accept_lens-1` for topk==1 = chain-accept), no-ops
+  for non-mamba models. **This is exactly "option (a)" (per-token checkpoint) below — upstream now
+  provides it for free**, superseding the "option (b) re-run" plan and the hand-rolled
+  snapshot/restore.
+- **Registration is a plugin.** `@SpeculativeAlgorithm.register(...)` (`speculative/spec_registry.py`)
+  — no enum / scheduler edits. Workers subclass `BaseSpecWorker` and implement
+  `forward_batch_generation(batch, on_publish=None) -> GenerationBatchResult`; the V1 separate-worker
+  path is gone, so run non-overlap (`--disable-overlap-schedule`).
+- **`NGRAMWorker` is the template** (a non-EAGLE draft source that builds a `VerifyInput` and reuses
+  the verify path). Our worker = NGRAM's shape, but the draft source is a 0.1B RWKV-7 (own
+  `TpModelWorker` with `req_to_token_pool=None` → own MambaPool) run K greedy decode steps → a
+  chain (topk=1) verify input (`retrieve_index` linear, lower-triangular mask) → reuse
+  `TARGET_VERIFY` + `eagle_sample` + `commit_mamba_states_after_verify`.
+
+**The one genuinely new piece** is the *draft's own* recurrent-state rollback (upstream's commit
+handles the target only): draft also captures `intermediate_ssm` and commits at accepted length, or
+re-runs J steps, or snapshots its slot. Everything below (draft construction, K-step decode, greedy
+chain acceptance) still applies; the target verify/rollback machinery is now upstream's.
+**Benefits:** far less code, upstream-maintained, option-(a) speed for free, and **upstreamable**
+(RWKV-7 spec support contributed back). Build + gate (spec-on == spec-off token-identical) on the
+tower main container under `--disable-overlap-schedule`. The `gemv_mb` primitive (3cafe02) is
+demoted to an ε-flip backup unless the upstream verify path itself trips the near-tie flip.
+
 ## Context
 req#6 asks for speculative decoding (0.1B RWKV draft → larger RWKV target). The reverse-overtake
 (ADR-0005) is done; spec-decode is a *new* capability that extends the lead — but RWKV-7 is a
