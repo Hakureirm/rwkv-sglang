@@ -46,10 +46,17 @@ unaffected: the guard is a no-op when every buffer key is present in the real pr
 
 ## Verification
 
-All four edited files compile. Correctness/throughput on 2×L4 (pp=2, cuda-graph ON,
-greedy vs tp=1) is the gate — running on branch `rwkv7-pp-cudagraph-fix`; folds into
-PR #30115 and unblocks the first TP/PP **production** throughput numbers (req#4, which had
-correctness but zero cuda-graph-ON serving data).
+All four edited files compile. **Single-GPU non-regression confirmed on the 5090 tower**
+(fix branch, tp=1, cuda-graph ON: boots + greedy 24/24 — the 4 edits are inert for
+non-PP paths, all gated on pp_size>1). Multi-GPU pp=2 correctness/throughput (the fix's
+actual target) is the remaining gate; it runs on 2×L4.
+
+Infra note (cost/repro): the multi-GPU verify was blocked for several rounds by a drifted
+`dev-cu12` base image whose scheduler 503s at startup **even at tp=1** (unrelated to this
+fix — reproduced with the inert-for-tp1 code). Pinning the base to the digest verified
+working on the tower (`sha256:49627efd…`) is the fix for that; the pp=2 re-verify runs on
+the pinned image. Lesson: pin the serving base image for multi-GPU CI, and capture Modal
+results to a file (the progress-spinner ANSI mangles piped stdout).
 
 ## Cross-references
 
