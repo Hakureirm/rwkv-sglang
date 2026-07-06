@@ -96,7 +96,12 @@ print(tok.decode(out))"
 
 - **Single-stream inference port**, deliberately: greedy bsz1 decode +
   chunked recurrent prefill. It is NOT the sglang serving stack — no
-  continuous batching, no paged state pool, no server, no quantization.
+  continuous batching, no paged state pool, no server.
+- **Optional weight quantization** (`load_model(..., quant="w8"|"w4")` or
+  `RWKV_MLX_QUANT`, mirroring CUDA w8g64 / w4-g64): fp16 stays the bit-exact
+  default; w8 is greedy-lossless and speeds bsz1 decode +28–68% at −20–39%
+  peak memory; w4 goes further on memory/decode at an int4 accuracy cost. Quant
+  is gated by the compression ruler, not the oracle gate (F0039/F0040).
 - Prefill runs the exact recurrence (chunked sequential scan; state carries
   all cross-chunk context, so chunking is mathematically exact). No
   chunkwise-parallel DPLR algebra — that would change summation order and is

@@ -208,9 +208,21 @@ class Rwkv7MLX:
     small per-channel params, norms and LoRAs are promoted to fp32 (lossless
     from bf16) per the precision policy in the module docstring."""
 
-    def __init__(self, model_dir, dtype=mx.bfloat16, wkv_mode=None):
+    def __init__(self, model_dir, dtype=mx.bfloat16, wkv_mode=None, quant=None):
         self.wkv_mode = wkv_mode or WKV_DEFAULT
         assert self.wkv_mode in ("pure", "metal"), self.wkv_mode
+        # Optional MLX-native group weight-quant of the big [out,in] projections
+        # (mirrors the CUDA w8g64 / w4-g64 modes). fp16 stays the exact default;
+        # quant is opt-in and NOT bit-exact — measure it on the Axis-3 compression
+        # ruler, not the oracle gate. bf16 activations + fp32 state/LoRAs/norms are
+        # unchanged; only the weight *storage* of the big matmuls changes.
+        quant = quant or os.environ.get("RWKV_MLX_QUANT") or None
+        if quant in ("none", "None", "fp16", "bf16", ""):
+            quant = None
+        assert quant in (None, "w8", "w4"), f"quant must be None|w8|w4, got {quant!r}"
+        self.quant = quant
+        self.q_bits, self.q_group = {
+            None: (0, 0), "w8": (8, 64), "w4": (4, 64)}[quant]
         cfg = json.load(open(os.path.join(model_dir, "config.json")))
         weights = {}
         for f in sorted(glob.glob(os.path.join(model_dir, "*.safetensors"))):
@@ -240,8 +252,21 @@ class Rwkv7MLX:
         big = lambda n: take(n, dtype)
         f32 = lambda n: take(n, mx.float32)
 
+        def qbig(n):
+            """A big [out,in] projection: bf16, or group-quantized to a
+            (w_q, scales, biases) tuple when quant is on. Grouping is over the
+            input dim (mx.quantize axis=-1), i.e. per-output-channel g{group}."""
+            W = take(n, dtype)
+            if self.q_bits == 0:
+                return W
+            # mx.quantize -> [w_q, scales, biases]; keep a tuple so the
+            # isinstance(..., tuple) dispatch in _proj / head / eval fires.
+            return tuple(mx.quantize(W, group_size=self.q_group, bits=self.q_bits))
+
+        # emb is a gather (1 row/token at decode) — MLX has no quantized gather,
+        # so it stays bf16; head is a full GEMM/GEMV, so it IS quantized.
         self.emb = big("model.embeddings.weight")
-        self.head = big("lm_head.weight")
+        self.head = qbig("lm_head.weight")
         self.ln_out = (f32("model.norm.weight"), f32("model.norm.bias"))
         self.ln0 = (
             f32("model.layers.0.pre_norm.weight"),
@@ -260,17 +285,17 @@ class Rwkv7MLX:
                 # token-shift lerp coefficients, [1,1,D] -> [D]
                 **{x: f32(f"{A}.{x}").reshape(-1)
                    for x in ["x_r", "x_w", "x_k", "x_v", "x_a", "x_g"]},
-                "Wr": big(f"{A}.r_proj.weight"),
-                "Wk": big(f"{A}.k_proj.weight"),
-                "Wv": big(f"{A}.v_proj.weight"),
-                "Wo": big(f"{A}.o_proj.weight"),
+                "Wr": qbig(f"{A}.r_proj.weight"),
+                "Wk": qbig(f"{A}.k_proj.weight"),
+                "Wv": qbig(f"{A}.v_proj.weight"),
+                "Wo": qbig(f"{A}.o_proj.weight"),
                 "k_k": f32(f"{A}.k_k"),
                 "k_a": f32(f"{A}.k_a"),
                 "r_k": f32(f"{A}.r_k"),  # [n_head, head_dim]
                 "gn": (f32(f"{A}.g_norm.weight"), f32(f"{A}.g_norm.bias")),
                 "fx_k": f32(f"{F}.x_k"),
-                "Wfk": big(f"{F}.key.weight"),
-                "Wfv": big(f"{F}.value.weight"),
+                "Wfk": qbig(f"{F}.key.weight"),
+                "Wfv": qbig(f"{F}.value.weight"),
             }
             # LoRA chains (fp32): down [low,H], up [H,low], bias [H].
             # w=tanh(+bias), a=identity(+bias), g=sigmoid(no bias),
@@ -290,11 +315,13 @@ class Rwkv7MLX:
         extra = set(weights) - consumed
         if extra:
             raise KeyError(f"unconsumed checkpoint keys: {sorted(extra)[:8]}")
-        mx.eval(
-            self.emb, self.head,
-            *[p for L in self.layers for p in L.values()
-              if isinstance(p, mx.array)],
-        )
+        # Materialize every weight now (flatten tuple-valued params: norms, and
+        # the quantized (w_q, scales, biases) triples) for a clean load + peak.
+        def _flat(v):
+            return v if isinstance(v, tuple) else (v,)
+        mx.eval(*[p for v in [self.emb, self.head] for p in _flat(v)],
+                *[p for L in self.layers for val in L.values()
+                  for p in _flat(val) if isinstance(p, mx.array)])
         # decode step, compiled once per model (T==1 shapes are static). NB only
         # the T==1 decode path is compiled: compiling the T>1 prefill reorders fp
         # ops and breaks oracle bit-exactness on 0.1B (see prefill()).
@@ -319,7 +346,13 @@ class Rwkv7MLX:
         """x (fp32 [T, in]) @ W.T with W in the big-proj dtype. The input is
         rounded to the weight dtype at the GEMM boundary (same rounding point
         as the sglang bf16 path); MLX accumulates the GEMM in fp32; the output
-        is promoted back to fp32 for the elementwise math."""
+        is promoted back to fp32 for the elementwise math. When W is a quantized
+        (w_q, scales, biases) tuple, use mx.quantized_matmul (x @ dequant(W).T);
+        the activation is still bf16 in, so this is weight-only quant."""
+        if isinstance(W, tuple):
+            return mx.quantized_matmul(
+                x32.astype(self.dtype), *W, transpose=True,
+                group_size=self.q_group, bits=self.q_bits).astype(mx.float32)
         return mx.matmul(x32.astype(W.dtype), W.T).astype(mx.float32)
 
     @staticmethod
@@ -409,7 +442,12 @@ class Rwkv7MLX:
             x = x + dxf
             new_state.append((sa, sf, S))
         x = _layer_norm(x[-1:], *self.ln_out, self.norm_eps)
-        logits = mx.matmul(x.astype(self.head.dtype), self.head.T)
+        if isinstance(self.head, tuple):
+            logits = mx.quantized_matmul(
+                x.astype(self.dtype), *self.head, transpose=True,
+                group_size=self.q_group, bits=self.q_bits)
+        else:
+            logits = mx.matmul(x.astype(self.head.dtype), self.head.T)
         return logits[0].astype(mx.float32), new_state
 
     # ---- public API -------------------------------------------------------
@@ -470,7 +508,7 @@ class Rwkv7MLX:
         return [int(t[0]) for t in toks], state
 
 
-def load_model(model_dir, dtype="bfloat16", wkv=None):
+def load_model(model_dir, dtype="bfloat16", wkv=None, quant=None):
     dt = {"bfloat16": mx.bfloat16, "float16": mx.float16,
           "float32": mx.float32}[dtype]
-    return Rwkv7MLX(model_dir, dtype=dt, wkv_mode=wkv)
+    return Rwkv7MLX(model_dir, dtype=dt, wkv_mode=wkv, quant=quant)

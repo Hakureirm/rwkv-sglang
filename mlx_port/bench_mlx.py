@@ -34,13 +34,24 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rwkv7_mlx import load_model
 
 
-def _gate(model, fx, tag, wkv):
-    got, _ = model.generate(fx["prompt_tokens"], len(fx["greedy_tokens"]))
-    if got != fx["greedy_tokens"]:
-        print(f"BENCH_ABORT_{tag} gate FAILED for wkv={wkv} — "
-              f"refusing to publish numbers", flush=True)
-        sys.exit(1)
-    print(f"[{tag}] pre-bench gate re-check PASS 24/24 (wkv={wkv})")
+def _gate(model, fx, tag, wkv, quant):
+    exp = fx["greedy_tokens"]
+    got, _ = model.generate(fx["prompt_tokens"], len(exp))
+    n_match = sum(1 for i in range(len(exp)) if got[i] == exp[i])
+    if quant is None:
+        # fp16 is the exact default: refuse to publish if it drifted at all.
+        if got != exp:
+            print(f"BENCH_ABORT_{tag} gate FAILED for wkv={wkv} — "
+                  f"refusing to publish numbers", flush=True)
+            sys.exit(1)
+        print(f"[{tag}] pre-bench gate re-check PASS {n_match}/{len(exp)} "
+              f"(wkv={wkv})")
+    else:
+        # quant is opt-in and not expected bit-exact; report greedy-vs-oracle
+        # match (real accuracy = the compression ruler), never abort.
+        fd = next((i for i in range(len(exp)) if got[i] != exp[i]), None)
+        print(f"[{tag}] quant={quant} greedy-vs-oracle {n_match}/{len(exp)} "
+              f"match first_div={fd} (wkv={wkv})")
 
 
 def bench_decode(model, prompt_tokens, n_timed=128, n_warm=16, runs=5):
@@ -84,6 +95,8 @@ def main():
     ap.add_argument("--dtype", default="bfloat16",
                     choices=["bfloat16", "float16", "float32"])
     ap.add_argument("--wkv", default="pure,metal")
+    ap.add_argument("--quant", default=None,
+                    help="opt-in weight quant: None (fp16 default) | w8 | w4")
     ap.add_argument("--decode-tokens", type=int, default=128)
     ap.add_argument("--prefill-tokens", type=int, default=1024)
     args = ap.parse_args()
@@ -115,8 +128,9 @@ def main():
         long_prompt = (prompt * (args.prefill_tokens // len(prompt) + 1))[
             : args.prefill_tokens]
         for wkv in args.wkv.split(","):
-            model = load_model(model_dir, dtype=args.dtype, wkv=wkv)
-            _gate(model, fx, tag, wkv)
+            model = load_model(model_dir, dtype=args.dtype, wkv=wkv,
+                               quant=args.quant)
+            _gate(model, fx, tag, wkv, args.quant)
             if hasattr(mx, "clear_cache"):
                 mx.clear_cache()  # drop the gate's transient buffers
             if hasattr(mx, "reset_peak_memory"):
@@ -127,6 +141,7 @@ def main():
             peak = (mx.get_peak_memory() / 2**30
                     if hasattr(mx, "get_peak_memory") else float("nan"))
             print(f"BENCH_{tag} wkv={wkv} dtype={args.dtype} "
+                  f"quant={args.quant} "
                   f"decode={dec_med:.1f} tok/s (median; best {dec_best:.1f}) "
                   f"(bsz1 greedy, {args.decode_tokens} steady-state, median of 5)"
                   f"  prefill={pre:.1f} tok/s ({args.prefill_tokens} tokens, "
