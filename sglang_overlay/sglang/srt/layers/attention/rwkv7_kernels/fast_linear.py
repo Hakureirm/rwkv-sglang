@@ -243,6 +243,10 @@ def _register_fakes():
         @torch.library.register_fake("rwkv7_fast::gemv_m1_cfg")
         def _fm1c(x, weight, threads, out_tile):
             return x.new_empty((1, weight.shape[0]))
+
+        @torch.library.register_fake("rwkv7_fast::gemv_mb_cfg")
+        def _fmbc(x, weight, threads, out_tile):
+            return x.new_empty((x.shape[0], weight.shape[0]))
     except Exception:
         pass  # older torch without register_fake -> caller disables piecewise cuda graph
 
@@ -267,3 +271,18 @@ def gemv_m1(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         return torch.ops.rwkv7_fast.gemv_m1_cfg(xc, weight, t, ot)
     except Exception:
         return torch.ops.rwkv7_fast.gemv_m1(xc, weight)
+
+
+def gemv_mb(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    """y[M,N] = x[M,K] @ weight[N,K]^T, batch-INVARIANT: row m is bit-identical to
+    gemv_m1(x[m]) because it uses the same per-output fp32 reduction and the SAME
+    (threads, out_tile) the decode path picks for (N,K). One launch for all M rows.
+
+    Purpose: the chain-spec verify computes the target over K positions in a single
+    launch while staying bit-exact against the M=1 baseline decode — this is the
+    F0031 increment-(ii) exactness path (the M=K cuBLAS GEMM reduction order was the
+    lone gate flip). Caller guarantees fp16, contiguous, K%4==0."""
+    xc = x.contiguous()
+    N, K = weight.size(0), weight.size(1)
+    t, ot = _select_config(N, K)
+    return torch.ops.rwkv7_fast.gemv_mb_cfg(xc, weight, t, ot)

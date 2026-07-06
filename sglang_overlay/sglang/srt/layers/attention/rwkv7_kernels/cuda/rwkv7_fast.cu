@@ -150,11 +150,106 @@ at::Tensor gemv_m1_cfg(at::Tensor x, at::Tensor weight, int64_t threads,
 }
 #undef RWKV7_GEMV_LAUNCH
 
+// ---------------------------------------------------------------------------
+// gemv_mb_cfg: batch-invariant M-row GEMV. Each row m of y[M,N] is computed by
+// the EXACT same per-output fp32 reduction as gemv_m1_kernel (one row per
+// blockIdx.y), so with the SAME (threads, out_tile) the decode path picks,
+// y[m] is BIT-IDENTICAL to gemv_m1(x[m]). Purpose: the chain-spec verify runs
+// the target over K positions in one launch while staying bit-exact against the
+// M=1 baseline decode — closing the F0031 gate flip (M=K cuBLAS GEMM reduction
+// order) without giving up the one-forward-per-round structure. cuda-graph safe.
+// ---------------------------------------------------------------------------
+template <int Threads, int OutTile>
+__global__ __launch_bounds__(Threads, 1) void gemv_mb_kernel(
+    int K, int N, int M,
+    const dtype* __restrict__ x,        // [M, K]
+    const dtype* __restrict__ weight,   // [N, K]
+    dtype* __restrict__ y) {            // [M, N]
+  const int n0 = blockIdx.x * OutTile;
+  const int m = blockIdx.y;
+  const dtype* xm = x + static_cast<int64_t>(m) * K;
+  dtype* ym = y + static_cast<int64_t>(m) * N;
+  float acc[OutTile];
+#pragma unroll
+  for (int j = 0; j < OutTile; ++j) acc[j] = 0.0f;
+  for (int k = threadIdx.x << 2; k < K; k += Threads << 2) {
+    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(xm + k));
+    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(xm + k + 2));
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      const dtype* wj = weight + static_cast<int64_t>(n0 + j) * K + k;
+      const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(wj));
+      const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(wj + 2));
+      acc[j] = fmaf(x0.x, w0.x, acc[j]);
+      acc[j] = fmaf(x0.y, w0.y, acc[j]);
+      acc[j] = fmaf(x1.x, w1.x, acc[j]);
+      acc[j] = fmaf(x1.y, w1.y, acc[j]);
+    }
+  }
+  __shared__ float partial[Threads / 32][OutTile];
+  const int lane = threadIdx.x & 31;
+  const int warp = threadIdx.x >> 5;
+#pragma unroll
+  for (int j = 0; j < OutTile; ++j) {
+    const float v = warp_sum(acc[j]);
+    if (lane == 0) partial[warp][j] = v;
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      float sum = 0.0f;
+#pragma unroll
+      for (int w = 0; w < Threads / 32; ++w) sum += partial[w][j];
+      ym[n0 + j] = __float2half_rn(sum);
+    }
+  }
+}
+
+#define RWKV7_GEMB_LAUNCH(T, OT)                                              \
+  gemv_mb_kernel<T, OT><<<dim3(static_cast<int>(N) / (OT), static_cast<int>(M)), \
+                          (T), 0, stream>>>(                                  \
+      static_cast<int>(K), static_cast<int>(N), static_cast<int>(M),         \
+      x.data_ptr<dtype>(), weight.data_ptr<dtype>(), y.data_ptr<dtype>())
+
+at::Tensor gemv_mb_cfg(at::Tensor x, at::Tensor weight, int64_t threads,
+                       int64_t out_tile) {
+  const int64_t M = x.size(0);
+  const int64_t K = x.size(1);
+  const int64_t N = weight.size(0);
+  TORCH_CHECK(x.dim() == 2 && x.is_contiguous(), "gemv_mb_cfg x must be [M,K] contiguous");
+  TORCH_CHECK(weight.size(1) == K, "gemv_mb_cfg weight [N,K] mismatch");
+  TORCH_CHECK((K % 4) == 0, "gemv_mb_cfg requires K%4==0");
+  TORCH_CHECK((N % out_tile) == 0, "gemv_mb_cfg requires N % out_tile == 0");
+  auto y = at::empty({M, N}, x.options());
+  if (N == 0 || M == 0) return y;
+  if (K == 0) return y.zero_();
+  auto stream = at::cuda::getCurrentCUDAStream();
+  switch (threads * 100 + out_tile) {
+    case 64 * 100 + 1:  RWKV7_GEMB_LAUNCH(64, 1);  break;
+    case 64 * 100 + 2:  RWKV7_GEMB_LAUNCH(64, 2);  break;
+    case 64 * 100 + 4:  RWKV7_GEMB_LAUNCH(64, 4);  break;
+    case 128 * 100 + 1: RWKV7_GEMB_LAUNCH(128, 1); break;
+    case 128 * 100 + 2: RWKV7_GEMB_LAUNCH(128, 2); break;
+    case 128 * 100 + 4: RWKV7_GEMB_LAUNCH(128, 4); break;
+    case 256 * 100 + 1: RWKV7_GEMB_LAUNCH(256, 1); break;
+    case 256 * 100 + 2: RWKV7_GEMB_LAUNCH(256, 2); break;
+    case 256 * 100 + 4: RWKV7_GEMB_LAUNCH(256, 4); break;
+    default: TORCH_CHECK(false, "gemv_mb_cfg unsupported (threads,out_tile)=(",
+                         threads, ",", out_tile, "); use {64,128,256}x{1,2,4}");
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return y;
+}
+#undef RWKV7_GEMB_LAUNCH
+
 TORCH_LIBRARY(rwkv7_fast, m) {
   m.def("gemv_m1(Tensor x, Tensor weight) -> Tensor");
   m.def("gemv_m1_cfg(Tensor x, Tensor weight, int threads, int out_tile) -> Tensor");
+  m.def("gemv_mb_cfg(Tensor x, Tensor weight, int threads, int out_tile) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(rwkv7_fast, CUDA, m) {
   m.impl("gemv_m1", &gemv_m1);
   m.impl("gemv_m1_cfg", &gemv_m1_cfg);
+  m.impl("gemv_mb_cfg", &gemv_mb_cfg);
 }
