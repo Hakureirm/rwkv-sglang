@@ -419,15 +419,25 @@ analysis: [F0031](findings/0031-spec-decode-increment-i.md), F0029 (viability), 
 
 Native implementation, custom Metal WKV kernel, gated by the same numpy reference:
 
-| | 0.1B | 1.5B |
-|---|---|---|
-| greedy vs oracle | 24/24 (both kernel paths) | 24/24 |
-| decode, single stream | 291.0 tok/s | 36.4 tok/s |
-| prompt reading (1024 tok) | 10,399 tok/s | 1,947.5 tok/s |
-| peak memory | 0.91 GiB | 6.68 GiB |
+Default (Metal WKV) path, Apple M5, 32 GB unified memory, MLX 0.31.2 (decode median of 5, prefill median of 3, lightly-loaded host):
 
-Apple M5, 32 GB unified memory, MLX 0.31.2. The Metal kernel is worth 5–8× on prompt reading;
-decode is memory-bound so it changes little. See [`../mlx_port/`](../mlx_port/).
+| | 0.1B | 1.5B | 7.2B |
+|---|---|---|---|
+| greedy vs oracle | 24/24 | 24/24 | 8/8¹ |
+| decode, single stream | 294 tok/s | 32 tok/s | 7.6 tok/s |
+| prompt reading (1024 tok) | 10,457 tok/s | 1,787 tok/s | 453 tok/s |
+| peak memory | 0.54 GiB | 3.38 GiB | 14.6 GiB |
+
+¹ the 7.2B oracle fixture is 8 tokens; 0.1B/1.5B are 24 — all three token-exact on BOTH the pure-ops
+and Metal paths. **7.2B fp16 fits in 32 GB unified memory with headroom.**
+
+The fused **Metal WKV kernel is the default**: it reads the prompt **4.4–8.1× faster** than the
+pure-ops scan (0.1B 8.1× / 1.5B 5.6× / 7.2B 4.4×) at equal-within-noise decode (both bandwidth-bound
+on the per-token weight read). `RWKV_MLX_WKV=pure` is a JIT-free fallback. Peak memory is measured
+per-model (a prior number double-counted a retained compiled-decode closure — corrected). See
+[F0037](findings/0037-mlx-fused-metal-default.md) and [`../mlx_port/`](../mlx_port/). Deeper
+Apple-Silicon work (kernel tuning for the M5 GPU, quantization, accuracy rulers, real-workload) is in
+progress.
 
 ---
 

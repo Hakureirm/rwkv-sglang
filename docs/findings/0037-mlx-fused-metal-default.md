@@ -23,17 +23,19 @@ decode = 128-token steady-state greedy (median & best of 5), prefill = 1024 toke
 
 | model | WKV | decode tok/s (median / best) | prefill tok/s | peak mem |
 |---|---|---|---|---|
-| 0.1B | pure | 274.6 / 302.1 | 1,222 | 0.40 GiB |
-| 0.1B | **metal** | 287.7 / 291.4 | **10,360** | 0.54 GiB |
-| 1.5B | pure | 31.5 / 32.8 | 297 | 3.04 GiB |
-| 1.5B | **metal** | 28.1 / 31.1 | **1,643** | 3.38 GiB |
+| 0.1B | pure | 284.4 / 294.7 | 1,292 | 0.40 GiB |
+| 0.1B | **metal** | 294.0 / 301.8 | **10,457** | 0.54 GiB |
+| 1.5B | pure | 34.0 / 34.4 | 319 | 3.04 GiB |
+| 1.5B | **metal** | 32.1 / 32.6 | **1,787** | 3.38 GiB |
+| 7.2B | pure | 6.6 / 7.2 | 102 | 14.03 GiB |
+| 7.2B | **metal** | 7.6 / 7.6 | **453** | 14.64 GiB |
 
-**Prefill: metal is 8.5× (0.1B) / 5.5× (1.5B) faster** — the fused whole-chunk scan runs in one
-dispatch versus `pure`'s T-step Python loop. **Decode: equal within measurement noise** — bsz1
-decode is bandwidth-bound on the per-token weight read (the WKV op is a small slice of per-token
-work), so both paths land within ~5% on the least-contended `best` run; median jitter on a loaded
-host slightly favored either path per size. **Peak memory: +~0.3 GiB** for the kernel's threadgroup
-scratch — a small, worthwhile cost for the prefill win.
+(3-size clean run on a lightly-loaded M5; 7.2B added — its 14.6 GiB fp16 fits in 32 GB unified memory
+and is oracle-exact 8/8.) **Prefill: metal is 8.1× (0.1B) / 5.6× (1.5B) / 4.4× (7.2B) faster** — the
+fused whole-chunk scan runs in one dispatch versus `pure`'s T-step Python loop. **Decode: equal
+within measurement noise** — bsz1 decode is bandwidth-bound on the per-token weight read (the WKV op
+is a small slice of per-token work), so the paths track within a few % (metal edges ahead at 7.2B).
+**Peak memory: +~0.3 GiB** for the kernel's threadgroup scratch — a small, worthwhile cost.
 
 ## Why metal is the right default
 Prefill speed sets time-to-first-token and is where `pure` was weakest (an interpreter-bound loop);
