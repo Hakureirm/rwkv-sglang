@@ -56,6 +56,13 @@ full re-run was **bit-identical** (pooled 0.6085, drift −0.0000 over ~7.5M tok
 | int8 w8a8 (throughput path) | 0.6161 | +0.0076 |
 | int4 GPTQ | 0.6514 | +0.0429 |
 | 7.2B fp16 | **0.5413** | −0.0672 vs 1.5B (bigger model compresses better) |
+| 7.2B w8a8 | 0.5454 | +0.0041 vs 7.2B fp16 |
+| 7.2B w4 (rwkv_w4, g64) | 0.5615 | +0.0202 vs 7.2B fp16 |
+
+**Quantization costs less at 7.2B than at 1.5B.** w8a8: +0.0041 (7.2B) vs +0.0076 (1.5B); int4:
++0.0202 (7.2B, plain RTN `rwkv_w4`) vs +0.0429 (1.5B, the stronger GPTQ) — the 7.2B RTN checkpoint
+degrades *less than half* as much as the 1.5B GPTQ one despite the weaker quantizer, i.e. the larger
+model absorbs low-bit weights markedly better (`bench/results/uncheatable_full_{w4,w8a8}_7.2b_5090main.json`).
 
 Per-corpus table (all 15, no cherry-picking) and the position-curve (proof the recurrent state
 keeps absorbing context: 3.65 bits at position 0-64 → 2.24 bits past 1024) are in
