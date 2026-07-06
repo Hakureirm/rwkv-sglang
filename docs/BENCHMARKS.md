@@ -432,33 +432,91 @@ analysis: [F0031](findings/0031-spec-decode-increment-i.md), F0029 (viability), 
 
 ## 12. Apple Silicon (MLX)
 
-Native implementation, custom Metal WKV kernel, gated by the same numpy reference:
+Native RWKV-7 for Apple Silicon — MLX + a hand-written Metal WKV kernel, gated by the **same numpy
+fp32 oracle** as CUDA. The MLX port **matches the CUDA platform's coverage**: kernel profiling,
+quantization, the compression-rate ruler, and a real-workload bench — all on **Apple M5 (32 GB
+unified, MLX 0.31.2)**. This is a shared box (load ~8), so single-stream decode has ±3–5% run-to-run
+jitter; the headline quant deltas come from **interleaved one-process A/B** (baseline+variant
+back-to-back per round, drift-cancelled), and `bench_mlx.py` reports median+best.
 
-Default (Metal WKV) path, Apple M5, 32 GB unified memory, MLX 0.31.2 (decode median of 5, prefill median of 3, lightly-loaded host):
+### 12.1 fp16 default — correctness + speed (Metal WKV, bf16 weights)
 
 | | 0.1B | 1.5B | 7.2B |
 |---|---|---|---|
-| greedy vs oracle | 24/24 | 24/24 | 8/8¹ |
-| decode, single stream | 294 tok/s | 32 tok/s | 7.6 tok/s |
-| prompt reading (1024 tok) | 10,457 tok/s | 1,787 tok/s | 453 tok/s |
-| peak memory | 0.54 GiB | 3.38 GiB | 14.6 GiB |
+| greedy vs numpy oracle | 24/24 | 24/24 | 8/8¹ |
+| decode, single stream (tok/s) | 325.6 | 37.3 | 7.5 |
+| prompt reading, 1024 tok (tok/s) | 11,486 | 1,905 | 441 |
+| peak memory | 0.54 GiB | 3.38 GiB | 14.64 GiB |
 
-¹ the 7.2B oracle fixture is 8 tokens; 0.1B/1.5B are 24 — all three token-exact on BOTH the pure-ops
-and Metal paths. **7.2B fp16 fits in 32 GB unified memory with headroom.**
+¹ the 7.2B oracle fixture is 8 tokens (0.1B/1.5B are 24) — all three token-exact on BOTH the pure-ops
+and Metal WKV paths; 7.2B fp16 fits in 32 GB with headroom. The fused Metal WKV kernel is the default
+(prompt-reading 4.4–8.1× faster than the pure-ops scan; `RWKV_MLX_WKV=pure` = JIT-free fallback).
+[F0037](findings/0037-mlx-fused-metal-default.md), [F0038](findings/0038-mlx-m5-kernel-profiling.md).
 
-The fused **Metal WKV kernel is the default**: it reads the prompt **4.4–8.1× faster** than the
-pure-ops scan (0.1B 8.1× / 1.5B 5.6× / 7.2B 4.4×) at equal-within-noise decode (both bandwidth-bound
-on the per-token weight read). `RWKV_MLX_WKV=pure` is a JIT-free fallback. Peak memory is measured
-per-model (a prior number double-counted a retained compiled-decode closure — corrected). See
-[F0037](findings/0037-mlx-fused-metal-default.md) and [`../mlx_port/`](../mlx_port/).
+### 12.2 M5 hardware ceilings + where single-stream time goes (F0038)
 
-**MLX now matches the CUDA platform's coverage** (F0038–F0041, all oracle-exact 24/24 on the fp16
-default): M5 kernel profiling (bsz1 decode is weight-bandwidth-bound, ~79% of the hard ceiling) plus a
-bit-exact decay-precompute WKV win; **opt-in w8/w4 weight quant** (`RWKV_MLX_QUANT`, `mx.quantize` g64,
-mirrors CUDA w8g64/w4g64) — **w8 greedy-lossless, decode +49% (1.5B) / +68% (7.2B), peak memory −33%
-(w8) / −55% (w4)**; a direct-call compression-rate ruler (w8 +0.0003 bpb = lossless, w4 +0.0504 —
-matching the CUDA column); and a real ShareGPT single-stream bench (w8 halves inter-token latency).
-fp16/bf16 remains the exact default.
+Measured M5: **memory bandwidth ~123 GB/s**, matmul ~11.4 TFLOP/s @2048² / ~13.2 @4096². bsz1 decode
+reads every weight once per token (1.5B ≈ **2.88 GB/token**) → a **hard ceiling of ~42.7 tok/s**, and
+we measure ~33.6 = **79% of it**. So the decode lever is *fewer weight bytes* (quant, §12.3), not more
+fp16 kernel tuning (an in-graph ablation zeroing the big projections takes decode 34→400 tok/s —
+decode *is* the weight read). Shipped kernel win: decay-precompute in the WKV scan (D× fewer `exp`,
+**bit-exact**) → prefill **+0.8% / +1.8% / +3.1%** (0.1B/1.5B/7.2B); prefill chunk 256 near-optimal.
+Negatives recorded (not re-tried): T>1 prefill compile = +13% but broke 0.1B bit-exactness → reverted.
+
+### 12.3 Quantization — MLX-native w8g64 / w4g64 (F0039), opt-in; fp16 stays the exact default
+
+`RWKV_MLX_QUANT=w8|w4` (`mx.quantize` group-64, mirrors CUDA w8g64/w4-g64; weight-only, bf16 acts):
+
+| model | mode | greedy vs oracle | decode tok/s (med / best) | prefill tok/s | peak mem |
+|---|---|---|---:|---:|---:|
+| 0.1B | fp16 | 24/24 | 325.6 / 331.9 | 11,486 | 0.54 GiB |
+| 0.1B | **w8** | **24/24** | **417.3 / 475.7** | 8,458 | 0.43 GiB |
+| 0.1B | w4 | 4/24 | 588.1 / 593.4 | 7,831 | 0.36 GiB |
+| 1.5B | fp16 | 24/24 | 37.3 / 39.1 | 1,905 | 3.38 GiB |
+| 1.5B | **w8** | **24/24** | **55.5 / 56.0** | 1,908 | 2.28 GiB |
+| 1.5B | w4 | 24/24² | 94.0 / 95.8 | 1,975 | 1.65 GiB |
+| 7.2B | fp16 | 8/8 | 7.5 / 7.9 | 441 | 14.64 GiB |
+| 7.2B | **w8** | **8/8** | **12.6 / 12.9** | 484 | 8.88 GiB |
+| 7.2B | w4 | 8/8² | 22.0 / 22.9 | 513 | 5.76 GiB |
+
+- **w8 = greedy-lossless, the recommended quant**: decode **+28% / +49% / +68%** (0.1B/1.5B/7.2B),
+  peak mem **−20% / −33% / −39%**, greedy output identical to the fp32 oracle. Drift-cancelled 1.5B
+  interleaved A/B: fp16 31.4 → **w8 52.0 (+66%)** → w4 85.1 (+171%).
+- **w4 = footprint / max-decode play**: decode **+81% / +152% / +193%**, peak **−33% / −51% / −61%**
+  (7.2B in 5.76 GiB), at a real accuracy cost (§12.4).
+- ² w4's 24/8-token greedy match is coincidental agreement, not losslessness (0.1B w4 already diverges
+  greedily, 4/24). Prefill under quant: 0.1B −26% (small-model prefill is compute-bound → dequant
+  tax), 1.5B ~flat, 7.2B +10% (large enough that prefill is partly bandwidth-bound too).
+
+### 12.4 Accuracy — compression rate (uncheatable, same metric as CUDA §2) (F0040)
+
+Direct-call harness (`compression_mlx.py`; MLX has no HTTP server), 1.5B, 15 corpora × 40 docs, pooled
+bits/byte (lower = better):
+
+| precision | pooled bpb | vs fp16 |
+|---|---:|---:|
+| fp16 | **0.5926** | — |
+| w8 | 0.5929 | **+0.0003 (lossless)** |
+| w4 | 0.6430 | +0.0504 |
+
+Mirrors the CUDA column (w8g64 +0.0001, int4 +0.0429): w8 lossless on the ruler, int4 a real cost.
+Position curve 3.62 → 2.19 bits ([0-64)→[1024+)) — the O(1) state keeps absorbing context (CUDA:
+3.65→2.24).
+
+### 12.5 Real workload — ShareGPT single-stream (F0041)
+
+150 real ShareGPT conversations (first-human-turn prompts; length min/p50/mean/max = 8/51/244/1865
+tok), bsz1 streaming, max_new = 128:
+
+| precision | TTFT p50 / p90 / p99 (ms) | ITL p50 / p90 / p99 (ms) | decode tok/s | prefill tok/s |
+|---|---|---|---:|---:|
+| fp16 | 77.8 / 631 / 1310 | 38.8 / 48.7 / 57.6 | 25.6 | 1,202 |
+| **w8** | 71.8 / 608 / 1322 | **19.5 / 27.7 / 37.2** | **48.0** | 1,307 |
+
+w8 (greedy- and compression-lossless) **halves inter-token latency** and nearly doubles streaming
+decode — the recommended interactive default. TTFT is O(prompt) with RWKV's constant-size state (the
+1865-token long tail stays ~1.3 s). Raw JSON in [`../mlx_port/results/`](../mlx_port/results/); full
+methodology + negatives in F0038–F0041.
 
 ---
 
