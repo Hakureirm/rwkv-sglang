@@ -4,6 +4,12 @@ Every measured axis of this project, in readable form. Each table states its set
 the committed raw output. Methodology details and negative results live in the dated reports
 under [`findings/`](findings/); this page is the summary you can actually read.
 
+**Models.** All checkpoints are RWKV-7 (the RWKV7-G1 family). **Unless a table or row says
+otherwise, the model is the 1.5B** (`rwkv7-1.5b-fla`, or its prequantized checkpoints for
+quant rows). The **0.1B** (`rwkv7-0.1b-fla`) and **7.2B** (`rwkv7-7.2b-fla`) rows are always
+labeled with their size. Precision is fp16/bf16 unless a row names a quant tier (w8g64 / w8a8 /
+int4-GPTQ / w4).
+
 **Engine versions.** Since 2026-07-05 all new measurements run on **sglang main**; earlier
 numbers were measured on v0.5.10 and are kept, marked "(v0.5.10)". Where both exist we show
 both — the migration itself changed nothing for correctness (verified) and made the 3090
@@ -49,15 +55,15 @@ full re-run was **bit-identical** (pooled 0.6085, drift −0.0000 over ~7.5M tok
 **Compression rate** (bits per byte on fresh corpora, lower is better; tokenizer-independent,
 15 corpora × 500 documents). **Re-measured in full on sglang main (2026-07-05): every value below reproduced to the 4th decimal on BOTH the RTX 5090 and RTX 3090** — different silicon, different engine version, same pooled cross-entropy over ~7.5M tokens (`bench/results/uncheatable_full_*_5090main.json`, `*_3090main.json`):
 
-| precision | pooled bpb | vs fp16 |
+| model · precision | pooled bpb | vs fp16 |
 |---|---|---|
-| fp16 | **0.6085** | — |
-| int8 w8g64 | 0.6086 | +0.0001 (lossless in practice) |
-| int8 w8a8 (throughput path) | 0.6161 | +0.0076 |
-| int4 GPTQ | 0.6514 | +0.0429 |
-| 7.2B fp16 | **0.5413** | −0.0672 vs 1.5B (bigger model compresses better) |
-| 7.2B w8a8 | 0.5454 | +0.0041 vs 7.2B fp16 |
-| 7.2B w4 (rwkv_w4, g64) | 0.5615 | +0.0202 vs 7.2B fp16 |
+| 1.5B fp16 | **0.6085** | — |
+| 1.5B int8 w8g64 | 0.6086 | +0.0001 (lossless in practice) |
+| 1.5B int8 w8a8 (throughput path) | 0.6161 | +0.0076 |
+| 1.5B int4 GPTQ | 0.6514 | +0.0429 |
+| 7.2B fp16 | **0.5413** | −0.0672 vs 1.5B fp16 (bigger model compresses better) |
+| 7.2B int8 w8a8 | 0.5454 | +0.0041 vs 7.2B fp16 |
+| 7.2B int4 w4 (rwkv_w4, g64) | 0.5615 | +0.0202 vs 7.2B fp16 |
 
 **Quantization costs less at 7.2B than at 1.5B.** w8a8: +0.0041 (7.2B) vs +0.0076 (1.5B); int4:
 +0.0202 (7.2B, plain RTN `rwkv_w4`) vs +0.0429 (1.5B, the stronger GPTQ) — the 7.2B RTN checkpoint
@@ -71,17 +77,20 @@ keeps absorbing context: 3.65 bits at position 0-64 → 2.24 bits past 1024) are
 **MATH500** (faithful port of Albatross's `eval_math500.py`: same prompt, sampling, grader,
 1500-token budget):
 
-| metric | value | note |
+All rows are the **RTX 5090** unless noted (avg@64 also has a 3090 column); "main"/"(v0.5.10)"
+is the engine version.
+
+| model · precision · setting | value | note |
 |---|---|---|
-| avg@64 (v0.5.10) | **0.4060** (12,991 / 32,000 generations) | 500 problems × 64 samples |
-| pass@64 (v0.5.10) | 0.6980 | ≥1 correct in 64 |
-| greedy avg@1, v0.5.10 | 0.3920 (196/500) | deterministic |
-| greedy avg@1, **main** | **0.3940 (197/500)** | Δ +0.0020, far inside the ±0.0220 noise band → no regression (`bench/results/math500_greedy_5090main.json`) |
-| avg@64, **main** | **0.4042** (RTX 5090) / **0.4063** (RTX 3090) | both inside the ±0.0027 per-run band around v0.5.10's 0.4060 → no regression on either card (`bench/results/math500_avg64_{5090main,3090main}.json`) |
-| **7.2B** greedy avg@1, main | **0.6320 (316/500)** | the flagship: +23.8pt over 1.5B's 0.3940 — a much stronger reasoner, at 3,248 tok/s on the 5090 (`bench/results/math500_greedy_7.2b_5090main.json`) |
-| **w8a8** avg@64, main | **0.3812** (12,197/32,000) | vs fp16 0.4042 = **−2.3pt** — a real int8 reasoning cost the low-variance ruler resolves; compression (0.6161) and greedy hid it (`bench/results/math500_avg64_w8a8_5090main.json`) |
-| **w8a8** greedy avg@1, main | 0.3800 (190/500) | vs fp16 0.3940 = −1.4pt (within 1 binomial SE at n=500) |
-| **int4 GPTQ** greedy avg@1, main | 0.1560 (78/500) | vs fp16 0.3940 = **−24pt collapse** — perplexity-style rulers badly understate int4's reasoning damage (see §4 warning) |
+| 1.5B fp16 avg@64 (v0.5.10) | **0.4060** (12,991 / 32,000 generations) | 500 problems × 64 samples |
+| 1.5B fp16 pass@64 (v0.5.10) | 0.6980 | ≥1 correct in 64 |
+| 1.5B fp16 greedy avg@1 (v0.5.10) | 0.3920 (196/500) | deterministic |
+| 1.5B fp16 greedy avg@1 (main) | **0.3940 (197/500)** | Δ +0.0020, far inside the ±0.0220 noise band → no regression (`bench/results/math500_greedy_5090main.json`) |
+| 1.5B fp16 avg@64 (main) | **0.4042** (RTX 5090) / **0.4063** (RTX 3090) | both inside the ±0.0027 per-run band around v0.5.10's 0.4060 → no regression on either card (`bench/results/math500_avg64_{5090main,3090main}.json`) |
+| **7.2B** fp16 greedy avg@1 (main) | **0.6320 (316/500)** | the flagship: +23.8pt over 1.5B's 0.3940 — a much stronger reasoner, at 3,248 tok/s on the 5090 (`bench/results/math500_greedy_7.2b_5090main.json`) |
+| 1.5B **w8a8** avg@64 (main) | **0.3812** (12,197/32,000) | vs 1.5B fp16 0.4042 = **−2.3pt** — a real int8 reasoning cost the low-variance ruler resolves; compression (0.6161) and greedy hid it (`bench/results/math500_avg64_w8a8_5090main.json`) |
+| 1.5B **w8a8** greedy avg@1 (main) | 0.3800 (190/500) | vs 1.5B fp16 0.3940 = −1.4pt (within 1 binomial SE at n=500) |
+| 1.5B **int4 GPTQ** greedy avg@1 (main) | 0.1560 (78/500) | vs 1.5B fp16 0.3940 = **−24pt collapse** — perplexity-style rulers badly understate int4's reasoning damage (see §4 warning) |
 
 The three quantization tiers on the *reasoning* ruler, ordered by damage: w8g64 (weight-only,
 greedy-lossless) → w8a8 (−2.3pt) → int4 (−24pt). Compression rate alone would rank them
@@ -167,7 +176,9 @@ not amortized across ~144 heterogeneous decode kernels, plus an already-excellen
 baseline, eat the kernel's margin. That tax is latent on the VRAM-bound 7.2B case above,
 where int8's real win (2.90× concurrency) lives. Raw: `bench/verify_w8a8.py --bench`.
 
-## 5. Serving throughput (wall-clock, 64-in/256-out, concurrency sweep)
+## 5. Serving throughput (RWKV-7 1.5B, wall-clock, 64-in/256-out, concurrency sweep)
+
+RWKV-7 1.5B, sglang main. "single request" = bsz1; "peak" = best over the concurrency sweep.
 
 | config | RTX 3090 main | RTX 5090 main |
 |---|---|---|
@@ -285,9 +296,9 @@ difference the next table quantifies.
 
 ## 7b. Comparison with vllm-rwkv (the community vLLM fork)
 
-Measured 2026-07-06 under strictly equal conditions: same GPUs (RTX 3090 + RTX 5090), same
-weights file (tensor-verified), same client logic (the sweep client ported to the vllm-rwkv OpenAI
-endpoint, identical 64-in/256-out protocol), vllm-rwkv at its documented best config.
+Measured 2026-07-06 under strictly equal conditions, **RWKV-7 1.5B**: same GPUs (RTX 3090 + RTX
+5090), same weights file (1.5B, tensor-verified), same client logic (the sweep client ported to the
+vllm-rwkv OpenAI endpoint, identical 64-in/256-out protocol), vllm-rwkv at its documented best config.
 Disclosure: the vllm-rwkv tip (`4bf0239a1`) crashes on the first decode as shipped (an
 interface mismatch introduced by its automated upstream rebase); all vllm-rwkv numbers below
 required a documented 2-line compatibility fix to run at all. That branch force-push rebases
@@ -329,8 +340,8 @@ ratio is 1.38×) is the single highest-leverage speed item. Raw:
 ## 7c. Real-workload comparison (ShareGPT, variable-length conversations)
 
 The synthetic sweep above uses one fixed shape (64-in/256-out). Real serving is
-variable-length, which stresses the scheduler differently. Same neutral client
-(`sglang.bench_serving`), same ShareGPT file, same 500 prompts, same weights, each engine
+variable-length, which stresses the scheduler differently. **RWKV-7 1.5B**; same neutral client
+(`sglang.bench_serving`), same ShareGPT file, same 500 prompts, same weights (1.5B), each engine
 at its best config. Two load levels: peak (all requests at once) and steady (16 req/s). Equal-conditions proof:
 all 8 runs processed exactly 168,913 input tokens and generated exactly 109,861 output tokens
 — same prompts in, same tokens out (identical weights + greedy + ignore_eos).
@@ -368,8 +379,9 @@ load, rwkv-sglang is ahead; at light steady load they trade. Raw: `bench/results
 
 ## 8. Launch autotune across cards (why hardcoded constants don't travel)
 
-Kernel-level A/B of our GEMV launch autotune vs the built-in heuristic (interleaved 4-pass
-median; only the numerically-safe axis is tuned by default). Gain = time saved on that shape:
+Kernel-level A/B of our GEMV launch autotune vs the built-in heuristic, on the **RWKV-7 1.5B**
+projection shapes (att_rkvo / ffn_key / ffn_value; interleaved 4-pass median; only the
+numerically-safe axis is tuned by default). Gain = time saved on that shape:
 
 | GPU | att_rkvo / ffn_key / ffn_value | takeaway |
 |---|---|---|
@@ -387,7 +399,7 @@ methodology (including the clock-ramp artifact that forced the interleaved desig
 
 ## 9. Latency under real load
 
-**Poisson arrivals** (requests arrive at a fixed average rate; 512-in/256-out; RTX 5090 main):
+**Poisson arrivals** (RWKV-7 1.5B; requests arrive at a fixed average rate; 512-in/256-out; RTX 5090 main):
 
 | arrival rate | output tok/s | TTFT p50 / p99 | per-token p50 / p99 |
 |---|---|---|---|
@@ -399,7 +411,7 @@ methodology (including the clock-ramp artifact that forced the interleaved desig
 No queueing below 16 req/s — first-token latency stays ~26 ms. The 3090 (v0.5.10) reference
 had 302 ms TTFT at 16 req/s. Raw: `bench/results/pd_mixed_5090.json`, `pd_mixed_3090main.json`.
 
-**ShareGPT** (real conversation lengths, standard `bench_serving`, 500 requests, RTX 5090):
+**ShareGPT** (RWKV-7 1.5B; real conversation lengths, standard `bench_serving`, 500 requests, RTX 5090):
 peak 9,845.6 output / 27,527.7 total tok/s; at 16 req/s median TTFT 32.3 ms. Raw:
 `bench/results/sharegpt_{peak,r16}_5090.log`.
 
