@@ -103,7 +103,7 @@ Three modes, all with hand-written kernels, all arch-portable (JIT per GPU):
 | mode | accuracy cost | when it wins | checkpoints |
 |---|---|---|---|
 | int8 w8g64 (weight-only) | none measurable (greedy-exact; compression +0.0001) | small-batch speed (+13% over fp16 full stack at bsz1 on 5090) + half the weight bytes | ModelScope `Hakureirm/rwkv7-g1-1.5b-w8g64` |
-| int8 w8a8 (tensor-core) | compression 0.6161 (+0.0076, == cutlass); **MATH500 avg@64 0.3812 vs fp16 0.4042 = −2.3pt** (the low-variance ruler resolves a real reasoning cost the compression rate and greedy hid — same pattern as int4, far milder) | large-batch throughput king on sm80–90 (3090 peak 9,851 tok/s). On sm120/Blackwell the upstream cutlass op does not exist; rwkv-sglang's own s8-wmma kernel (register-blocked V2, bit-exact gate, batch-invariant) now serves the tier there — the int8 GEMM beats fp16 cuBLAS at M≥512 (1.03–1.55×), while e2e peak is 20,991 tok/s @c512 = 0.9466× fp16 (the residual gap is the per-token activation-quant launch tax against an already-tuned fp16 baseline) | box-relayable |
+| int8 w8a8 (tensor-core) | compression 0.6161 (+0.0076, == cutlass); **MATH500 avg@64 0.3812 vs fp16 0.4042 = −2.3pt** (the low-variance ruler resolves a real reasoning cost the compression rate and greedy hid — same pattern as int4, far milder) | large-batch throughput king on sm80–90 (3090 peak 9,851 tok/s, 64-in/256-out). On sm120/Blackwell the upstream cutlass op does not exist; rwkv-sglang's own s8-wmma kernel (register-blocked V2, bit-exact gate, batch-invariant) now serves the tier there — the int8 GEMM beats fp16 cuBLAS at M≥512 (1.03–1.55×), while e2e peak is 20,991 tok/s (@c512, 64-in/256-out) = 0.9466× fp16 (the residual gap is the per-token activation-quant launch tax against an already-tuned fp16 baseline) | box-relayable |
 | int4 GPTQ | lambada −1.28pt at 7.2B (RTN would be −2.64) | lowest VRAM: 7.2B in 4.6 GB weights, serves on a 16 GB T4 at 32.9 tok/s | ModelScope `Hakureirm/rwkv7-g1-{1.5b,7.2b}-w4gptq` |
 
 Prequantized checkpoints are required (the loader reads qweight/scale keys; pointing the
@@ -178,8 +178,9 @@ family, silently falling back to eager above it — always set `--cuda-graph-max
 
 ## 6. The 10-GPU fleet (same code, same recipe, every card)
 
-1.5B fp16 full stack on sglang main, wall-clock. Single-request and peak (sweep capped at
-384 concurrency on the fleet, 512 on the workstation 5090):
+1.5B fp16 full stack on sglang main, wall-clock. **Single-request = bsz1 sustained decode
+(steady state); peak = best total throughput over a 64-in/256-out concurrency sweep** (capped
+at 384 concurrency on the fleet, 512 on the workstation 5090):
 
 | GPU | arch | single request | peak |
 |---|---|---|---|
@@ -202,9 +203,10 @@ H100 and B200 — single-stream decode is a memory-bandwidth story and GDDR7 del
 ## 6b. Multi-GPU: TP / PP (verified on main, cuda-graph ON)
 
 Tensor- and pipeline-parallel, on sglang main under the production cuda-graph path (F0019's
-matrix was cuda-graph OFF). 1.5B bf16, 2×L4, wall-clock tok/s. **TP=2 and PP=2 are both
-greedy 24/24 identical to single-GPU and deterministic** — multi-GPU changes nothing about
-the output. (Getting PP here first required fixing a cuda-graph capture crash — F0036.)
+matrix was cuda-graph OFF). 1.5B bf16, 2×L4, wall-clock tok/s, **64-in/256-out** (c1/c8/c32/c64
+= concurrency). **TP=2 and PP=2 are both greedy 24/24 identical to single-GPU and
+deterministic** — multi-GPU changes nothing about the output. (Getting PP here first required
+fixing a cuda-graph capture crash — F0036.)
 
 | config | greedy vs 1-GPU | c1 | c8 | c32 | c64 (peak) | vs tp=1 |
 |---|---|---|---|---|---|---|
