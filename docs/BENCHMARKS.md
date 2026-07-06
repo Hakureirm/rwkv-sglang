@@ -530,6 +530,44 @@ decode — the recommended interactive default. TTFT is O(prompt) with RWKV's co
 1865-token long tail stays ~1.3 s). Raw JSON in [`../mlx_port/results/`](../mlx_port/results/); full
 methodology + negatives in F0038–F0041.
 
+### 12.6 CoreML / Apple Neural Engine — feasibility probe: FAIL, no tok/s reported (F0042)
+
+A second Apple-Silicon path was probed — CoreML targeting the ANE (compute unit, not GPU) — as a
+possible third point (ANE / GPU / CPU) alongside §12.1's MLX-GPU numbers. **Feasibility gate failed
+before any full model was built; per this repo's oracle-gate-before-speed discipline, no ANE tok/s
+number is reported.** Full methodology, evidence, and the stop decision are in
+[F0042](findings/0042-coreml-ane-feasibility.md); summary:
+
+Model = RWKV-7's WKV recurrence (the delta-rule state update — the actual RWKV-specific numerics,
+excluding the surrounding Linear/LoRA projections), built directly in MIL (coremltools' IR, no
+torch/fla) at real checkpoint geometry, fp16, `coremltools.models.compute_plan.MLComputePlan` as
+ground truth for per-op device placement (not a timing guess):
+
+| probe (compute unit tested: ANE, restricted to CPU_AND_NE) | ops | preferred=ANE | preferred=CPU | also CPU under unrestricted `ALL`? |
+|---|---:|---:|---:|---|
+| WKV step, 0.1B (H=12, D=64, fp16) | 30 | **0** | 30 | yes, all 30 |
+| WKV step, 1.5B (H=32, D=64, fp16) | 30 | **0** | 30 | yes, all 30 |
+| WKV chain ×4 steps, 0.1B (fp16) | 105 | **0** | 105 | yes, all 105 |
+
+Zero of 168 tested non-const ops (two model sizes, two chunk lengths) ever get `preferred=ANE`, even
+when GPU+ANE are both unrestricted — CoreML's own scheduler routes the whole recurrence to **CPU**.
+This is confirmed to be a real scheduling decision, not a broken/no-ANE-present probe: a positive
+control (batched fp16 GEMM, 1024×1024, the shape class of a *prefill*-chunk Linear) genuinely gets
+`preferred=ANE` **and** a corroborating 1.20x wall-clock win on this same machine (Apple M5, ANE
+enumerable with 16 cores). A second control — a **decode-shaped GEMV** (`[1,2048]@[2048,2048]`, what
+RWKV's own r/k/v/o projections look like at bsz1, i.e. the "surrounding linears" assumed
+ANE-friendly) — gets labeled `preferred=ANE` but measures **18% *slower*** through ANE than plain
+CPU (single unbatched/unpipelined dispatch doesn't amortize ANE hand-off latency at this size).
+
+**Reading it**: same underlying reason as §12.2 (F0038) — bsz1 decode is bandwidth/launch-bound, not
+compute-bound (a hard ~123 GB/s ceiling, already at 79% on MLX-GPU); a batched-matmul accelerator has
+structurally little to add to "read the weights once, do a little recurrent math per token," and
+RWKV-7's sequential scan (no chunkwise-parallel reformulation, to keep summation order oracle-exact)
+is the hardest possible shape for it. The full per-layer CoreML converter (fixed-shape decode/prefill
+programs, explicit state tensors, oracle gate, tok/s) was **not built** — it would not change this
+structural verdict, only spend time to arrive at a CPU-bound recurrence wearing an ANE label. MLX-GPU
+(§12.1–§12.5) remains the complete, load-bearing Apple-Silicon story.
+
 ---
 
 *In-progress (this page is updated as they land): MATH500 avg@64 and full compression on
