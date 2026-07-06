@@ -199,6 +199,25 @@ Notable: at single-request the consumer RTX 5090 matches H200 (397.3 vs 399.3) a
 H100 and B200 — single-stream decode is a memory-bandwidth story and GDDR7 delivers. Raw:
 `bench/results/fleet_main_10cards.json`.
 
+## 6b. Multi-GPU: TP / PP (verified on main, cuda-graph ON)
+
+Tensor- and pipeline-parallel, on sglang main under the production cuda-graph path (F0019's
+matrix was cuda-graph OFF). 1.5B bf16, 2×L4, wall-clock tok/s. **TP=2 and PP=2 are both
+greedy 24/24 identical to single-GPU and deterministic** — multi-GPU changes nothing about
+the output. (Getting PP here first required fixing a cuda-graph capture crash — F0036.)
+
+| config | greedy vs 1-GPU | c1 | c8 | c32 | c64 (peak) | vs tp=1 |
+|---|---|---|---|---|---|---|
+| tp=1 (1 GPU) | reference | 72.6 | 482.3 | 1,612.9 | 2,582.6 | — |
+| **tp=2** | **24/24 exact** | 105.3 | 655.9 | 2,008.6 | **3,026.2** | **1.17×** |
+| **pp=2** | **24/24 exact** | 65.4 | 367.7 | 1,365.5 | 2,288.8 | 0.89× |
+
+Honest read: at 1.5B on PCIe-connected L4s, TP=2 buys ~1.17× at c64; PP=2 is 0.89×
+(pipeline bubbles dominate at this model size — PP's job is fitting a model larger than one
+card, not per-token speedup for a small one). The value is that both are **correct and
+production-viable** on main; scaling for models that actually need multiple cards (7.2B+,
+NVLink) is a follow-up. Raw: `bench/results/tppp_l4_main.json`.
+
 ## 7. Comparison with Albatross (BlinkDL's official speed reference)
 
 Albatross is a forward-loop benchmark (no scheduler, no dynamic batching, no API); this
