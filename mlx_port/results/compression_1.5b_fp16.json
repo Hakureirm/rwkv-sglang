@@ -1,0 +1,198 @@
+{
+  "model": "/tmp/mlx_models/rwkv7-1.5b-fla",
+  "quant": null,
+  "ctx_len": 4000,
+  "max_docs": 40,
+  "datasets": {
+    "ao3_english": {
+      "neg_log_prob_sum": 5215.843084100795,
+      "avg tokens": 2142.95,
+      "avg bytes": 9038.925,
+      "sample_count": 40,
+      "total_nll_nats": 208633.7233640318,
+      "total_bytes": 361557,
+      "bpb": 0.8324962262091138,
+      "compression_rate": 10.406202827613923
+    },
+    "ao3_nonenglish": {
+      "neg_log_prob_sum": 3925.6983037627606,
+      "avg tokens": 1677.175,
+      "avg bytes": 5294.925,
+      "sample_count": 40,
+      "total_nll_nats": 157027.93215051043,
+      "total_bytes": 211797,
+      "bpb": 1.0696252496238852,
+      "compression_rate": 13.370315620298564
+    },
+    "arxiv_cs": {
+      "neg_log_prob_sum": 5021.387070601306,
+      "avg tokens": 2498.2,
+      "avg bytes": 12222.075,
+      "sample_count": 40,
+      "total_nll_nats": 200855.48282405222,
+      "total_bytes": 488883,
+      "bpb": 0.5927250671543468,
+      "compression_rate": 7.409063339429335
+    },
+    "arxiv_math": {
+      "neg_log_prob_sum": 3372.8155095724883,
+      "avg tokens": 2274.825,
+      "avg bytes": 8397.75,
+      "sample_count": 40,
+      "total_nll_nats": 134912.62038289953,
+      "total_bytes": 335910,
+      "bpb": 0.5794342781689871,
+      "compression_rate": 7.242928477112338
+    },
+    "arxiv_other": {
+      "neg_log_prob_sum": 4156.4391594916715,
+      "avg tokens": 2287.075,
+      "avg bytes": 10750.425,
+      "sample_count": 40,
+      "total_nll_nats": 166257.56637966685,
+      "total_bytes": 430017,
+      "bpb": 0.5577894979180197,
+      "compression_rate": 6.972368723975246
+    },
+    "arxiv_physics": {
+      "neg_log_prob_sum": 5035.336688845014,
+      "avg tokens": 2705.375,
+      "avg bytes": 11934.75,
+      "sample_count": 40,
+      "total_nll_nats": 201413.46755380055,
+      "total_bytes": 477390,
+      "bpb": 0.6086809753202166,
+      "compression_rate": 7.608512191502707
+    },
+    "bbc_news": {
+      "neg_log_prob_sum": 1318.669975250907,
+      "avg tokens": 590.3,
+      "avg bytes": 2690.7,
+      "sample_count": 40,
+      "total_nll_nats": 52746.79901003628,
+      "total_bytes": 107628,
+      "bpb": 0.7070422692472799,
+      "compression_rate": 8.838028365590999
+    },
+    "biorxiv_all": {
+      "neg_log_prob_sum": 4839.849214659587,
+      "avg tokens": 2542.5,
+      "avg bytes": 11496.3,
+      "sample_count": 40,
+      "total_nll_nats": 193593.9685863835,
+      "total_bytes": 459852,
+      "bpb": 0.6073629307376922,
+      "compression_rate": 7.592036634221152
+    },
+    "github_cpp": {
+      "neg_log_prob_sum": 1273.5168068095031,
+      "avg tokens": 1595.975,
+      "avg bytes": 5070.475,
+      "sample_count": 40,
+      "total_nll_nats": 50940.67227238012,
+      "total_bytes": 202819,
+      "bpb": 0.362351925938461,
+      "compression_rate": 4.529399074230763
+    },
+    "github_javascript": {
+      "neg_log_prob_sum": 1298.57782321368,
+      "avg tokens": 1700.525,
+      "avg bytes": 5699.45,
+      "sample_count": 40,
+      "total_nll_nats": 51943.1129285472,
+      "total_bytes": 227978,
+      "bpb": 0.3287074692748881,
+      "compression_rate": 4.108843365936101
+    },
+    "github_markdown": {
+      "neg_log_prob_sum": 2313.322751952998,
+      "avg tokens": 1495.15,
+      "avg bytes": 5069.025,
+      "sample_count": 40,
+      "total_nll_nats": 92532.91007811991,
+      "total_bytes": 202761,
+      "bpb": 0.6583947134248105,
+      "compression_rate": 8.229933917810131
+    },
+    "github_other": {
+      "neg_log_prob_sum": 1296.1236082645876,
+      "avg tokens": 1644.95,
+      "avg bytes": 5430.55,
+      "sample_count": 40,
+      "total_nll_nats": 51844.9443305835,
+      "total_bytes": 217222,
+      "bpb": 0.34433180838449695,
+      "compression_rate": 4.304147604806212
+    },
+    "github_python": {
+      "neg_log_prob_sum": 1357.5684047438103,
+      "avg tokens": 1462.375,
+      "avg bytes": 5406.325,
+      "sample_count": 40,
+      "total_nll_nats": 54302.73618975241,
+      "total_bytes": 216253,
+      "bpb": 0.36227145152972423,
+      "compression_rate": 4.528393144121553
+    },
+    "wikipedia_english": {
+      "neg_log_prob_sum": 1292.650601338956,
+      "avg tokens": 600.175,
+      "avg bytes": 2545.125,
+      "sample_count": 40,
+      "total_nll_nats": 51706.02405355824,
+      "total_bytes": 101805,
+      "bpb": 0.7327343891376056,
+      "compression_rate": 9.15917986422007
+    },
+    "wikipedia_nonenglish": {
+      "neg_log_prob_sum": 1446.7359641056894,
+      "avg tokens": 1370.525,
+      "avg bytes": 4043.2,
+      "sample_count": 40,
+      "total_nll_nats": 57869.438564227574,
+      "total_bytes": 161728,
+      "bpb": 0.5162244758832092,
+      "compression_rate": 6.452805948540115
+    }
+  },
+  "overall": {
+    "mean_compression_rate": 7.3834772732939475,
+    "pooled_compression_rate": 7.407134425106597,
+    "pooled_bpb": 0.5925707540085278,
+    "total_docs": 600,
+    "wall_time_s": 828.9937210083008
+  },
+  "position_curve": [
+    {
+      "bucket": "[0-64)",
+      "tokens": 38400,
+      "mean_neg_log2_p": 3.6238891004367217
+    },
+    {
+      "bucket": "[64-128)",
+      "tokens": 38400,
+      "mean_neg_log2_p": 2.7399951399251985
+    },
+    {
+      "bucket": "[128-256)",
+      "tokens": 76731,
+      "mean_neg_log2_p": 2.567952774275953
+    },
+    {
+      "bucket": "[256-512)",
+      "tokens": 143744,
+      "mean_neg_log2_p": 2.3858405427436558
+    },
+    {
+      "bucket": "[512-1024)",
+      "tokens": 248118,
+      "mean_neg_log2_p": 2.2961999240227073
+    },
+    {
+      "bucket": "[1024+)",
+      "tokens": 518130,
+      "mean_neg_log2_p": 2.194115157725992
+    }
+  ],
+  "methodology": "uncheatable_eval (Jellyfish042) via MLX score_tokens, fp32 log-softmax"
+}

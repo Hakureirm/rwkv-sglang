@@ -507,6 +507,63 @@ class Rwkv7MLX:
         mx.eval(*toks)
         return [int(t[0]) for t in toks], state
 
+    # ---- scoring (compression rate) --------------------------------------
+    def _hidden_all(self, tokens, state):
+        """Like `_forward_seq` but returns the post-final-norm hidden for ALL T
+        positions (not just the last) + new state. Same layer math (so same
+        precision policy); used for teacher-forced per-token scoring."""
+        x = self.emb[tokens].astype(mx.float32)
+        x = _layer_norm(x, *self.ln0, self.norm_eps)
+        v_first = None
+        new_state = []
+        for i, L in enumerate(self.layers):
+            sa, sf, S = state[i]
+            dx, v_first, sa, S = self._time_mix(
+                L, _layer_norm(x, *L["ln1"], self.norm_eps), v_first, sa, S
+            )
+            x = x + dx
+            dxf, sf = self._channel_mix(
+                L, _layer_norm(x, *L["ln2"], self.norm_eps), sf
+            )
+            x = x + dxf
+            new_state.append((sa, sf, S))
+        return _layer_norm(x, *self.ln_out, self.norm_eps), new_state
+
+    def _head_logits(self, hidden):
+        """hidden [n, D] fp32 -> logits [n, vocab] fp32 (quant-aware head)."""
+        if isinstance(self.head, tuple):
+            lg = mx.quantized_matmul(hidden.astype(self.dtype), *self.head,
+                                     transpose=True, group_size=self.q_group,
+                                     bits=self.q_bits)
+        else:
+            lg = mx.matmul(hidden.astype(self.head.dtype), self.head.T)
+        return lg.astype(mx.float32)
+
+    def score_tokens(self, chunk_ids, block=512):
+        """Teacher-forced per-token NLL in NATS for every token after the first:
+        -log P(chunk_ids[i] | chunk_ids[:i]) for i=1..L-1, fresh state. This is
+        the uncheatable-eval scoring inner loop (feed [0]+chunk, score the reals);
+        fp32 log-softmax over the exact recurrence. Processed in `block`-token
+        pieces (state carries across; head+softmax over <=block rows) so memory
+        stays bounded even at 4k-token chunks. Returns a 1-D mx.array [L-1]."""
+        L = len(chunk_ids)
+        ids = mx.array(chunk_ids, dtype=mx.int32)
+        state = self.new_state()
+        out = []
+        for s in range(0, L, block):
+            part = ids[s:s + block]
+            t = part.shape[0]
+            hid, state = self._hidden_all(part, state)
+            n_valid = min(t, L - 1 - s)  # last global position has no target
+            if n_valid > 0:
+                logits = self._head_logits(hid[:n_valid])
+                logp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
+                tgt = ids[s + 1:s + 1 + n_valid][:, None]
+                nll = -mx.take_along_axis(logp, tgt, axis=-1)[:, 0]
+                out.append(nll)
+            mx.eval(*[a for lay in state for a in lay], *out[-1:])
+        return mx.concatenate(out) if out else mx.array([], dtype=mx.float32)
+
 
 def load_model(model_dir, dtype="bfloat16", wkv=None, quant=None):
     dt = {"bfloat16": mx.bfloat16, "float16": mx.float16,
