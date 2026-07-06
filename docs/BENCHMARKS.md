@@ -37,7 +37,7 @@ Greedy decoding is compared token-by-token against a pure-numpy fp32 reference i
 | 0.1B / 1.5B / 7.2B, CUDA, fp16+bf16 | 24/24 exact, both sglang main and v0.5.10, RTX 3090 and RTX 5090 | `bench/results/greedy_gates_5090.log`, gate logs per finding |
 | dynamic batching / chunked prefill / CUDA graphs | exact (mixed-batch and shared-prefix cases included) | F0022 |
 | int8 (w8g64) | 24/24 exact — quantization is greedy-lossless; re-verified on sglang main (RTX 5090, fp16) | §4, F0015, `bench/results/quant_oracle_gates_5090main.log` |
-| TP 2/4/8, PP 2/4/8, tp2×pp2 | 24/24 exact on real multi-GPU (v0.5.10) | `bench/results/` TP/PP logs |
+| TP 2/4/8, PP 2/4/8, tp2×pp2 | 24/24 exact on real multi-GPU; **on main under cuda-graph ON, TP=2 and PP=2 are greedy 24/24 == 1-GPU + deterministic** (2×L4; fixed a PP+cuda-graph capture crash — F0036) | F0019, F0036 |
 | Apple Silicon (MLX), 0.1B + 1.5B | 24/24 exact, both the pure-ops path and the custom Metal kernel | [`../mlx_port/`](../mlx_port/) |
 | batch-position independence | outputs identical whether a request runs alone or inside a batch (prefix ≥ 4 tokens guaranteed; beyond that is bf16 accumulation, same as any engine) | test/registered/models/test_rwkv7.py |
 

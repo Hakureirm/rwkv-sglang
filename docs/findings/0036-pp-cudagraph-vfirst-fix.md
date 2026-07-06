@@ -1,6 +1,6 @@
-# F0036 — PP + cuda-graph was broken on main (v_first proxy); fix + first TP/PP production throughput
+# F0036 — PP + cuda-graph was broken on main (v_first proxy); fix VERIFIED + first TP/PP production throughput
 
-**Date:** 2026-07-06 · **Status:** FIX WRITTEN + compiles; 2×L4 re-verify in flight · **Prior:** F0019 (TP/PP correctness, v0.5.10, cuda-graph OFF)
+**Date:** 2026-07-06 · **Status:** FIXED + VERIFIED (2×L4, cuda-graph ON, greedy 24/24) + merged into PR #30115 · **Prior:** F0019 (TP/PP correctness, v0.5.10, cuda-graph OFF)
 
 ## What the TP/PP audit uncovered
 
@@ -54,9 +54,26 @@ actual target) is the remaining gate; it runs on 2×L4.
 Infra note (cost/repro): the multi-GPU verify was blocked for several rounds by a drifted
 `dev-cu12` base image whose scheduler 503s at startup **even at tp=1** (unrelated to this
 fix — reproduced with the inert-for-tp1 code). Pinning the base to the digest verified
-working on the tower (`sha256:49627efd…`) is the fix for that; the pp=2 re-verify runs on
-the pinned image. Lesson: pin the serving base image for multi-GPU CI, and capture Modal
-results to a file (the progress-spinner ANSI mangles piped stdout).
+working on the tower (`sha256:49627efd…`) resolved it. Lesson: pin the serving base image
+for multi-GPU CI, and capture results to a local file (the progress-spinner ANSI mangles
+piped stdout).
+
+## Verified result (2×L4, 1.5B bf16, cuda-graph ON, wall-clock tok/s)
+
+| config | greedy vs tp=1 | deterministic | c1 | c8 | c32 | c64 (peak) |
+|---|---|---|---|---|---|---|
+| tp=1 (1 GPU) | (reference) | yes | 72.6 | 482.3 | 1,612.9 | 2,582.6 |
+| **tp=2 (2 GPU)** | **24/24 exact** | yes | 105.3 | 655.9 | 2,008.6 | **3,026.2** (1.17×) |
+| **pp=2 (2 GPU)** | **24/24 exact** | yes | 65.4 | 367.7 | 1,365.5 | **2,288.8** (0.89×) |
+
+**pp=2 now boots and runs correctly with cuda-graph ON** (previously KeyError'd at capture)
+— the fix works. Both TP=2 and PP=2 are greedy-exact vs single-GPU and deterministic:
+multi-GPU does not change the output, now under the production cuda-graph path. Honest
+throughput read (1.5B is small and L4 interconnect is PCIe, not NVLink): TP=2 buys ~1.17×
+at c64; PP=2 is 0.89× (pipeline bubbles dominate at this model size — PP's role is fitting
+models larger than one card, not per-token speedup at 1.5B). These are the first TP/PP
+numbers on main under cuda-graph ON; F0019's were cuda-graph OFF gate configs. Raw:
+`bench/results/tppp_l4_main.json`.
 
 ## Cross-references
 
