@@ -78,6 +78,7 @@ keeps absorbing context: 3.65 bits at position 0-64 → 2.24 bits past 1024) are
 | greedy avg@1, v0.5.10 | 0.3920 (196/500) | deterministic |
 | greedy avg@1, **main** | **0.3940 (197/500)** | Δ +0.0020, far inside the ±0.0220 noise band → no regression (`bench/results/math500_greedy_5090main.json`) |
 | avg@64, **main** | **0.4042** (RTX 5090) / **0.4063** (RTX 3090) | both inside the ±0.0027 per-run band around v0.5.10's 0.4060 → no regression on either card (`bench/results/math500_avg64_{5090main,3090main}.json`) |
+| **7.2B** greedy avg@1, main | **0.6320 (316/500)** | the flagship: +23.8pt over 1.5B's 0.3940 — a much stronger reasoner, at 3,248 tok/s on the 5090 (`bench/results/math500_greedy_7.2b_5090main.json`) |
 | **w8a8** avg@64, main | **0.3812** (12,197/32,000) | vs fp16 0.4042 = **−2.3pt** — a real int8 reasoning cost the low-variance ruler resolves; compression (0.6161) and greedy hid it (`bench/results/math500_avg64_w8a8_5090main.json`) |
 | **w8a8** greedy avg@1, main | 0.3800 (190/500) | vs fp16 0.3940 = −1.4pt (within 1 binomial SE at n=500) |
 | **int4 GPTQ** greedy avg@1, main | 0.1560 (78/500) | vs fp16 0.3940 = **−24pt collapse** — perplexity-style rulers badly understate int4's reasoning damage (see §4 warning) |
