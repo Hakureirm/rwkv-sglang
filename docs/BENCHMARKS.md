@@ -378,8 +378,10 @@ peak 9,845.6 output / 27,527.7 total tok/s; at 16 req/s median TTFT 32.3 ms. Raw
 | context 1K → 32K (7.2B) | 17,866 MiB | 17,866 MiB | **+0 MiB** |
 | concurrency 1 → 64 (7.2B, 24 GB card) | 46.6 tok/s | 1,802.7 tok/s | +308 MiB |
 
-A Transformer's KV cache grows on both axes; RWKV-7's state does not. This is why one 24 GB
-card serves 64 concurrent 7.2B streams. (v0.5.10 measurements; unchanged by design on main.)
+A Transformer's KV cache grows on both axes; RWKV-7's state does not. This is why a single
+32 GB 5090 serves **640 concurrent 7.2B streams** with w8a8 (§4) — the state pool is the only
+thing that scales with concurrency, and it is tiny and fixed-per-request. (The VRAM-growth
+rows above are v0.5.10 measurements; unchanged by design on main.)
 
 ## 11. Speculative decoding (phase 1)
 

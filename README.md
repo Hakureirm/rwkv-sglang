@@ -22,12 +22,12 @@ the context — a Transformer's KV cache grows with every token. Measured effect
 1 to 256 concurrent sequences, or growing the context 64×, each costs **less than 0.2 GB**
 of extra VRAM. High concurrency and long context are where this architecture wins.
 
-## What works (2026-07-05)
+## What works (2026-07-06)
 
 | | |
 |---|---|
 | **Correctness** | Greedy output is token-exact vs a numpy fp32 reference — 24/24 tokens on 0.1B / 1.5B / 7.2B (CUDA) and on Apple Silicon (MLX); also exact under dynamic batching, chunked prefill, CUDA graphs, TP 2/4/8, and PP 2/4/8 |
-| **Accuracy rulers** | MATH500 greedy: 0.3940 on main vs 0.3920 on v0.5.10 — within statistical noise, no regression. Compression rate: 0.6085 (fp16), 0.6086 (int8 — i.e. lossless) |
+| **Accuracy rulers** | MATH500 avg@64 (the low-variance ruler): **0.4042** on main, matching v0.5.10's 0.4060 within noise — no regression. Compression rate: fp16 0.6085, int8 w8g64 0.6086 (lossless), w8a8 0.6161, int4-GPTQ 0.6514. Quantization on the reasoning ruler (avg@64): w8a8 −2.3pt, int4 −24pt — [§4](docs/BENCHMARKS.md#4-quantization-what-you-trade-and-what-you-get) |
 | **Serving features** | Dynamic batching, chunked prefill, recurrent-state prefix cache (~98% hit rate under high-reuse load) |
 | **Quantization** | Two int8 tiers + int4 (GPTQ), all hand-written CUDA. **w8g64** (weight-only): greedy-lossless (24/24 oracle-exact). **w8a8** (tensor-core): compression == cutlass (0.6161), a measured −2.3pt on MATH500 avg@64, for large-batch/VRAM wins. On sm120/Blackwell — where upstream has no int8 GEMM at all — our s8-wmma kernel serves w8a8 and beats fp16 cuBLAS on the GEMM (1.03–1.55× at batch ≥512). On **7.2B / one 32 GB 5090, int8 serves 2.90× the concurrency and 26.8% higher peak than fp16 can reach** (fp16 OOMs above 221 concurrent) — details in [BENCHMARKS §4](docs/BENCHMARKS.md#4-quantization-what-you-trade-and-what-you-get) / [F0035](docs/findings/0035-7b-int8-concurrency-headroom.md) |
 | **Speculative decoding** | Phase 1 working: a draft model proposes, the target verifies in one pass, rejected tokens roll back via an O(1) state snapshot. 9/10 test prompts token-identical to normal decoding; the single difference is a benign floating-point rounding-order effect, fully analyzed in [F0031](docs/findings/0031-spec-decode-increment-i.md) |
