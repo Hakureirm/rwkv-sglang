@@ -111,9 +111,9 @@ ON, 64-in/256-out:
 | 7.2B on one 5090 | max concurrency | peak output throughput |
 |---|---|---|
 | fp16 | 221 | 5,983 tok/s @c192 |
-| **w8a8** | **512 (2.32×)** | **6,987 tok/s @c512 (1.168×, still climbing at 512)** |
+| **w8a8** | **640 (2.90×)** | **7,587 tok/s @c640 (1.268×, still climbing at 640)** |
 
-So int8 serves 7.2B at **2.32× the concurrency and a 16.8% higher peak than fp16 can reach
+So int8 serves 7.2B at **2.90× the concurrency and a 26.8% higher peak than fp16 can reach
 on this card** — fp16 is pinned at the memory limit. Honest mechanism: at matched
 concurrency ≤221 fp16 is faster per step (no activation-quant tax); w8a8 wins purely by
 reaching concurrency fp16 physically cannot. Raw: `bench/results/72b/`.

@@ -1,4 +1,4 @@
-# F0035 — 7.2B on a single 32 GB 5090: int8 unlocks 2.32× concurrency and a 16.8% higher peak fp16 cannot reach
+# F0035 — 7.2B on a single 32 GB 5090: int8 unlocks 2.90× concurrency and a 26.8% higher peak fp16 cannot reach
 
 **Date:** 2026-07-06 · **Status:** MEASURED (both configs booted + swept on the RTX 5090) · **Prior:** F0034 (w8a8 V2 + the 1.5B strategic pivot)
 
@@ -19,15 +19,22 @@ so the state-pool slot count *is* the max concurrency. Per-request state ≈ 33 
 | | fp16 7.2B | w8a8 7.2B |
 |---|---|---|
 | weights | 14.4 GB | 7.75 GB |
-| **max concurrency (state-pool slots)** | **221** | **512 (2.32×)** |
-| state pool allocated | 6.94 GB | 16.03 GB |
-| free after startup | 5.26 GB (near the card's limit) | 6.14 GB |
-| **peak output throughput** | **5,983 tok/s @ c192** | **6,987 tok/s @ c512 (1.168×)** |
+| **max concurrency (state-pool slots)** | **221** | **640 (2.90×)** |
+| state pool allocated | 6.94 GB | 20.03 GB |
+| free after startup | 5.26 GB (near the card's limit) | 1.92 GB (near the card's limit) |
+| **peak output throughput** | **5,983 tok/s @ c192** | **7,587 tok/s @ c640 (1.268×)** |
 
 fp16 physically caps at 221 concurrent (14.4 GB weights leave the pool room for only
-221 × 33 MB); above that it OOMs. w8a8 (7.75 GB weights) serves 512 concurrent and
-its throughput is **still climbing at 512** (6,275 @320 → 6,660 @448 → 6,987 @512),
-so 6,987 is a floor on its advantage, not a ceiling.
+221 × 33 MB); above that it OOMs. w8a8 (7.75 GB weights) runs each model's state pool
+right up to the card's edge: **640 concurrent** under full cuda-graph coverage, and its
+throughput is **still climbing at 640** (6,304 @320 → 6,997 @512 → 7,345 @576 → 7,587
+@640) — it stops at 640 only because the card is out of memory for more state (1.92 GB
+free), NOT because throughput saturated. So 7,587 is a memory-bound floor on the
+advantage, not a compute ceiling.
+
+(An earlier run artificially capped w8a8 at max_mamba_cache_size=512 to mirror the 1.5B
+sweep — 6,987 @c512 = 1.168×; raising the cap to the card's true limit gives the 640 /
+7,587 / 2.90× / 1.268× above.)
 
 ## The honest mechanism (what int8 does and does NOT do here)
 
@@ -37,8 +44,8 @@ it also pays the activation-quant tax). w8a8 wins **only** by having the VRAM he
 to run at concurrency fp16 cannot reach. So the result is not "int8 makes each step
 faster at 7.2B" — it is:
 
-> On a single 32 GB 5090, w8a8 serves RWKV-7 7.2B at **2.32× the concurrency** and a
-> **16.8% higher peak throughput** than fp16 can — because fp16 is pinned against the
+> On a single 32 GB 5090, w8a8 serves RWKV-7 7.2B at **2.90× the concurrency** and a
+> **26.8% higher peak throughput** than fp16 can — because fp16 is pinned against the
 > card's memory limit at 221 concurrent, and only int8 frees enough room for the
 > recurrent-state pool to go further.
 
@@ -52,7 +59,7 @@ Upstream cutlass `int8_scaled_mm` does not exist on sm120 at all, so no other RW
 serving stack has *any* int8 on consumer Blackwell. rwkv-sglang's hand-written s8-wmma
 kernel (V2): (1) beats fp16 cuBLAS on the GEMM itself at M≥512 (1.03–1.55×, F0034);
 (2) is greedy lambada-certified (0.6486 vs 0.6509 cutlass); (3) halves weight VRAM;
-and now (4) on 7.2B turns that VRAM into **2.32× concurrency + 16.8% higher peak** than
+and now (4) on 7.2B turns that VRAM into **2.90× concurrency + 26.8% higher peak** than
 fp16 can reach on a 32 GB 5090.
 
 ## Cross-references
