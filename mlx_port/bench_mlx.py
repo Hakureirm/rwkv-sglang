@@ -100,6 +100,13 @@ def main():
         ("15B", os.path.join(args.models_root, "rwkv7-1.5b-fla"),
          os.path.join(fixtures, "oracle_rwkv7_15b_eiffel.json")),
     ]
+    # 7.2B is optional (14 GB): included only when the weights are present, so
+    # the default run stays light on machines that only have the small models.
+    _m72 = os.path.join(args.models_root, "rwkv7-7.2b-fla")
+    if os.path.isdir(_m72):
+        jobs.append(
+            ("72B", _m72, os.path.join(fixtures, "oracle_rwkv7_72b_eiffel.json"))
+        )
     for tag, model_dir, fixture in jobs:
         fx = json.load(open(fixture))
         prompt = fx["prompt_tokens"]

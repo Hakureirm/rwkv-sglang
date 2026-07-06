@@ -140,6 +140,12 @@ def main():
             (os.path.join(args.models_root, "rwkv7-1.5b-fla"),
              os.path.join(fixtures, "oracle_rwkv7_15b_eiffel.json"), "15B"),
         ]
+        # 7.2B is optional (14 GB): gated only when the weights are present.
+        _m72 = os.path.join(args.models_root, "rwkv7-7.2b-fla")
+        if os.path.isdir(_m72):
+            jobs.append(
+                (_m72, os.path.join(fixtures, "oracle_rwkv7_72b_eiffel.json"), "72B")
+            )
 
     all_ok = True
     for model_dir, fixture, tag in jobs:
