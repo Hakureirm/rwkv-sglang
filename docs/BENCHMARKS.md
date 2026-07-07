@@ -355,6 +355,25 @@ ratios above are against the stock numbers; against the re-tuned track they are 
 bsz1 (554.0 vs 553.9). Our launch parameters re-select at warmup on any card+CUDA — the design
 difference the next table quantifies.
 
+**Ongoing work on the bandwidth gap (2026-07-07, F0051).** The table above is the default
+(all fusion flags off) configuration. A real kernel-launch profile on H100 (699 launches per
+full decode step, not the ~144 an earlier internal estimate assumed — re-measured via
+`torch.profiler`, don't trust the old figure) found the highest-launch-count still-unfused
+cluster (the LoRA-output gate math: 3 sigmoids + surrounding elementwise) and fused it into
+one kernel, bit-exact on both sm_89 and sm_90 (`max_abs_diff = 0.0`), gated behind
+`RWKV_FUSED_GATES` (default off, additive, doesn't touch the numbers above). Measured effect,
+isolating exactly this change (a bsz8 control where the fusion doesn't fire shows ~0% change
+on both cards, confirming clean A/B isolation): **H100 bsz1 359.4→392.6 (+9.24%, ratio vs
+Albatross 0.592×→0.646×); L4 bsz1 82.1→83.1 (+1.22%)** — the much larger H100 gain for the
+identical code change is itself evidence the gap really is bandwidth-correlated, not just an
+observed pattern with an unconfirmed cause. Honest ceiling from the same profiling pass: even
+fusing every remaining tiny elementwise kernel this way tops out around H100 0.69× — the
+larger remaining piece is that our GEMV kernels run their epilogues as separate launches
+where Albatross's mega-kernel fuses them inline; that fusion (higher blast-radius — it touches
+the GEMV kernels every quantization tier depends on) is in progress. See
+[F0051](findings/0051-lora-gate-fusion-highbw.md) and later findings in that sequence for the
+current state; this is explicitly long-term/iterative (task #5), not expected to fully close.
+
 ## 7b. Comparison with vllm-rwkv (the community vLLM fork)
 
 Measured 2026-07-06 under strictly equal conditions, **RWKV-7 1.5B**: same GPUs (RTX 3090 + RTX
@@ -490,18 +509,37 @@ A Transformer's KV cache grows on both axes; RWKV-7's state does not. This is wh
 thing that scales with concurrency, and it is tiny and fixed-per-request. (The VRAM-growth
 rows above are v0.5.10 measurements; unchanged by design on main.)
 
-## 11. Speculative decoding (phase 1)
+## 11. Speculative decoding
 
-Draft model proposes K tokens, target verifies them in one pass, rejected tokens roll back by
-restoring an O(1) state snapshot. Status: functional; 9/10 gate prompts token-identical to
-normal decoding, mean 3.17 tokens accepted per round (measured acceptance rate α = 0.738).
-The single differing token was traced to float rounding-order (the probe: it occurred exactly
-at the sequence's smallest top-2 logit gap, 0.005 nats) — the verify's M=K GEMM reduces in a
-different order than the M=1 baseline decode. The exactness fix is built and gated: `gemv_mb`,
-a batch-invariant M-row GEMV whose every row is bit-identical to the decode kernel (`gemv_m1`)
-— routing the verify's projections through it makes spec-on ≡ spec-off. Remaining: wire it in,
-port the worker to sglang main, and add the draft/verify CUDA graphs (the speedup). Full
-analysis: [F0031](findings/0031-spec-decode-increment-i.md), F0029 (viability), ADR-0006.
+**Updated 2026-07-07 — correctness done, speed a real partial win.** A 0.1B RWKV-7 draft
+proposes K tokens; the target verifies them in one pass via sglang main's own spec-V2
+plugin architecture (`RWKV_SPEC`, modeled on the `NGRAMWorker` template — reusing upstream's
+verify+commit machinery rather than a bespoke worker, per the [2026-07-06 pivot in
+ADR-0006](adr/0006-speculative-decoding.md)); rejected tokens roll back via an O(1) state
+snapshot.
+
+**Correctness: `bench/spec_gate.py` is 10/10** token-identical (spec-on vs spec-off, greedy),
+holding at both 128 and 256 generation length, with zero regression on the pre-existing
+non-spec-decode suite. Getting there required fixing two real bugs specific to RWKV-7's
+recurrent state (not present in the transformer-oriented backends this machinery was built
+for): `intermediate_ssm`/`intermediate_conv_window` are indexed by request-ordinal, not pool
+slot; and RWKV-7's *second* token-shift state (the FFN one, `conv[1]`) was never corrected by
+the generic upstream commit hook, which only ever handled `conv[0]` (GDN/KDA/Lightning only
+have one token-shift-equivalent state each).
+
+**Speed: a hand-rolled CUDA graph for the draft's own decode loop** (not sglang's shared
+`DecodeCudaGraphRunner`, which hardcodes an EAGLE-family batch shape incompatible with a plain
+recurrent draft) gives a real, gated **1.5–1.6× speedup on the draft decode step itself**
+(median 33.2→53.7 tok/s, positive on all 7 test prompts). Net effect against not using
+speculative decoding at all: **still 2.6×–4.5× slower** (down from 7× before the graph) — a
+real, honest, partial step, not yet the win this feature is meant to deliver. Three profiled-
+but-not-yet-attacked next levers on record (per-layer state-clone cost, target-verify
+overhead, per-round Python orchestration).
+
+Full analysis: [F0046](findings/0046-spec-decode-strategy-b-build.md) (this build),
+[F0031](findings/0031-spec-decode-increment-i.md) (the superseded v0.5.10-era prototype,
+kept for the M-shape-reduction-order lesson it taught), F0029 (viability, α=0.738–0.7485),
+ADR-0006 (design).
 
 ## 12. Apple Silicon (MLX)
 
@@ -675,7 +713,147 @@ methodology, the repeatability check, and honest limits (no correctness oracle f
 compression-rate ruler run here) are in
 [F0045](findings/0045-qwen35-mlx-matched-benchmark.md).
 
+## 13. Comparison with Qwen3.5 (same engine, same-precision, matched size)
+
+Qwen3.5 (Alibaba) is a **hybrid Gated-DeltaNet** architecture — confirmed both empirically
+(bring-up on our own sglang install: 24 layers, 18 linear-attention/GDN + 6 full-attention,
+`interval=4`) and independently against BlinkDL's own reference implementation
+(`RWKV-LM/RWKV-v7/run_rwkv7_qwen35.py`, which encodes the identical `i%4!=3` layer split). GDN
+and RWKV-7's own recurrence are both members of the DPLR (diagonal-plus-low-rank) family — this
+is a same-generation, same-family comparison, not an old-architecture-vs-new-architecture one.
+Bo Peng's own state-size formulas make the structural difference explicit: RWKV-7's state is
+`L·(2D + 64D)`, a constant independent of context length; Qwen3.5's is
+`L·¾·(3·6D + 2·128D) + L·¼·(2·2·256·T)` — the second term scales with T because 6 of its 24
+layers are real attention needing a real, growing KV cache. Every concurrency-ceiling result
+below traces back to this one structural fact.
+
+**Size pairing** (nearest available Qwen3.5 tier; sizes are NOT identical, both stated everywhere):
+
+| RWKV-7 | Qwen3.5 | note |
+|---|---|---|
+| 1.5B | 2B | primary tier |
+| 7.2B | 9B | primary tier, largest int8/state-size payoff |
+
+Weights: same engine (sglang main, native `qwen3_5.py` support, no fork needed), same
+precision per row. **Qwen3.5 requires `--dtype bfloat16`** — `float16` crashes on a dtype
+branch bug in a shared hybrid-SSM Triton kernel (`causal_conv1d_triton.py`, used generically by
+Mamba2/Qwen3-Next/Qwen3.5, not something we patch — out of this project's blast radius; use the
+checkpoint's native bf16 instead). This means RWKV-7's headline **fp16** numbers elsewhere in
+this document are *not* directly comparable to Qwen3.5's bf16 numbers — every table below either
+compares bf16-to-bf16, or says explicitly when it's citing RWKV's fp16-optimized figure instead
+and why (RWKV's hand kernels are fp16-only; bf16 exercises RWKV's plain/stock path).
+
+### 13.1 Cloud tier — RTX 5090
+
+Same-precision (bf16, both stock paths — RWKV's fp16 hand kernels don't fire) bsz1:
+
+| tier | RWKV-7 (bf16) | Qwen3.5 (bf16) | winner |
+|---|---:|---:|---|
+| 1.5B / 2B | 256.6 | 335.8–336.3 | Qwen3.5 **+31.0%** |
+| 7.2B / 9B | 87.7 | 96.0 | Qwen3.5 **+9.4%** |
+
+RWKV-7 only overtakes bsz1 when its **fp16** hand-kernel stack is active — a different
+precision, not a fair same-precision reading: 1.5B fp16 full-stack 397.3–409.8 (+18–22% vs
+Qwen3.5), 7.2B fp16 full-stack 123.7 (+29%). **The bsz1 win at fp16 comes from kernel
+optimization work, not from the RWKV-7 architecture being inherently faster than Qwen3.5's at
+matched precision — keep these two claims distinct.**
+
+Peak concurrency, same precision (bf16), full sweep, `--cuda-graph-max-bs` sized to each
+model's real ceiling:
+
+| tier | RWKV-7 peak | Qwen3.5 peak | winner |
+|---|---:|---:|---|
+| 1.5B / 2B | **21,431.9 @ c=512** | 17,587.0 @ c=384 | RWKV-7 **+21.9%** |
+| 7.2B / 9B | **6,171.3 @ c=256** | 4,295.8 @ c=128 | RWKV-7 **+43.7%** |
+
+**RWKV-7 wins peak concurrency at both tiers on this card — the metric this project's own
+full-spectrum-over-single-stream doctrine treats as decisive.** The two tables aren't
+contradictory: bsz1 favors Qwen3.5 (no RWKV hand kernels in bf16); peak concurrency favors
+RWKV-7 (Qwen3.5's growing KV-cache cost for its 6 real-attention layers caps its ceiling
+lower, per the state-size formula above). Both are reported, neither is hidden.
+
+Bonus data point: Qwen3.5 also runs natively at **FP8** (`--quantization fp8`, zero extra
+code) — this is a *different* quantization tier from RWKV's int8, not a matched comparison,
+but worth recording: Qwen3.5 FP8 is **25–39% slower than its own bf16 at bsz1** (206.6 vs
+336.0 for 2B; 71.7 vs 96.0 for 9B) — the same small-batch quantization tax RWKV's own w8a8
+shows (§4). **True int8-vs-int8 is not achievable today**: sglang's int8 path requires a
+pre-quantized checkpoint with no on-the-fly quantization support, and no public
+pre-quantized Qwen3.5 int8 checkpoint exists — a real, disclosed gap, not a skipped
+measurement (F0048).
+
+Raw: `bench/results/qwen35/*_5090*.json`; findings F0044–F0048.
+
+### 13.2 Desktop tier — RTX 3090
+
+Same protocol, tighter 24GB budget. Peak concurrency, bf16:
+
+| tier | RWKV-7 peak | Qwen3.5 peak | winner |
+|---|---:|---:|---|
+| 1.5B / 2B | **7,058.6 @ c=256** | 6,316.9 @ c=384 | RWKV-7 **+11.7%** |
+| 7.2B / 9B | **1,796.3 @ c=128** (confirmed flat, repeat at c=192 = 1,794.3) | 1,376.3–1,414.2 @ c=64 (memory-ceiling-terminated, still climbing) | RWKV-7 **≥+27.0%** (floor, not the true margin) |
+
+The 7.2B/9B row is reported as a **floor**, not a final margin: three independent attempts to
+push Qwen3.5-9B past c=64 on this 24GB card all failed via genuine CUDA OOM (not the
+KV-starvation false-plateau this project screens for — confirmed via `nvidia-smi` headroom at
+each attempt and by reverse-engineering sglang's exact memory-pool formula, which shows no
+`--mem-fraction-static` value can simultaneously fund Qwen3.5-9B's mamba-cache budget and
+survive a real request burst above ~c=64–68 on this card — a genuine hardware ceiling, not a
+tuning gap). Qwen3.5-9B's true compute-bound peak is unreachable here; it reached 4,295.8 on
+the roomier 32GB tower. Don't read "+27.0%" as the real gap — it's a conservative lower bound.
+
+Raw: `bench/results/qwen35/*_3090*.json` (kept on the desktop box, not this repo); F0049.
+
+### 13.3 Apple Silicon tier — MLX
+
+Qwen3.5-2B runs on MLX **out of the box** via the standard `mlx-lm` library (0.31.3) — a real,
+non-stub Metal kernel for its Gated-DeltaNet layers, not a slow fallback (F0044). Matched
+multi-run comparison against RWKV-7 1.5B's MLX port, same protocol, same machine (F0045 —
+full table in §12.7): **RWKV-7 wins decode** (+19.3% bf16, statistical tie at int4),
+**Qwen3.5 wins prefill** (+65.6% bf16, +40.7% int4 — its dense-attention layers parallelize
+over the whole prompt in a way RWKV's sequential recurrence structurally can't match).
+Compression rate (matched N=40/corpus, both models): RWKV-7 1.5B fp16 **0.5926** vs
+Qwen3.5-2B bf16 **0.6719** — RWKV ahead, same direction as the cloud tier's compression
+finding below (F0045 addendum). **MATH500 avg@64 was not run on this platform** — a session
+attempting it ran into real memory pressure on this Mac and was stopped; this is a disclosed
+gap, not a silent omission. See §12.6 for why the Apple Neural Engine isn't part of this
+picture either (feasibility gate FAIL, F0042).
+
+### 13.4 Accuracy — compression rate (the cloud-tier reading)
+
+| model | precision | pooled bpb | N |
+|---|---|---:|---:|
+| RWKV-7 1.5B | fp16 | **0.6085** | 500/corpus (§2 canonical) |
+| Qwen3.5-2B | bf16 | 0.6729 | 500/corpus, matched protocol |
+
+**RWKV-7 1.5B compresses better than Qwen3.5-2B** despite being the smaller model — on this
+ruler (one of the two this project treats as decisive, per `feedback-benchmark-rigor`),
+RWKV-7 is ahead, corroborated by the same direction on the Apple Silicon tier above (two
+platforms, two independent implementations, same conclusion). **MATH500 avg@64 for Qwen3.5 is
+in progress** (a multi-hour job on the cloud tier as of this writing) — this section will be
+extended with that result rather than this document claiming a reasoning-quality verdict it
+doesn't have yet.
+
+### 13.5 Correctness
+
+Qwen3.5's outputs in this comparison are not just "coherent-looking" — Qwen3.5-**2B** is
+oracle-gated against BlinkDL's own independent numpy fp32 reference implementation (the same
+rigor this project always applies to its own RWKV-7 kernels), on both serving paths this
+comparison uses: mlx-lm (bf16) and sglang (bf16) both agree with the reference on top-1/top-5
+next-token distribution for a probe prompt, differences consistent with ordinary bf16
+rounding (F0050). **Qwen3.5-9B has not yet been gated this way** — not assumed to inherit the
+2B result, tracked as an open item.
+
+### 13.6 What this comparison does not yet cover (stated, not hidden)
+
+Int8-vs-int8 (no pre-quantized Qwen3.5 checkpoint exists, §13.1). MATH500 on Apple Silicon
+(memory-constrained, §13.3). A true compute-bound Qwen3.5-9B peak on 24GB hardware (memory
+ceiling reached first, §13.2). Qwen3.5-9B correctness oracle-gate (§13.5). Mobile and embedded
+device tiers (no such hardware available to this project). None of these are being silently
+skipped — each has its own tracked follow-up.
+
 ---
 
-*In-progress (this page is updated as they land): MATH500 avg@64 and full compression on
-main for both GPUs; 3090-on-main ladder; per-size decode/prefill grid vs Albatross retuned.*
+*In-progress (this page is updated as they land): Qwen3.5 MATH500 avg@64 + compression on the
+cloud tier (§13.4); 7.2B int4-GPTQ MATH500 avg@64 (§2/§4, decides the w4 Stage-2 question);
+continuing high-bandwidth-card kernel fusion work (§7); 3090-on-main ladder; per-size
+decode/prefill grid vs Albatross retuned.*
