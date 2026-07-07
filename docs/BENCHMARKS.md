@@ -70,6 +70,25 @@ full re-run was **bit-identical** (pooled 0.6085, drift −0.0000 over ~7.5M tok
 degrades *less than half* as much as the 1.5B GPTQ one despite the weaker quantizer, i.e. the larger
 model absorbs low-bit weights markedly better (`bench/results/uncheatable_full_{w4,w8a8}_7.2b_5090main.json`).
 
+**Asymmetric (scale+zero) GPTQ for int4 — a cheap, zero-kernel-change refinement (F0043, 2026-07-07).**
+A clean 3-way rerun on a matched corpus (N=300, since the historical N=7500 corpus is no longer on
+disk — do not compare these against the N=7500 row above, ~3% apart on fp16 alone at this sample
+size):
+
+| 1.5B · N=300 | pooled bpb | vs fp16 |
+|---|---|---|
+| fp16 | 0.5893 | — |
+| int4 GPTQ, symmetric | 0.6330 | +0.0437 |
+| int4 GPTQ, **asymmetric** | **0.6186** | +0.0293 (closes 33% of the symmetric gap) |
+
+Kernel needed zero changes — the int4 unpack already decodes the full two's-complement range
+`[-8,7]`; symmetric only used `[-7,7]`. Storing `q_unsigned - 8` makes the kernel's existing output
+exact up to a per-group constant, corrected with one extra `groupsum_x @ bias.T` matmul
+(O(N·K/64), ≤1.6% extra FLOPs on the widest projection) — verified exact to the kernel's own noise
+floor (`bench/verify_w4.py`, 12 configs, rel-err 7.6e-5–2.2e-4). See §4 and F0043 for the MATH500
+reasoning-collapse picture this doesn't fully fix, and why Stage 2 (real K-quant mixed precision)
+isn't recommended yet.
+
 Per-corpus table (all 15, no cherry-picking) and the position-curve (proof the recurrent state
 keeps absorbing context: 3.65 bits at position 0-64 → 2.24 bits past 1024) are in
 `bench/results/uncheatable_*` and F-series reports.
@@ -91,11 +110,13 @@ is the engine version.
 | 1.5B **w8a8** avg@64 (main) | **0.3812** (12,197/32,000) | vs 1.5B fp16 0.4042 = **−2.3pt** — a real int8 reasoning cost the low-variance ruler resolves; compression (0.6161) and greedy hid it (`bench/results/math500_avg64_w8a8_5090main.json`) |
 | 1.5B **w8a8** greedy avg@1 (main) | 0.3800 (190/500) | vs 1.5B fp16 0.3940 = −1.4pt (within 1 binomial SE at n=500) |
 | 1.5B **int4 GPTQ** greedy avg@1 (main) | 0.1560 (78/500) | vs 1.5B fp16 0.3940 = **−24pt collapse** — perplexity-style rulers badly understate int4's reasoning damage (see §4 warning) |
+| 1.5B **int4 GPTQ, symmetric** avg@64 (main, 3090) | **0.1498** (4,794/32,000) | vs fp16 avg@64 0.4060 = **−25.6pt**; confirms the greedy collapse (0.1560) isn't a decoding-strategy artifact — same magnitude under 64-way temperature sampling. Truncation 57.7% vs fp16's 14.2%; mean generated tokens 1022.9 vs 581 — a "loses the thread and never stops" failure, not "confidently wrong" |
+| 1.5B **int4 GPTQ, asymmetric** avg@64 (main, 3090, NEW 2026-07-07) | **0.2199** (7,036/32,000) | vs symmetric 0.1498 — real improvement (gap to fp16 closes 27.4%, truncation drops to 30.5%) from a zero-kernel-change fix (F0043), but nowhere near fp16 parity. Notably closes *less* of the gap than the same fix does on lambada (35.0%) or compression (32.9%) — the harder the metric, the less a bigger scale/zero encoding alone can buy back, evidence this isn't purely a bit-budget problem |
 
 The three quantization tiers on the *reasoning* ruler, ordered by damage: w8g64 (weight-only,
-greedy-lossless) → w8a8 (−2.3pt) → int4 (−24pt). Compression rate alone would rank them
-+0.0001 / +0.0076 / +0.0429 — the same order but wildly understating int4, which is why MATH500
-is the ruler that decides quantization quality here.
+greedy-lossless) → w8a8 (−2.3pt) → int4 (−24 to −26pt, symmetric or asymmetric). Compression rate
+alone would rank them +0.0001 / +0.0076 / +0.0293–0.0429 — the same order but wildly understating
+int4, which is why MATH500 is the ruler that decides quantization quality here.
 
 ## 3. Single-request speed ladder (steady-state, 1.5B fp16)
 
@@ -121,7 +142,7 @@ Three modes, all with hand-written kernels, all arch-portable (JIT per GPU):
 |---|---|---|---|
 | int8 w8g64 (weight-only) | none measurable (greedy-exact; compression +0.0001) | small-batch speed (+13% over fp16 full stack at bsz1 on 5090) + half the weight bytes | ModelScope `Hakureirm/rwkv7-g1-1.5b-w8g64` |
 | int8 w8a8 (tensor-core) | compression 0.6161 (+0.0076, == cutlass); **MATH500 avg@64 0.3812 vs fp16 0.4042 = −2.3pt** (the low-variance ruler resolves a real reasoning cost the compression rate and greedy hid — same pattern as int4, far milder) | large-batch throughput king on sm80–90 (3090 peak 9,851 tok/s, 64-in/256-out). On sm120/Blackwell the upstream cutlass op does not exist; rwkv-sglang's own s8-wmma kernel (register-blocked V2, bit-exact gate, batch-invariant) now serves the tier there — the int8 GEMM beats fp16 cuBLAS at M≥512 (1.03–1.55×), while e2e peak is 20,991 tok/s (@c512, 64-in/256-out) = 0.9466× fp16 (the residual gap is the per-token activation-quant launch tax against an already-tuned fp16 baseline) | box-relayable |
-| int4 GPTQ | lambada −1.28pt at 7.2B (RTN would be −2.64) | lowest VRAM: 7.2B in 4.6 GB weights, serves on a 16 GB T4 at 32.9 tok/s | ModelScope `Hakureirm/rwkv7-g1-{1.5b,7.2b}-w4gptq` |
+| int4 GPTQ | lambada −1.28pt at 7.2B (RTN would be −2.64); **1.5B MATH500 avg@64 collapses regardless of symmetric/asymmetric (−25.6pt / −18.6pt vs fp16 — see below)** | lowest VRAM: 7.2B in 4.6 GB weights, serves on a 16 GB T4 at 32.9 tok/s | ModelScope `Hakureirm/rwkv7-g1-{1.5b,7.2b}-w4gptq` |
 
 Prequantized checkpoints are required (the loader reads qweight/scale keys; pointing the
 quant flags at an fp16 dir errors out by design).
@@ -152,12 +173,30 @@ pinned at the memory limit. Honest mechanism: at matched concurrency ≤221 fp16
 per step (no activation-quant tax); w8a8 wins purely by reaching concurrency fp16 physically
 cannot. Raw: `bench/results/72b/`.
 
-**An honest int4 warning (measured 2026-07-05):** perplexity-style metrics understate int4's
-damage to multi-step reasoning. On the 1.5B GPTQ checkpoint, compression looks mild (0.6514)
-but **MATH500 greedy collapses to 0.1560** (78/500, vs fp16's 0.3940) — the quantized model
-loses the thread mid-derivation and rambles to the token cap (60% truncation vs 14%). Treat
-1.5B int4 as a memory tool for non-reasoning workloads; the 7.2B GPTQ (much smaller lambada
-loss) is being re-checked on the same ruler. Raw: `bench/results/math500_greedy_w4gptq_5090main.json`.
+**An honest int4 warning (measured 2026-07-05, updated 2026-07-07 with asymmetric + avg@64,
+F0043):** perplexity-style metrics understate int4's damage to multi-step reasoning. On the 1.5B
+GPTQ checkpoint, compression looks mild (0.6514 old N=7500 / 0.6330 clean N=300 symmetric) but
+**MATH500 avg@64 is 0.1498** (32,000-rollout, 64-way temperature sampling — confirms the greedy
+read of 0.1560 wasn't a decoding-strategy fluke) **vs fp16's 0.4060** — the quantized model loses
+the thread mid-derivation and rambles to the token cap (57.7% truncation vs fp16's 14.2%, mean
+1023 vs 581 generated tokens).
+
+**Asymmetric (scale+zero) quantization — the cheap fix, tried first — helps for real but doesn't
+solve it:** avg@64 improves to **0.2199** (truncation down to 30.5%), closing 27.4% of the gap to
+fp16. That's a smaller fractional recovery than the same fix gets on lambada (35.0%) or
+compression (32.9%) — the more decision-relevant the metric, the less a wider-but-still-4-bit
+encoding buys back, which reads as evidence this is closer to compounding error over a long
+reasoning chain than a simple "not enough bits" problem. **Decision (F0043): a full K-quant
+mixed-precision rewrite (Stage 2, Q4_K_M-style 4/6-bit mixed blocks) is not recommended yet** —
+the cheaper, more informative next step is checking whether 7.2B's int4 MATH500 collapses this
+badly too (only lambada has been checked there, at a much smaller −1.28pt hit than 1.5B's
+−3.34pt, consistent with "bigger models quantize better"); if 7.2B holds up fine on MATH500,
+int4's honest scope is "great memory tool at 7.2B+, use int8 instead of int4 for reasoning-heavy
+workloads at 1.5B" and Stage 2 isn't needed at all. Treat 1.5B int4 (symmetric or asymmetric) as
+a memory tool for non-reasoning workloads, not a general-purpose lossless tier — w8g64 (int8,
+weight-only) remains the lossless quantized tier. Raw:
+`bench/results/math500_greedy_w4gptq_5090main.json` (greedy),
+`docs/findings/0043-w4-asym-gptq.md` (full avg@64 + compression + lambada picture).
 
 **The sm120 w8a8 kernel (GEMM microbench).** Upstream cutlass `int8_scaled_mm` does not
 compile for sm120, so on Blackwell consumer cards our hand-written s8-wmma GEMM (register-
