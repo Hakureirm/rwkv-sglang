@@ -234,6 +234,70 @@ make explicit exactly how close the int4-decode race is to measurement noise.
   and coherence comparison only. Treat the int4 "degenerates into repetition" observation as a
   qualitative flag, not a quantified accuracy delta.
 
+## Addendum (2026-07-07, follow-up investigation): the 8–12% gap is confirmed external jitter, not a regression
+
+A separate follow-up pass investigated whether the "8–12% below canonical" gap flagged in Result 2
+above is a genuine performance regression (code, library, or OS change) or ordinary machine variance.
+**Verdict: variance, not a regression** — the codebase's own history and a live repro both settle it.
+
+- **No functional change to the decode path.** `git log` on `mlx_port/rwkv7_mlx.py` since the
+  canonical §12.3 numbers were measured (commit `b8075a8`, 2026-07-06 18:40, the same commit that
+  shipped the decay-precompute WKV kernel whose "after" table *is* the canonical 37.3/39.1 reading)
+  shows exactly two later commits touching that file: `a87e563` (F0039, opt-in quant) and `42f28b2`
+  (F0040, compression-rate scoring). Neither touches the fp16 decode path in a way that could cost
+  8–12%: `a87e563` adds `qbig()`/`isinstance(W, tuple)` dispatch that is a pure pass-through to the
+  original `big(n)` call when `quant=None` (the default) — one extra `isinstance` check per matmul,
+  nanoseconds against a ~28 ms/token bandwidth-bound budget; `42f28b2` only *adds* new methods
+  (`_hidden_all`, `_head_logits`, `score_tokens`) never called by `generate`/`greedy_loop`/
+  `bench_mlx.py`. `bench_mlx.py`'s own `bench_decode`/`bench_prefill` timing functions are byte-for-byte
+  unchanged since before the canonical run. The two commits after that (`e78ae0e`, `0139586`) don't
+  touch `rwkv7_mlx.py` at all.
+- **No library change.** Installed versions today: `mlx==0.31.2`, `mlx-lm==0.31.3` — identical to what
+  every relevant doc (this finding, F0038, BENCHMARKS.md §12) already records as the measurement
+  environment. No upgrade occurred between the canonical run and now.
+- **The canonical 37.3 reading was already flagged, in its own source finding, as noise-flavored.**
+  F0038's own text (the finding that shipped the decay-precompute kernel and produced the 37.3/39.1
+  "after" table) says outright: *"the higher decode here vs F0037's baseline (298 / 33.6 / 7.6) is
+  host-load variance on this shared box, not a speedup."* i.e. 33.6 tok/s (not 37.3) was F0038's own
+  assessed baseline for this exact config on the very same day the "canonical" 37.3 was recorded —
+  BENCHMARKS.md §12.2 independently repeats the 33.6 figure. So the "canonical" citation was already,
+  by the original author's own account, sitting on the high side of that day's noise, not a clean
+  steady-state number.
+- **Live repro, 10 fresh consecutive runs** (2026-07-07, `bench_mlx.py --models-root /private/tmp/mlx_models
+  --wkv metal`, 1.5B fp16, this Mac, load average 4.6–4.9 per `uptime` — lower than F0038's documented
+  ~8 — no thermal or performance warnings per `pmset -g therm`, on AC power, no other Python/MLX/CoreML
+  process consuming CPU per `ps aux`):
+
+  | run | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | decode tok/s (median of 5) | 36.3 | 36.2 | 36.5 | 36.5 | 36.3 | 36.2 | 36.4 | 36.4 | 36.4 | 36.4 |
+
+  Extremely tight (36.2–36.5, 0.8% spread) — closer to the canonical 37.3 than to this finding's own
+  32.8/34.4 readings from earlier the same day, and comfortably above them. This proves neither the
+  machine nor the code has settled into a permanently slower state: the same box, same code, same
+  library versions reproduce near-canonical numbers minutes after this check began.
+- **Revised jitter picture.** Across five independent same-code, same-library 1.5B-fp16-decode
+  session medians now on record (33.6 on 2026-07-06 ~17:37, 37.3 on 2026-07-06 ~18:40, 32.8 and 34.4
+  earlier on 2026-07-07, 36.2–36.5 in this check later on 2026-07-07), the spread is **32.8–37.3
+  tok/s, a ~12% peak-to-trough spread** — roughly 2–3x the ±3–5% figure `docs/BENCHMARKS.md` previously
+  quoted as *the* jitter band. That ±3–5% figure was not wrong, it was scoped too narrowly: it
+  correctly describes *within-session* spread (this finding's own run1-vs-run2 repeatability check
+  landed at 0.4–4.9%, and this check's 10-run cluster at 0.8%), but it does not cover *cross-session*
+  spread, which is the comparison Result 2 above was actually making. `docs/BENCHMARKS.md` /
+  `.zh-CN.md` §12's intro has been corrected to state both bands separately.
+- **No root cause was chased beyond this** (out of scope for this pass's time-box). Plausible
+  contributors to cross-session (as opposed to cross-run) drift include background load at the moment
+  of the run (this Mac is shared with other work, e.g. an ASR server process — idle at 0.0% CPU during
+  this check, but not necessarily idle during earlier sessions), memory-allocator/Metal-driver state
+  left over from whatever large models were loaded earlier in a session (F0045's original low readings
+  were captured in a session that had just finished loading/unloading multiple multi-GB Qwen3.5
+  checkpoints back-to-back; this check's tight cluster was a clean RWKV-only session with nothing else
+  loaded first), or ordinary macOS scheduler/QoS variation — none of these were isolated or ruled out
+  individually. The actionable conclusion: **absolute single-session decode tok/s on this box is a
+  point-in-time sample with a real ~±6% (up to ~12% peak-to-trough) cross-session band, not a fixed
+  constant**, while interleaved-A/B *deltas* (the quant comparisons, the head-to-head vs Qwen3.5)
+  remain reliable because both arms of an A/B share whatever session-level drift is present.
+
 ## Cross-references
 
 `mlx_port/bench_mlx_qwen35.py` (this pass's new script) · `mlx_port/bench_mlx.py` (the RWKV-7

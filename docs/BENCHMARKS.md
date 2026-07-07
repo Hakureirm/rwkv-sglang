@@ -447,9 +447,16 @@ analysis: [F0031](findings/0031-spec-decode-increment-i.md), F0029 (viability), 
 Native RWKV-7 for Apple Silicon — MLX + a hand-written Metal WKV kernel, gated by the **same numpy
 fp32 oracle** as CUDA. The MLX port **matches the CUDA platform's coverage**: kernel profiling,
 quantization, the compression-rate ruler, and a real-workload bench — all on **Apple M5 (32 GB
-unified, MLX 0.31.2)**. This is a shared box (load ~8), so single-stream decode has ±3–5% run-to-run
-jitter; the headline quant deltas come from **interleaved one-process A/B** (baseline+variant
-back-to-back per round, drift-cancelled), and `bench_mlx.py` reports median+best.
+unified, MLX 0.31.2)**. This is a shared box, and decode jitter comes in two sizes depending on what
+you compare: **within** one back-to-back session it stays tight (~1–5%: 10 fresh consecutive runs on
+2026-07-07 landed at 36.2–36.5 tok/s for 1.5B fp16 decode), but **across** sessions (different
+times/days, same code, same `mlx`/`mlx-lm` versions) the session median has been observed to swing
+**up to ~12% peak-to-trough** — 32.8–37.3 tok/s across five independent 1.5B-fp16 decode sessions on
+2026-07-06/07 (full breakdown: [F0045](findings/0045-qwen35-mlx-matched-benchmark.md) addendum).
+Treat a single session's absolute tok/s as a point-in-time reading, not a fixed constant — the
+headline quant deltas below are more robust because they use **interleaved one-process A/B**
+(baseline+variant back-to-back per round, which cancels cross-session drift too), and `bench_mlx.py`
+reports median+best.
 
 ### 12.1 fp16 default — correctness + speed (Metal WKV, bf16 weights)
 
