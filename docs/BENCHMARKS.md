@@ -147,31 +147,53 @@ Three modes, all with hand-written kernels, all arch-portable (JIT per GPU):
 Prequantized checkpoints are required (the loader reads qweight/scale keys; pointing the
 quant flags at an fp16 dir errors out by design).
 
-**Where int8 is decisive — 7.2B on a single 32 GB 5090 (measured 2026-07-06).** RWKV-7
-state is constant-size, so the state-pool slot count is the max concurrency (per-request
-state ≈ 33 MB, identical for both — it is fp32 model state, independent of weight
-quantization). fp16 weights (14.4 GB) leave the pool room for only 221 concurrent and it
-OOMs above; w8a8 weights (7.75 GB) free enough headroom for 640. Same launch, cuda-graph
-ON, 64-in/256-out:
+**Where int8 is decisive — 7.2B on a single 32 GB 5090 (measured 2026-07-06; fp16 side
+corrected 2026-07-07, [F0047](docs/findings/0047-fp16-72b-concurrency-correction.md)).**
+RWKV-7 state is constant-size, so the state-pool slot count is the max concurrency
+(per-request state ≈ 33 MB, identical for both — it is fp32 model state, independent of
+weight quantization).
+
+**Correction:** the original fp16 sweep grid stopped at concurrency 221 on the untested
+assumption that fp16 was already pinned at a hard OOM ceiling there. Re-running with a finer
+grid past 221 (same launch, `--mem-fraction-static 0.85`) shows throughput was still
+climbing, non-monotonically, well beyond that point: fp16's real safe operating ceiling is
+**at least 344 concurrent** (368 boots clean but OOMs under real request load — thin-margin
+allocator fragmentation in the eager prefill path, not a hard architectural cap at 221), and
+its **true peak is 6,709 tok/s @ c320** (confirmed declining at c336: 6,039 and c344: 6,111)
+— not 5,983 @ c192. The hand-kernel stack does carry real extra memory overhead beyond the
+state pool, though: at matched `--cuda-graph-max-bs 320`, fp16 full-stack leaves only ~2.0 GB
+free after cuda-graph capture vs bf16 stock's ~6.4 GB (identical weights, identical
+state-pool math, identical launch) — so fp16 genuinely cannot push raw concurrency quite as
+far as bf16 can. Its faster per-step compute more than compensates end to end: fp16's
+corrected peak (6,709 @ c320) is still 8.7% above bf16's own peak (6,171 @ c256, §12), so the
+hand kernels remain a net win, just a smaller one at the high-concurrency tail than at bsz1.
+Same launch, cuda-graph ON, 64-in/256-out:
 
 | 7.2B on one 5090 | max concurrency | peak output throughput |
 |---|---|---|
-| fp16 | 221 | 5,983 tok/s @c192 |
-| **w8a8** | **640 (2.90×)** | **7,587 tok/s @c640 (1.268×, still climbing at 640)** |
+| fp16 | **≥344** (was misreported as 221) | **6,709 tok/s @c320** (was misreported as 5,983 @c192) |
+| **w8a8** | **640 (1.86×)** | **7,587 tok/s @c640 (1.131×, still climbing at 640)** |
 
-Full concurrency sweep (output tok/s) — fp16 tops out and OOMs where w8a8 keeps scaling:
+Full concurrency sweep (output tok/s) — fp16's corrected curve peaks at 320 then declines
+(no crash); w8a8 keeps scaling on its larger memory budget:
 
-| concurrency | 1 | 128 | 192 | 221 | 320 | 448 | 512 | 576 | 640 |
+| concurrency | 1 | 128 | 192 | 221 | 256 | 320 | 336 | 344 | 368 |
 |---|---|---|---|---|---|---|---|---|---|
-| fp16 | 124 | 5,668 | 5,983 | 5,747 | — OOM above 221 → | | | | |
-| **w8a8** | 60 | 4,657 | — | 5,342 | 6,304 | 6,679 | 6,997 | 7,346 | **7,587** |
+| fp16 (corrected) | 124 | 5,688–5,695 | 5,999–6,034 | 5,769–5,772 | 6,186–6,205 | **6,709–6,714 (peak)** | 6,039 | 6,111 | OOMs under load |
+| **w8a8** (unchanged) | 60 | 4,657 | — | 5,342 | — | 6,304 | — | — | — |
 
-w8a8's curve is still rising at 640 (its own memory ceiling: 20.03 GB state pool, 1.92 GB
-free); the 7,587 is a memory-bound floor, not a compute plateau. So int8 serves 7.2B at
-**2.90× the concurrency and a 26.8% higher peak than fp16 can reach on this card** — fp16 is
-pinned at the memory limit. Honest mechanism: at matched concurrency ≤221 fp16 is faster
-per step (no activation-quant tax); w8a8 wins purely by reaching concurrency fp16 physically
-cannot. Raw: `bench/results/72b/`.
+(fp16 range = two independent re-runs at `--cuda-graph-max-bs` 320 and 344, agreeing within
+0.5% at every shared point: `bench/results/72b/sweep_72b_fp16_v2_5090.json` /
+`sweep_72b_fp16_v3_5090.json`; original coarse-grid run kept as `sweep_72b_fp16.json` for
+process record, no longer the current source of truth.) w8a8's curve is still rising at 640
+(its own memory ceiling: 20.03 GB state pool, 1.92 GB free); the 7,587 is a memory-bound
+floor, not a compute plateau. So int8 still serves 7.2B at a genuine **1.86× the concurrency
+and a 13.1% higher peak than fp16 can reach on this card** (revised down from the previously
+published 2.90×/26.8% — the fp16 side of that ratio was understated by an undertested grid,
+the w8a8 side is unchanged) — fp16 is pinned nearer the memory limit, just less tightly than
+previously thought. Honest mechanism: at matched concurrency ≤221 fp16 is faster per step (no
+activation-quant tax); w8a8 wins by reaching concurrency fp16 cannot safely sustain. Raw:
+`bench/results/72b/`.
 
 **An honest int4 warning (measured 2026-07-05, updated 2026-07-07 with asymmetric + avg@64,
 F0043):** perplexity-style metrics understate int4's damage to multi-step reasoning. On the 1.5B

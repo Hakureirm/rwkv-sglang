@@ -1,6 +1,13 @@
 # F0035 — 7.2B on a single 32 GB 5090: int8 unlocks 2.90× concurrency and a 26.8% higher peak fp16 cannot reach
 
-**Date:** 2026-07-06 · **Status:** MEASURED (both configs booted + swept on the RTX 5090) · **Prior:** F0034 (w8a8 V2 + the 1.5B strategic pivot)
+**Date:** 2026-07-06 · **Status:** SUPERSEDED on the fp16 side — see
+[F0047](0047-fp16-72b-concurrency-correction.md) (2026-07-07): the fp16 sweep below stopped at
+concurrency 221 and never tested further, on an untested assumption that 221 was a hard OOM
+ceiling. It wasn't — fp16's real ceiling is ≥344 concurrent and its true peak is 6,709 tok/s
+@ c320 (not 5,983 @ c192). The corrected ratio is **1.86× concurrency / 13.1% higher peak**,
+not 2.90×/26.8%. The w8a8 numbers in this document are unaffected and remain current. Kept
+below verbatim as the process record of the original (incomplete) measurement. ·
+**Prior:** F0034 (w8a8 V2 + the 1.5B strategic pivot)
 
 ## The claim, and why 1.5B was the wrong place to make it
 

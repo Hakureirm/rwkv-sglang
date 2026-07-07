@@ -29,7 +29,7 @@ of extra VRAM. High concurrency and long context are where this architecture win
 | **Correctness** | Greedy output is token-exact vs a numpy fp32 reference — 24/24 tokens on 0.1B / 1.5B / 7.2B (CUDA) and on Apple Silicon (MLX); also exact under dynamic batching, chunked prefill, CUDA graphs, and tensor/pipeline parallel (TP 2/4/8, PP 2/4/8; TP=2 & PP=2 re-verified on main under cuda-graph ON, greedy 24/24 == 1-GPU — [F0036](docs/findings/0036-pp-cudagraph-vfirst-fix.md)) |
 | **Accuracy rulers** | MATH500 avg@64 (the low-variance ruler): **0.4042** on main, matching v0.5.10's 0.4060 within noise — no regression. Compression rate: fp16 0.6085, int8 w8g64 0.6086 (lossless), w8a8 0.6161, int4-GPTQ 0.6514. Quantization on the reasoning ruler (avg@64): w8a8 −2.3pt, int4 −24pt — [§4](docs/BENCHMARKS.md#4-quantization-what-you-trade-and-what-you-get) |
 | **Serving features** | Dynamic batching, chunked prefill, recurrent-state prefix cache (~98% hit rate under high-reuse load) |
-| **Quantization** | Two int8 tiers + int4 (GPTQ), all hand-written CUDA. **w8g64** (weight-only): greedy-lossless (24/24 oracle-exact). **w8a8** (tensor-core): compression == cutlass (0.6161), a measured −2.3pt on MATH500 avg@64, for large-batch/VRAM wins. On sm120/Blackwell — where upstream has no int8 GEMM at all — our s8-wmma kernel serves w8a8 and beats fp16 cuBLAS on the GEMM (1.03–1.55× at batch ≥512). On **7.2B / one 32 GB 5090, int8 serves 2.90× the concurrency and 26.8% higher peak than fp16 can reach** (fp16 OOMs above 221 concurrent) — details in [BENCHMARKS §4](docs/BENCHMARKS.md#4-quantization-what-you-trade-and-what-you-get) / [F0035](docs/findings/0035-7b-int8-concurrency-headroom.md) |
+| **Quantization** | Two int8 tiers + int4 (GPTQ), all hand-written CUDA. **w8g64** (weight-only): greedy-lossless (24/24 oracle-exact). **w8a8** (tensor-core): compression == cutlass (0.6161), a measured −2.3pt on MATH500 avg@64, for large-batch/VRAM wins. On sm120/Blackwell — where upstream has no int8 GEMM at all — our s8-wmma kernel serves w8a8 and beats fp16 cuBLAS on the GEMM (1.03–1.55× at batch ≥512). On **7.2B / one 32 GB 5090, int8 serves 1.86× the concurrency and 13.1% higher peak than fp16 can reach** (fp16's real ceiling is ≥344 concurrent, corrected 2026-07-07 from an undertested 221) — details in [BENCHMARKS §4](docs/BENCHMARKS.md#4-quantization-what-you-trade-and-what-you-get) / [F0047](docs/findings/0047-fp16-72b-concurrency-correction.md) |
 | **Speculative decoding** | Phase 1 working: a draft model proposes, the target verifies in one pass, rejected tokens roll back via an O(1) state snapshot. 9/10 test prompts token-identical to normal decoding; the single difference is a benign floating-point rounding-order effect, fully analyzed in [F0031](docs/findings/0031-spec-decode-increment-i.md) |
 | **Apple Silicon** | Native MLX implementation with a custom Metal kernel, gated by the same numpy reference — see [`mlx_port/`](mlx_port/) |
 | **Upstream work** | Model PR [#30115](https://github.com/sgl-project/sglang/pull/30115), verified on RTX 3090 and RTX 5090; also found and fixed a silent pipeline-parallel data-corruption bug: issue [#30015](https://github.com/sgl-project/sglang/issues/30015) → fix PR [#30095](https://github.com/sgl-project/sglang/pull/30095) |
@@ -45,9 +45,11 @@ of extra VRAM. High concurrency and long context are where this architecture win
 | RTX 5090 | **409.8 tok/s** fp16 · **548.8** int4 | **22,175 tok/s** |
 
 **7.2B, one RTX 5090 (32 GB):** single request 123.7 tok/s (fp16). Peak serving:
-5,983 tok/s (fp16, but capped at 221 concurrent — it OOMs above) vs **7,587 tok/s
+**6,709 tok/s (fp16 @ c320, safe to ≥344 concurrent)** vs **7,587 tok/s
 (int8, 640 concurrent)**. At bsz 1 fp16 is faster; int8's win is the VRAM headroom that
-lets 7.2B scale to 2.90× the concurrency — the full story is in [BENCHMARKS §4](docs/BENCHMARKS.md#4-quantization-what-you-trade-and-what-you-get).
+lets 7.2B scale to 1.86× the concurrency — the full story (and the correction to a
+previously-published 5,983/221 figure that undertested the concurrency grid) is in
+[BENCHMARKS §4](docs/BENCHMARKS.md#4-quantization-what-you-trade-and-what-you-get).
 
 - The same stack runs on T4, L4, A10G, A100 (40/80GB), L40S, H100, H200, B200 —
   per-card results in [`fleet_main_10cards.json`](bench/results/fleet_main_10cards.json).
