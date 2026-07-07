@@ -1,0 +1,246 @@
+---
+doc_kind: finding
+finding_id: F0045
+title: "Qwen3.5-2B vs RWKV-7 1.5B, matched MLX benchmark (same M5, same bench_mlx.py protocol, multi-run): RWKV-7 wins bsz1 decode (+19-36% bf16, a near-tie at int4), Qwen3.5 wins prefill (+41-66% both tiers) — a genuine split, not a sweep either way"
+last_verified_commit: "HEAD"
+discovered_by: Sonnet 5 (agent-assisted), 2026-07-07
+severity: info
+status: open
+related: [F0037, F0038, F0039, F0044]
+---
+
+# Finding F0045: Qwen3.5-2B MLX matched benchmark vs RWKV-7 1.5B
+
+## Context / question being asked
+
+F0044 established that Qwen3.5-2B runs on MLX via `mlx-lm` 0.31.3 out of the box (real Metal
+kernels, not a slow fallback) but explicitly flagged its numbers as **single-run smoke-test**
+throughput, not a `bench_mlx.py`-style gated multi-run result, and listed "a `bench_mlx.py`-equivalent
+multi-run median bsz1/prefill sweep for Qwen3.5 on MLX" as the first of three follow-ups before
+anything could be cited as a benchmark number. This finding does that follow-up: a real multi-run
+benchmark for Qwen3.5-2B using the *exact same protocol* `mlx_port/bench_mlx.py` uses for RWKV-7, and
+the resulting matched, same-machine, same-size-tier comparison table.
+
+## Method
+
+New script: [`mlx_port/bench_mlx_qwen35.py`](../../mlx_port/bench_mlx_qwen35.py). It reimplements
+`bench_mlx.py`'s `bench_decode`/`bench_prefill` line-for-line against Qwen3.5 via `mlx_lm`'s Python
+API (not the `mlx_lm.generate` CLI F0044 used for its smoke test):
+
+- **decode**: prefill a short seed prompt ("The capital of France is" — the same prompt F0044's smoke
+  test used), run **16 untimed warmup** greedy steps, then time **128 further greedy steps**. Every
+  step is async-pipelined (`mx.async_eval` on the argmax token, fed straight back as next input, no
+  per-step host sync mid-loop — the same pattern `rwkv7_mlx.py`'s `greedy_loop` uses, which its own
+  docstring calls "the standard mlx-lm generation pattern"). **Median of 5 runs**, reporting median +
+  best, exactly like `bench_mlx.py`.
+- **prefill**: the seed-prompt tokens tiled to exactly **1024 tokens** (same tiling trick
+  `bench_mlx.py` uses), fresh KV/recurrent-state cache, timed end-to-end including forcing logits +
+  full cache state to materialize. **Median of 3 runs** after 1 discarded warmup run.
+- Peak memory reset before each config, released (`del` + `gc.collect()` + `mx.clear_cache()`) before
+  the next config loads — the same discipline `bench_mlx.py` documents to avoid one config's retained
+  weights polluting the next config's peak-memory reading.
+- **No oracle gate** (none exists for Qwen3.5 in this repo — out of scope, per F0044). A coherence
+  sample (24-token greedy continuation, eyeballed for on-topic/non-garbled prose) substitutes, the
+  same bar F0044's own probe used.
+
+Checkpoints: the same two local checkpoints F0044 already verified byte-for-byte —
+`/private/tmp/qwen35_mlx_test/Qwen3.5-2B` (bf16, native, zero conversion) and
+`/private/tmp/qwen35_mlx_test/Qwen3.5-2B-mlx-4bit` (int4 group-64 affine, via `mlx_lm.convert -q
+--q-bits 4 --q-group-size 64`, confirmed via `config.json`'s `quantization: {group_size: 64, bits: 4,
+mode: affine}`). No re-download, no re-conversion — both were already present and intact. Same
+machine/software stack as F0044 and `mlx_port/`: Apple M5, 32 GiB unified, macOS 27.0, MLX core
+0.31.2, `mlx-lm` 0.31.3, Python 3.13.13.
+
+**Disclosed, not hidden, methodology difference**: this benchmarks Qwen3.5 through `mlx_lm` — the
+opponent's own native, actively-maintained implementation (real hand-written Metal delta-rule kernel
+for its Gated-DeltaNet layers, confirmed in F0044) — not a from-scratch port. `mlx_port/`'s "zero
+fla/torch/transformers" policy governs what this project ships as its **own** RWKV-7 implementation;
+it was never a requirement to also hand-port the competitor's architecture just to benchmark it
+(F0044's Decision section; mirrors how the GPU/cloud tier benchmarks Qwen3.5 through sglang's own
+native support, not a hand-rolled mirror port).
+
+## Result 1 — Qwen3.5-2B MLX, multi-run (new this pass)
+
+| precision | decode tok/s (median / best) | prefill tok/s (1024 tok, median of 3) | peak mem |
+|---|---:|---:|---:|
+| bf16 (native checkpoint) | 27.5 / 27.7 | 2,800.5 | 4.65 GiB |
+| int4 (mlx_lm.convert, g64 affine) | 89.3 / 89.9 | 2,691.3 | 2.28 GiB |
+
+Coherence samples (greedy, 24 tokens after the seed prompt — no oracle exists for Qwen3.5, so this is
+an eyeball check, not a pass/fail gate, same bar as F0044):
+
+- **bf16**: `" Paris.\nA. True\nB. False\n\n<think>\nThinking Process:\n\n1.  **Analyze the"` — correct
+  answer, coherent reasoning-model preamble (Qwen3.5 emits a `<think>` block by default).
+- **int4**: `" Paris.\n\nThe capital of France is Paris.\n\nThe capital of France is Paris.\n\nThe
+  capital of France is"` — correct answer, but **degenerates into repetition** rather than reasoning.
+  Disclosed honestly: this is a real, visible quality signal from int4 quantization, not swept under
+  the rug. It is a coherence observation, not a quantitative accuracy claim — no compression-rate or
+  logprob ruler was run for Qwen3.5 (out of scope this pass; see Honest limits below).
+
+Raw JSON: [`mlx_port/results/bench_qwen35_2b_bf16.json`](../../mlx_port/results/bench_qwen35_2b_bf16.json),
+[`mlx_port/results/bench_qwen35_2b_int4.json`](../../mlx_port/results/bench_qwen35_2b_int4.json).
+
+int4 vs bf16 for Qwen3.5 itself: decode **+224.7%** (27.5→89.3), prefill **−3.9%** (2,800.5→2,691.3,
+a real if small regression — plausibly a dequant tax similar in kind, if not degree, to what
+`bench_mlx.py`'s own quant notes record for RWKV at small sizes).
+
+## Result 2 — RWKV-7 1.5B MLX: canonical citation *and* a fresh same-session cross-check
+
+The canonical, previously-published numbers (`docs/BENCHMARKS.md` §12.3, gate-verified 24/24 at the
+time, superseding `mlx_port/README.md`'s own slightly older same-config table — see footnote¹):
+
+| precision | decode tok/s (median / best) | prefill tok/s (1024 tok) | peak mem |
+|---|---:|---:|---:|
+| fp16-labeled² (bf16 weights) | 37.3 / 39.1 | 1,905 | 3.38 GiB |
+| w4 (int4 group-64) | 94.0 / 95.8 | 1,975 | 1.65 GiB |
+
+`docs/BENCHMARKS.md` itself warns: *"this is a shared box (load ~8), so single-stream decode has
+±3–5% run-to-run jitter."* Rather than take that on faith, this pass re-ran `bench_mlx.py` fresh,
+twice, back-to-back, today, on the same machine, minutes apart from the Qwen3.5 runs above (gate
+re-verified 24/24 both times before any number was accepted):
+
+| run | fp16-labeled decode (med/best) | fp16 prefill | w4 decode (med/best) | w4 prefill |
+|---|---:|---:|---:|---:|
+| fresh A | 32.8 / 33.6 | 1,691.6 | 89.5 / 91.8 | 1,913.2 |
+| fresh B | 34.4 / 34.5 | 1,776.6 | 90.9 / 92.9 | 1,935.2 |
+
+Peak memory was identical across both fresh runs and the canonical citation (3.38 / 1.65 GiB) —
+memory doesn't jitter with load the way timing does. The two fresh runs agree with **each other**
+within the documented ±3–5% band (decode 4.9%, prefill 5.0%, w4 decode 1.6%, w4 prefill 1.2%). But
+**both fresh runs sit 8–12% below the canonical published fp16-labeled decode/prefill figures**
+(32.8–34.4 vs 37.3; 1,691.6–1,776.6 vs 1,905) — a gap bigger than the documented same-session jitter
+band, most likely day-to-day system-load variance rather than a measurement error on either side (the
+w4 numbers, by contrast, land much closer to canonical: 89.5–90.9 vs 94.0). **This is disclosed, not
+smoothed over**, because it directly affects how tight the closest race below (int4 decode) actually
+is — see Result 3.
+
+¹ `mlx_port/README.md`'s own measured table (commit `e78ae0e`, 2026-07-06 20:06) shows 36.4 tok/s
+decode / 1947.5 prefill / **6.68 GiB** peak for the identical 1.5B-metal-fp16 config — the peak-memory
+figure is a stale pre-fix artifact (superseded by `docs/BENCHMARKS.md` at commit `1aa5ab7`,
+2026-07-06 22:12, which is later and whose fp16→w8→w4 peak-memory progression, 3.38→2.28→1.65 GiB, is
+internally monotonic and consistent with the memory-release fix `bench_mlx.py` documents in its own
+code comments). `docs/BENCHMARKS.md` §12.3 is treated as canonical here for that reason.
+
+² `docs/BENCHMARKS.md` §12.1's own header reads "fp16 default", but `mlx_port/README.md`'s precision
+policy and `bench_mlx.py --dtype`'s actual default are both **bfloat16** ("bf16 weights for the big
+projections... fp32 for everything else... macOS 27.0... bf16 weights + fp32 state"). "fp16" here is
+a **label carried over from this project's CUDA-side naming convention for its non-quantized
+baseline**, not a claim of literal float16 weights. Qwen3.5's checkpoint is *also* natively bf16
+(confirmed in F0044: `mlx_lm.convert`'s own log prints `Using dtype: bfloat16`, and no dtype
+conversion is applied for the direct-load bf16 path benchmarked here). **Net effect: there is no
+actual precision mismatch between the two "bf16" rows below — both run bfloat16 weights** — but the
+RWKV-7 MLX docs' "fp16" label should not be read as literal float16 when comparing the two projects'
+numbers side by side. This comparison uses "bf16" throughout to avoid perpetuating the ambiguity.
+
+## Result 3 — head-to-head, matched precision tiers
+
+**Primary comparison** (fresh run A for both sides — measured today, same machine, same working
+session, minutes apart, eliminating the cross-session load confound noted above):
+
+| tier | metric | RWKV-7 1.5B | Qwen3.5-2B | winner |
+|---|---|---:|---:|---|
+| bf16 | decode tok/s (median) | **32.8** | 27.5 | RWKV-7 **+19.3%** |
+| bf16 | decode tok/s (best) | **33.6** | 27.7 | RWKV-7 **+21.3%** |
+| bf16 | prefill tok/s (1024 tok) | 1,691.6 | **2,800.5** | Qwen3.5 **+65.6%** |
+| bf16 | peak mem | **3.38 GiB** | 4.65 GiB | RWKV-7 **−27.3%** |
+| int4 | decode tok/s (median) | 89.5 | 89.3 | **statistical tie** (+0.2%) |
+| int4 | decode tok/s (best) | **91.8** | 89.9 | RWKV-7 **+2.1%** (near-tie) |
+| int4 | prefill tok/s (1024 tok) | 1,913.2 | **2,691.3** | Qwen3.5 **+40.7%** |
+| int4 | peak mem | **1.65 GiB** | 2.28 GiB | RWKV-7 **−27.6%** |
+
+**Alternate framing** (canonical `docs/BENCHMARKS.md` RWKV figures vs the same fresh Qwen3.5 numbers
+— wider RWKV margins at bf16/int4 decode, everything else directionally identical):
+
+| tier | metric | RWKV-7 1.5B (canonical) | Qwen3.5-2B (fresh) | winner |
+|---|---|---:|---:|---|
+| bf16 | decode tok/s (median) | **37.3** | 27.5 | RWKV-7 **+35.6%** |
+| int4 | decode tok/s (median) | **94.0** | 89.3 | RWKV-7 **+5.3%** |
+
+**Reading it, plainly, in both directions:**
+
+- **RWKV-7 wins bsz1 decode at every framing**, by a comfortable margin at bf16 (+19–36% depending on
+  which RWKV run is cited) and by a much smaller margin at int4 — **close enough (0.2–5.3%) that
+  which RWKV run you cite decides whether it's "RWKV wins narrowly" or "statistical tie."** This
+  report picks the same-session fresh numbers as primary specifically because they remove the
+  cross-session confound, and under that framing int4 decode is a tie, full stop — that is stated
+  plainly, not softened toward either side.
+- **Qwen3.5 wins prefill at both tiers, by a wide and robust margin** (+41–66%, and this doesn't
+  depend on which RWKV citation is used since the fresh/canonical RWKV prefill numbers are close to
+  each other, 1,691–1,905 fp16 / 1,913–1,975 int4). Qwen3.5's interleaved full-attention layers (6 of
+  24) do dense batched matmul over the whole 1024-token window — exactly the shape GPU matmul units
+  are best at — while RWKV-7's WKV recurrence, even chunked (256-token chunks), carries a genuinely
+  sequential per-token state update that chunking amortizes but cannot fully parallelize away (the
+  same structural point `docs/BENCHMARKS.md` §12.2/§12.6 already make about RWKV-7's decode being
+  bandwidth/launch-bound rather than compute-bound — here it shows up as a prefill cost instead).
+- **RWKV-7 uses ~27% less peak memory at both tiers** — expected and disclosed as such, not framed as
+  an architecture-efficiency win: it is substantially explained by RWKV-7 "1.5B" being a nominally
+  smaller model than Qwen3.5 "2B" (both are each vendor's own nominal size label; this project did not
+  independently recompute exact active/text-only parameter counts for either checkpoint this pass —
+  see Honest limits). The bf16 and int4 memory ratios are nearly identical (4.65/3.38 = 1.376×,
+  2.28/1.65 = 1.382×), consistent with a roughly proportional, parameter-count-driven effect rather
+  than a quant-scheme-specific one.
+- **Both sides benefit hugely from int4**, but Qwen3.5 relatively more so on decode. Using each
+  side's own canonical/primary bf16→int4 pair: RWKV-7 +152.0% (37.3→94.0, matching
+  `docs/BENCHMARKS.md`'s own stated "+152%" for 1.5B exactly) vs Qwen3.5 +224.7% (27.5→89.3). This is
+  an observation, not a causally-explained result — no profiling was done this pass to attribute it to
+  bit-width efficiency (4.503 measured bits/weight for Qwen3.5), checkpoint byte count, or
+  architecture mix; flagged for a future pass rather than asserted.
+
+**This is a genuine split decision — not a sweep for either side, and this report does not round it
+into one.** Decode and memory favor RWKV-7; prefill favors Qwen3.5 clearly; int4 decode is close to a
+coin flip depending on which RWKV-7 run is cited.
+
+## Repeatability check (why the primary table uses fresh run A, not an average)
+
+Both sides were benchmarked **twice**, independently, this pass:
+
+| | RWKV-7 fp16 decode | RWKV-7 w4 decode | Qwen3.5 bf16 decode | Qwen3.5 int4 decode |
+|---|---:|---:|---:|---:|
+| run 1 (primary) | 32.8 | 89.5 | 27.5 | 89.3 |
+| run 2 (repeat) | 34.4 | 90.9 | 27.4 | 86.1 |
+| spread | 4.9% | 1.6% | 0.4% | 3.6% |
+
+All four fall inside or right at the documented ±3–5% shared-box jitter band. Run 1 (the first,
+un-cherry-picked run for both models) is used as the primary table above rather than an average of
+the two, since averaging two 5-run medians invents a statistic this project's methodology doesn't
+otherwise use elsewhere; the repeat runs exist to show the primary numbers are not outliers, and to
+make explicit exactly how close the int4-decode race is to measurement noise.
+
+## Honest limits of this comparison
+
+- **No numerical correctness oracle exists for Qwen3.5 in this repo.** The coherence samples above
+  are the same "on-topic, non-garbled" bar F0044 used, not RWKV-7's 24/24 exact-match oracle bar. The
+  int4 sample's repetition is disclosed as a real, visible signal precisely because there is no
+  stronger ruler (compression rate, MATH500) run for Qwen3.5 here to quantify it properly — that
+  remains a follow-up (F0044's item 2, still open).
+- **bsz1, single-stream only** — this mirrors `mlx_port/README.md`'s own explicit scope ("Single-
+  stream inference port, deliberately... NOT the sglang serving stack"). This says nothing about
+  concurrent/batched throughput, which is where this project's broader competitive story is centered
+  on the CUDA/sglang tier (`docs/BENCHMARKS.md` §5–§8); the MLX tier as a whole has no serving stack to
+  batch on, for either model.
+- **"1.5B" and "2B" are each vendor's own nominal size label**, not independently-verified matched
+  active-parameter counts. Qwen3.5's on-disk bf16 checkpoint still carries stripped-at-load vision-
+  tower and MTP weights (F0044), so computing an exact active/text-only parameter count from file size
+  would overstate it; this wasn't attempted. The size-pairing (1.5B↔2B) follows this project's existing
+  convention for this comparison tier, not a claim of parameter-for-parameter parity.
+- **Only the 2B tier is covered.** F0044's third follow-up (whether Qwen3.5's 9B checkpoint is dense
+  or MoE on this stack, to scope a 7.2B↔9B second tier) remains open and untouched by this pass.
+  int4 group-size and quantization recipe were matched exactly (g64 affine, both via native `mx.
+  quantize`), one of the cleaner apples-to-apples aspects of this comparison — but this pass did not
+  re-verify Qwen3.5's true bits/weight against RWKV's (RWKV's own bits/weight for w4g64 isn't broken
+  out separately in `docs/BENCHMARKS.md`; Qwen3.5's was measured at 4.503 in F0044).
+- **No compression-rate or MATH500 ruler was run for Qwen3.5** — this project's own decreed accuracy
+  rulers (compression rate + position curve, MATH500 avg@64) were not exercised here; this is a speed
+  and coherence comparison only. Treat the int4 "degenerates into repetition" observation as a
+  qualitative flag, not a quantified accuracy delta.
+
+## Cross-references
+
+`mlx_port/bench_mlx_qwen35.py` (this pass's new script) · `mlx_port/bench_mlx.py` (the RWKV-7
+protocol this mirrors) · [F0044](0044-qwen35-mlx-feasibility.md) (the feasibility probe this extends —
+its follow-up item 1 is now done; items 2–3 remain open) · [F0037](0037-mlx-fused-metal-default.md) /
+[F0038](0038-mlx-m5-kernel-profiling.md) (RWKV-7 MLX baseline numbers and the bandwidth-bound-decode
+framing used to read the prefill-vs-decode split above) · [F0039](0039-mlx-weight-quantization.md)
+(RWKV-7's own w8g64/w4g64 quant methodology, the scheme this pass's int4-vs-int4 comparison is matched
+against) · `docs/BENCHMARKS.md` §12.3 (canonical RWKV-7 1.5B citation) · `mlx_port/results/
+bench_qwen35_2b_bf16.json`, `bench_qwen35_2b_int4.json` (raw output of this pass).

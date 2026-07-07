@@ -568,6 +568,45 @@ programs, explicit state tensors, oracle gate, tok/s) was **not built** — it w
 structural verdict, only spend time to arrive at a CPU-bound recurrence wearing an ANE label. MLX-GPU
 (§12.1–§12.5) remains the complete, load-bearing Apple-Silicon story.
 
+### 12.7 Matched comparison — Qwen3.5-2B on MLX, same protocol, same machine (F0045)
+
+The Apple-Silicon tier is not RWKV-only ([F0044](findings/0044-qwen35-mlx-feasibility.md)): Qwen3.5-2B
+runs on MLX via `mlx-lm` 0.31.3's own native implementation (a real hand-written Metal kernel for its
+Gated-DeltaNet layers, not a slow fallback). This section benchmarks it with the **exact same
+protocol** as §12.1/§12.3 above — `mlx_port/bench_mlx_qwen35.py` mirrors `bench_mlx.py`'s
+`bench_decode`/`bench_prefill` line-for-line (16-step warmup, 128-step timed decode median of 5,
+1024-token prefill median of 3) — same machine (Apple M5, MLX 0.31.2, `mlx-lm` 0.31.3).
+
+Both "bf16" rows really are bfloat16 on both sides — RWKV-7's own "fp16" table header in §12.1 is a
+naming-convention label carried over from this project's CUDA-baseline terminology, not literal
+float16 (see F0045 for the full note). int4 uses the same MLX-native group-64 affine weight-only
+scheme on both sides (RWKV-7: `RWKV_MLX_QUANT=w4`; Qwen3.5: `mlx_lm.convert -q --q-bits 4
+--q-group-size 64`).
+
+| model | precision | decode tok/s (median / best) | prefill tok/s (1024 tok) | peak mem |
+|---|---|---:|---:|---:|
+| RWKV-7 1.5B | bf16 | 32.8 / 33.6 | 1,691.6 | 3.38 GiB |
+| Qwen3.5-2B | bf16 | 27.5 / 27.7 | **2,800.5** | 4.65 GiB |
+| RWKV-7 1.5B | int4 (w4g64) | 89.5 / 91.8 | 1,913.2 | **1.65 GiB** |
+| Qwen3.5-2B | int4 (g64) | 89.3 / 89.9 | **2,691.3** | 2.28 GiB |
+
+Fresh same-session measurement — both models benchmarked back-to-back, same run, same load
+conditions. F0045 also reports a repeatability check (both sides re-run independently, spreads of
+0.4–4.9%, within this doc's documented ±3–5% jitter band) and the canonical §12.3 citation (37.3 tok/s
+RWKV-7 bf16 decode, measured in an earlier session) for cross-reference.
+
+**Split decision, stated plainly**: RWKV-7 wins bsz1 decode at bf16 (**+19.3%** median, 32.8 vs 27.5)
+and is a statistical tie at int4 (**+0.2%**, 89.5 vs 89.3 — within run-to-run noise; citing the
+canonical §12.3 figure instead widens this to +5.3%, so treat int4 decode as "too close to call," not
+a clean RWKV win). Qwen3.5 wins prefill at both tiers by a wide, noise-robust margin (**+65.6%** bf16,
+**+40.7%** int4) — its interleaved full-attention layers (6 of 24) get dense batched-matmul
+parallelism over the whole prompt window that RWKV-7's sequential WKV recurrence, even chunked,
+cannot fully match. RWKV-7 uses ~27% less peak memory at both tiers, substantially a function of it
+being a nominally smaller model (1.5B vs 2B) rather than an architecture-efficiency win. Full
+methodology, the repeatability check, and honest limits (no correctness oracle for Qwen3.5, no
+compression-rate ruler run here) are in
+[F0045](findings/0045-qwen35-mlx-matched-benchmark.md).
+
 ---
 
 *In-progress (this page is updated as they land): MATH500 avg@64 and full compression on

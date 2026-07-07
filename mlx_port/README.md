@@ -30,7 +30,15 @@ safetensors checkpoint.
 - `sharegpt_mlx.py` — **real-workload** single-stream (bsz1) bench over real
   ShareGPT prompts: TTFT + inter-token-latency distribution and prefill/decode
   throughput over the true prompt-length mix (F0041).
-- `results/` — committed compression + ShareGPT result JSONs (reproducibility).
+- `bench_mlx_qwen35.py` — **not part of the RWKV-7 port**: benchmarks Qwen3.5-2B
+  via `mlx_lm` (the opponent's own native MLX implementation) with the exact
+  same protocol as `bench_mlx.py`, for a same-machine matched comparison
+  (F0045). This is the one file in this directory that intentionally uses
+  `mlx_lm`/`transformers` — the "zero fla/torch/transformers" policy above
+  governs what this project ships as its own RWKV-7 implementation, not the
+  yardstick used to benchmark a competitor's model.
+- `results/` — committed compression + ShareGPT + Qwen3.5 comparison result
+  JSONs (reproducibility).
 
 ## Correctness gate (oracle-exact)
 

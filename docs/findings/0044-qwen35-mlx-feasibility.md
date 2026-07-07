@@ -223,11 +223,17 @@ implementation, not the yardstick used to run the competitor.
 
 **Before this becomes a cited benchmark number**, three follow-ups (out of scope for this
 feasibility pass):
-1. A `bench_mlx.py`-equivalent multi-run median bsz1/prefill sweep for Qwen3.5 on MLX.
+1. ~~A `bench_mlx.py`-equivalent multi-run median bsz1/prefill sweep for Qwen3.5 on MLX.~~ **Done —
+   see [F0045](0045-qwen35-mlx-matched-benchmark.md)**: multi-run bf16/int4 decode+prefill vs RWKV-7
+   1.5B, same machine, same protocol. Split result (RWKV-7 wins decode, Qwen3.5 wins prefill, int4
+   decode is a near-tie) — not a sweep for either side.
 2. A real correctness check beyond "coherent, not garbled" — does not need to clear RWKV-7's
    24/24 oracle-exact bar, but "reads fine" alone is not enough to sit next to an oracle-gated number.
+   **Still open** — F0045's int4 coherence sample degenerated into repetition, which is exactly the
+   kind of thing this stronger check would quantify properly.
 3. Confirm whether the 9B checkpoint is dense or MoE on this stack before scoping the second
    matched-size comparison tier (1.5B↔2B is fully unblocked already; 7.2B↔9B is not yet checked here).
+   **Still open.**
 
 ## Cross-references
 
