@@ -138,8 +138,20 @@ _FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "4"))
 # un-fused launch-count cluster per decode layer. Byte-exact vs torch gated by
 # bench/test_lora_gates.py (incl. the sigmoid transcendental) before default. OFF.
 _FUSED_GATES = os.environ.get("RWKV_FUSED_GATES", "0") == "1"
+# W1 cont. (reverse-overtake, F0052): EPILOGUE-fuse the FFN channel-mix activation
+# relu(k)^2 INTO the ffn.key GEMV's store (one kernel), instead of running relu + pow
+# as 2 standalone elementwise launches after the GEMV (F0051 profile: those 2 tiny
+# launches + the k[1,inter] HBM round-trip are pure per-kernel GPU-side overhead on a
+# fast card). This is the "fuse INTO the GEMV" lever from F0051 §5.1. Fires ONLY on the
+# eligible unquantized fp16 M==1 decode key projection (the single pure-elementwise op
+# that directly follows a GEMV output); the other 5 GEMV call sites (r/k/v/o + ffn.value)
+# have no such epilogue and are untouched — so this is a NEW op (gemv_m1_sqrelu), never a
+# change to the shared gemv_m1. Byte-exact vs torch.relu(gemv_m1(.))**2 gated by
+# bench/test_sqrelu_gate.py; greedy-EXACT end-to-end by verify_batch.py. Default OFF.
+_FUSED_SQRELU = os.environ.get("RWKV_FUSED_SQRELU", "0") == "1"
 _GLUE_ANNOUNCED = False  # one-time "R2 fused glue ENABLED" stderr notice (attn)
 _GATES_ANNOUNCED = False  # one-time "W1 fused LoRA gates ENABLED" notice
+_SQRELU_ANNOUNCED = False  # one-time "W1 fused ffn sqrelu ENABLED" notice
 _GLUE1_ANNOUNCED = False  # one-time notice (ffn shift_lerp1)
 
 # M6 measurement gate: log the per-token zero-fraction of the ffn sqrelu activation
@@ -407,6 +419,34 @@ def _proj_gemv(layer, x: torch.Tensor, fast: bool) -> torch.Tensor:
         ):
             return fast_linear.gemv_m1(x, w)
     return layer(x)[0]
+
+
+def _proj_gemv_sqrelu(layer, x: torch.Tensor, fast: bool) -> torch.Tensor:
+    """FFN channel-mix key projection FOLLOWED BY relu(.)**2, with the activation fused
+    into the GEMV epilogue on the eligible unquantized fp16 M==1 decode path. Drop-in
+    for ``torch.relu(_proj_gemv(layer, x, fast)) ** 2``: identical eligibility (mirrors
+    _proj_gemv exactly), and bit-identical output (bench/test_sqrelu_gate.py — the fused
+    kernel reproduces torch's two-step fp16 rounding). Any path the fused kernel can't
+    take falls back to the plain projection + torch sqrelu, so bsz>1 / quantized /
+    odd-shaped checkpoints behave exactly as before."""
+    if _CALIB and getattr(layer, "_qname", None):
+        _calib_accumulate(layer._qname, x)
+    if isinstance(layer, (W4Linear, W8Linear)):
+        return torch.relu(layer(x)) ** 2
+    if (
+        fast
+        and x.shape[0] == 1
+        and x.dtype == torch.float16
+        and (x.shape[-1] % 4) == 0
+    ):
+        w = layer.weight
+        if (
+            w.dtype == torch.float16
+            and w.is_contiguous()
+            and (w.shape[0] % 2) == 0
+        ):
+            return fast_linear.gemv_m1_sqrelu(x, w)
+    return torch.relu(layer(x)[0]) ** 2
 
 
 class Rwkv7LoRA(nn.Module):
@@ -856,6 +896,19 @@ class Rwkv7FeedForward(nn.Module):
                 _GLUE1_ANNOUNCED = True
                 print("[rwkv7] R2 fused paged shift+lerp1 (ffn) glue ENABLED (decode, fp16)",
                       file=sys.stderr, flush=True)
+        # W1 (F0052): fuse relu(key(xk))**2 into the key GEMV's epilogue (one kernel,
+        # no k[1,inter] HBM round-trip). Only on the dense path — the sparse kernel and
+        # the sparsity logger both need the RAW k (sparse applies relu^2 itself), and
+        # they are mutually exclusive with this fusion by construction.
+        if _FUSED_SQRELU and not self._sparse and not _LOG_SPARSITY:
+            global _SQRELU_ANNOUNCED
+            if self.layer_id == 0 and not _SQRELU_ANNOUNCED and self._fast:
+                import sys
+                _SQRELU_ANNOUNCED = True
+                print("[rwkv7] W1 fused ffn sqrelu epilogue ENABLED (fp16 bsz1 decode)",
+                      file=sys.stderr, flush=True)
+            act = _proj_gemv_sqrelu(self.key, xk, self._fast)
+            return _proj_gemv(self.value, act, self._fast)
         k = _proj_gemv(self.key, xk, self._fast)
         # M6 sparse value-projection on the eligible bsz1-decode path (kernel applies
         # relu()^2 to k internally, then a sparse fp32-accum SpMV skipping zero rows).

@@ -334,6 +334,17 @@ sm_89 与 sm_90 双架构位精确(`max_abs_diff = 0.0`),开关 `RWKV_FUSED_GATE
 [F0051](findings/0051-lora-gate-fusion-highbw.md) 及该序列后续 finding 了解最新状态;
 这明确是长期迭代项(task #5),不指望完全补平。
 
+**更新(2026-07-07,F0052)。** 落地并实测了上面提到的第一个"把 elementwise 融进 GEMV
+epilogue"候选项:把 FFN 的 `relu(key(xk))**2` 激活(2 次 elementwise launch)直接折进
+`ffn.key` 这次 GEMV 自己的写回里,而不是在它之后单独跑 2 个核。sm_89 与 sm_90 上位精确
+(`torch.equal`),并验证了量化档(w4、w8a8)在开关两侧位一致、完全不受影响。实测效果
+(隔离方法同上):**H100 bsz1 393.2→404.3(+2.82%,独立复测 +2.72%;对 Albatross 比值约
+0.65×→0.66×);L4 bsz1 83.1→83.3(+0.24%,噪声量级)**——高带宽卡上是真实收益,低带宽卡
+上基本无感,与 F0051 同一条带宽相关性规律再次成立,但收益比 LoRA-gate 融合小得多(与它
+折叠的 launch 簇更小成正比,2 次 vs ~7-8 次)。核级别的账目显示融合后的 epilogue 本身几乎
+不额外占用 GPU 时间,因此**把上面的上限估计从约 0.69× 上修到约 0.71×**。开关
+`RWKV_FUSED_SQRELU` 默认关、纯新增。见 [F0052](findings/0052-sqrelu-epilogue-fusion-highbw.md)。
+
 ## 7b. 与 vllm-rwkv(社区 vLLM fork)对比
 
 2026-07-06 在严格同等条件下实测,**RWKV-7 1.5B**:同两张卡(RTX 3090 + RTX 5090)、同一份权重文件(1.5B)

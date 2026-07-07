@@ -374,6 +374,19 @@ the GEMV kernels every quantization tier depends on) is in progress. See
 [F0051](findings/0051-lora-gate-fusion-highbw.md) and later findings in that sequence for the
 current state; this is explicitly long-term/iterative (task #5), not expected to fully close.
 
+**Update (2026-07-07, F0052).** Built and measured the first "epilogue-fuse into the GEMV"
+candidate named above: folding the FFN's `relu(key(xk))**2` activation (2 elementwise launches)
+directly into the `ffn.key` GEMV's own store, instead of running it as separate kernels after.
+Byte-exact (`torch.equal`) on both sm_89 and sm_90, including a check that the quantized tiers
+(w4, w8a8) are bit-identically unaffected. Measured effect, same isolation method as above:
+**H100 bsz1 393.2→404.3 (+2.82%, independently reproduced at +2.72%; ratio vs Albatross
+≈0.65×→0.66×); L4 bsz1 83.1→83.3 (+0.24%, noise-level)** — real on the high-bandwidth card, a
+non-event on the low-bandwidth one, the same correlation as F0051 again, but a much smaller win
+than the LoRA-gate fusion (proportional to the smaller 2-launch cluster it collapses, vs. ~7-8).
+Kernel-level accounting shows the fused epilogue itself costs ~0 extra GPU time, so this **revises
+the ceiling above from ~0.69× to ~0.71×**. Gated behind `RWKV_FUSED_SQRELU` (default off, additive).
+See [F0052](findings/0052-sqrelu-epilogue-fusion-highbw.md).
+
 ## 7b. Comparison with vllm-rwkv (the community vLLM fork)
 
 Measured 2026-07-06 under strictly equal conditions, **RWKV-7 1.5B**: same GPUs (RTX 3090 + RTX

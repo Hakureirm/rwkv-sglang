@@ -244,6 +244,10 @@ def _register_fakes():
         def _fm1c(x, weight, threads, out_tile):
             return x.new_empty((1, weight.shape[0]))
 
+        @torch.library.register_fake("rwkv7_fast::gemv_m1_sqrelu_cfg")
+        def _fm1sq(x, weight, threads, out_tile):
+            return x.new_empty((1, weight.shape[0]))
+
         @torch.library.register_fake("rwkv7_fast::gemv_mb_cfg")
         def _fmbc(x, weight, threads, out_tile):
             return x.new_empty((x.shape[0], weight.shape[0]))
@@ -271,6 +275,22 @@ def gemv_m1(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         return torch.ops.rwkv7_fast.gemv_m1_cfg(xc, weight, t, ot)
     except Exception:
         return torch.ops.rwkv7_fast.gemv_m1(xc, weight)
+
+
+def gemv_m1_sqrelu(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    """Epilogue-fused FFN channel-mix key projection: returns relu(x @ weight^T)**2
+    for M==1, bit-identical to ``torch.relu(gemv_m1(x, weight)) ** 2`` (verified by
+    bench/test_sqrelu_gate.py). Uses the SAME arch-aware (threads, out_tile) that
+    gemv_m1 picks for this (N, K), so the fp32 accumulation — hence the fp16 `k` the
+    activation reads — is identical to the plain path; only the relu+square are folded
+    into the store (2 fewer launches + no k[1,N] HBM round-trip per FFN block).
+
+    Caller (models/rwkv7.py) guarantees M==1, fp16, contiguous, K%4==0, N even before
+    dispatching here; anything else takes the two-step torch path."""
+    xc = x.contiguous().view(1, -1)
+    N, K = weight.size(0), weight.size(1)
+    t, ot = _select_config(N, K)
+    return torch.ops.rwkv7_fast.gemv_m1_sqrelu_cfg(xc, weight, t, ot)
 
 
 def gemv_mb(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
