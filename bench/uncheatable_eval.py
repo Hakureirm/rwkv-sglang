@@ -114,18 +114,28 @@ def score_chunk(sess, gen_url, chunk_ids, timeout):
     return [-ent[0] for ent in itl[1:]]  # NLL in nats, one per real chunk token
 
 
-def eval_dataset(name, texts, tokenizer, sess, gen_url, chunk_size, concurrency, timeout, pos_sum, pos_cnt):
+def eval_dataset(name, texts, tokenizer, sess, gen_url, chunk_size, concurrency, timeout, pos_sum, pos_cnt, reset_token_id=0):
     """Returns the REF-style data_dict for one dataset; accumulates the global
-    position-curve sums (pos_sum/pos_cnt, in -log2 p units) as a side effect."""
+    position-curve sums (pos_sum/pos_cnt, in -log2 p units) as a side effect.
+
+    reset_token_id: the leading token id prepended to every chunk (REF L397 uses
+    RWKV world tokenizer's token 0, which is that tokenizer's dedicated BOS/EOD/
+    state-reset id). This is only a faithful stand-in for a *different* tokenizer
+    if that tokenizer's id 0 has the same "reset/boundary" semantics -- for BPE
+    vocabularies built the usual way (merges filled from id 0 up, special tokens
+    appended at the end), id 0 is just an arbitrary content token, and reusing it
+    unmodified would silently prime every scored document with junk context. Pass
+    the target tokenizer's own document-boundary token instead (e.g. its EOS) via
+    --reset-token-id when scoring a non-RWKV model. See F0050 for the Qwen3.5 case."""
     # tokenize all docs client-side (REF eval_rwkv L379-L385; world tokenizer, no BOS)
     doc_tokens = [tokenizer.encode(t, add_special_tokens=False) for t in texts]
 
-    # build per-chunk work items: (doc_idx, doc_pos_offset, [0]+chunk)  (REF L395-L397)
+    # build per-chunk work items: (doc_idx, doc_pos_offset, [reset]+chunk)  (REF L395-L397)
     work = []
     for di, toks in enumerate(doc_tokens):
         assert len(toks) > 0, f"{name}: empty document after tokenization"
         for begin in range(0, len(toks), chunk_size):
-            work.append((di, begin, [0] + toks[begin : begin + chunk_size]))
+            work.append((di, begin, [reset_token_id] + toks[begin : begin + chunk_size]))
 
     doc_nll = [0.0] * len(texts)  # total NLL (nats) per document
     t0 = time.time()
@@ -204,6 +214,7 @@ def main():
     ap.add_argument("--data", nargs="+", required=True, help=".json (list of strings) / .jsonl ({'content':...}) files; globs OK")
     ap.add_argument("--max-docs", type=int, default=0, help="first N docs per dataset (0=all)")
     ap.add_argument("--ctx-len", type=int, default=4000, help="chunk size in tokens (REF chunk_size default 4000)")
+    ap.add_argument("--reset-token-id", type=int, default=0, help="leading token id prepended per chunk (default 0 = RWKV world tokenizer's BOS/EOD/reset id, matches REF exactly; for a non-RWKV tokenizer pass its own document-boundary token, e.g. its eos_token_id)")
     ap.add_argument("--concurrency", type=int, default=8, help="chunks in flight (server batches dynamically)")
     ap.add_argument("--timeout", type=float, default=1200.0, help="per-request timeout (s)")
     ap.add_argument("--out", default="", help="write full JSON results here (CSV curve alongside)")
@@ -239,6 +250,7 @@ def main():
             per_dataset[name] = eval_dataset(
                 name, texts, tokenizer, sess, gen_url, args.ctx_len,
                 args.concurrency, args.timeout, pos_sum, pos_cnt,
+                reset_token_id=args.reset_token_id,
             )
             print(json.dumps({k: v for k, v in per_dataset[name].items()}, indent=2), flush=True)
 
@@ -276,6 +288,7 @@ def main():
             os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
             payload = {
                 "model": args.model, "ctx_len": args.ctx_len, "max_docs": args.max_docs,
+                "reset_token_id": args.reset_token_id,
                 "datasets": per_dataset, "overall": overall, "position_curve": curve_rows,
                 "methodology": "uncheatable_eval (Jellyfish042) via sglang /generate input_token_logprobs",
             }

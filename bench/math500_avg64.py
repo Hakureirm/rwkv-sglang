@@ -109,15 +109,31 @@ def verify_one(item):  # REF verify_one L390-L402, copied verbatim
 
 
 def build_prompt_ids(task, tokenizer, prompt_style, max_new_tokens, ctx_limit):
-    # REF build_prefill_cache L128-L137
+    # REF build_prefill_cache L128-L137 (fake_think/plain -- RWKV has no chat
+    # template, this raw-text prefix is BlinkDL's own albatross convention).
+    # chatml_thinking/chatml_direct are our addition for models that ship a real
+    # chat template (e.g. Qwen3.5): forcing those models into the RWKV raw-text
+    # prompt would not exercise their best-supported mode, so we instead use the
+    # tokenizer's own apply_chat_template with its native reasoning-toggle kwarg.
     problem = task.problem.strip().replace("\r\n", "\n")
     if prompt_style == "fake_think":
         prompt = f"User: {problem}\n\nAssistant: <think></think"
+        ids = [0] + tokenizer.encode(prompt, add_special_tokens=False)
     elif prompt_style == "plain":
         prompt = f"User: {problem}\n\nAssistant:"
+        ids = [0] + tokenizer.encode(prompt, add_special_tokens=False)
+    elif prompt_style in ("chatml_thinking", "chatml_direct"):
+        messages = [{"role": "user", "content": problem}]
+        ids = tokenizer.apply_chat_template(
+            messages, tokenize=True, add_generation_prompt=True,
+            enable_thinking=(prompt_style == "chatml_thinking"),
+        )
+        if hasattr(ids, "get") and ids.get("input_ids") is not None:  # BatchEncoding (this transformers version)
+            ids = ids["input_ids"]
+        if ids and isinstance(ids[0], list):  # defensive: batched form -> single conversation
+            ids = ids[0]
     else:
         raise ValueError(f"unknown prompt style: {prompt_style}")
-    ids = [0] + tokenizer.encode(prompt, add_special_tokens=False)
     if len(ids) + max_new_tokens > ctx_limit:
         ids = ids[-max(1, ctx_limit - max_new_tokens):]
     return ids
@@ -144,8 +160,11 @@ def one_rollout(sess, gen_url, ids, args):
                 "top_p": args.top_p,
                 "top_k": args.top_k,
                 "max_new_tokens": args.max_new_tokens,
-                "stop": ["\nUser:"],       # REF user_stop (L270-L272)
-                "stop_token_ids": [0],     # REF eod (L263-L265)
+                # fake_think/plain: REF's ["\nUser:"] / [0] (L270-L272 / L263-L265).
+                # chatml_*: the model's own turn-end special token(s) -- computed
+                # once in main() (see stop_strings/stop_token_ids setup).
+                "stop": args.stop_strings,
+                "stop_token_ids": args.stop_token_ids,
             },
         },
         timeout=args.timeout,
@@ -183,9 +202,14 @@ async def run_all(tasks, prompt_ids, args, gen_url):
         done += 1
         if done % max(1, total // 20) == 0:
             print(f"  {done}/{total} rollouts ({time.time()-t0:.0f}s)", flush=True)
-        # stop_reason mapping to REF vocabulary (finish_row L187-L219)
+        # stop_reason mapping to REF vocabulary (finish_row L187-L219). "eod" =
+        # matched one of our configured stop_token_ids (REF: token 0; chatml: the
+        # model's own eos/im_end); "user_stop" = matched a stop *string* instead
+        # (REF's "\nUser:" hallucinated-next-turn detector; for chatml this is a
+        # defensive net that should rarely if ever fire since turn-end is a real
+        # special token, not text).
         fr, matched = out["finish_reason"], out["matched"]
-        if fr == "stop" and matched == 0:
+        if fr == "stop" and matched in args.stop_token_ids:
             stop_reason = "eod"
         elif fr == "stop":
             stop_reason = "user_stop"
@@ -228,7 +252,7 @@ def main():
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--top-p", type=float, default=0.28)
     ap.add_argument("--top-k", type=int, default=32)
-    ap.add_argument("--prompt-style", choices=("fake_think", "plain"), default="fake_think")
+    ap.add_argument("--prompt-style", choices=("fake_think", "plain", "chatml_thinking", "chatml_direct"), default="fake_think")
     ap.add_argument("--verify-workers", type=int, default=8)  # REF L63
     ap.add_argument("--timeout", type=float, default=3600.0)
     ap.add_argument("--out", default="", help="summary JSON path (generations JSONL alongside)")
@@ -242,6 +266,25 @@ def main():
     from transformers import AutoTokenizer  # same convention as bench/accuracy_eval.py L172
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     prompt_ids = {t.index: build_prompt_ids(t, tokenizer, args.prompt_style, args.max_new_tokens, args.ctx_limit) for t in tasks}
+
+    # Stop conditions: fake_think/plain reproduce REF exactly (RWKV world tokenizer
+    # token 0 = eod, "\nUser:" text = hallucinated-next-turn). chatml_* models have
+    # no equivalent to either -- they signal turn-end with their own special
+    # token(s) -- so we resolve those from the tokenizer instead of reusing RWKV's.
+    if args.prompt_style in ("fake_think", "plain"):
+        args.stop_strings = ["\nUser:"]
+        args.stop_token_ids = [0]
+    else:
+        stop_ids = set()
+        if tokenizer.eos_token_id is not None:
+            stop_ids.add(tokenizer.eos_token_id)
+        for tok in ("<|im_end|>", "<|endoftext|>"):
+            tid = tokenizer.convert_tokens_to_ids(tok)
+            if isinstance(tid, int) and tid is not None and tid >= 0:
+                stop_ids.add(tid)
+        args.stop_token_ids = sorted(stop_ids)
+        args.stop_strings = ["<|im_start|>"]  # defensive net; real turn-end is a special token, not text
+        print(f"chatml stop_token_ids={args.stop_token_ids} stop_strings={args.stop_strings}", flush=True)
 
     gen_url = f"http://{args.host}:{args.port}/generate"
     raw_rows, gen_wall = asyncio.run(run_all(tasks, prompt_ids, args, gen_url))
@@ -287,6 +330,8 @@ def main():
             "sampler_order": "temperature -> top_k -> top_p",  # REF L419
             "penalty": "off",                                   # REF L421
             "prompt_style": args.prompt_style,
+            "stop_token_ids": args.stop_token_ids,
+            "stop_strings": args.stop_strings,
             "concurrency": args.concurrency,
         },
     }
