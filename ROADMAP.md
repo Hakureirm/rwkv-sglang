@@ -29,22 +29,36 @@ requirement numbering predates Bo's exact reposted list and doesn't have its own
 requirement #2 (Qwen3.5) at all — that file needs a refresh pass; not done as part of this
 roadmap write-up to avoid scope creep, tracked here so it isn't lost.
 
-## Active right now (2026-07-07)
+## Active right now (2026-07-07, updated after the history-scrub push)
 
-Four independent workstreams running in parallel across the two GPU boxes, a rented
-high-bandwidth GPU (see "a note on hardware access" below), and this Mac:
+Desktop-tier Qwen3.5-9B concurrency search (previously listed here) is **done** — F0049 closed
+out with a confirmed-flat RWKV-7 peak beating Qwen3.5-9B's memory-ceiling-terminated peak by
++27.0% to +30.5%; see the requirements table above. Repo also had a PII/infra-identifier leak
+(a dev box's real username and SSH alias, baked into committed benchmark JSON and a README)
+found and fully remediated via `git filter-repo` + force-push this same day — see
+`memory/feedback-scrub-infra-identifiers-precommit.md` if you have access to it; not repeated
+here since ROADMAP is forward-looking, not an incident log.
+
+Three independent workstreams running in parallel across the two GPU boxes and a rented
+high-bandwidth GPU (see "a note on hardware access" below):
 
 - **Tower (RTX 5090)**: Qwen3.5-2B/9B accuracy evaluation (MATH500 avg@64 + compression rate),
   matched methodology to RWKV-7's own numbers. Compression already in hand (Qwen3.5-2B 0.6729
-  bpb vs RWKV-7 1.5B's 0.6085 — RWKV ahead). MATH500 avg@64 is a multi-hour job, in progress.
+  bpb vs RWKV-7 1.5B's 0.6085 — RWKV ahead). MATH500 avg@64 (2B, chatml_thinking) in progress,
+  ~80% through its 32,000-rollout run as of this update; 2B non-thinking + 9B still to follow.
 - **3090 box**: 7.2B int4-GPTQ MATH500 avg@64 (symmetric + asymmetric), the direct follow-up
   F0043 called for — decides whether a full K-quant rewrite (Stage 2) is worth building at all.
-- **High-bandwidth GPU (rented per-job, not a standing box)**: continuing the Albatross
-  bandwidth-gap investigation past F0051 — epilogue-fusing elementwise math directly into the
-  GEMV kernels (F0051's identified next lever), the highest-blast-radius kernel work in this
-  project so gated extremely conservatively (see F0051/F0052+ for the discipline applied).
-- **This Mac**: currently idle by design — a parallel Qwen3.5-on-MLX accuracy pass ran into
-  real memory pressure and was stopped on direct instruction; not being retried. The Apple
+  Currently in the Hessian-calibration phase (prerequisite to quantizing); a Monitor is armed
+  to pick the pipeline back up through quantize→eval once calibration finishes.
+- **High-bandwidth GPU (rented per-job, not a standing box)**: F0052, continuing the Albatross
+  bandwidth-gap investigation past F0051 — epilogue-fusing the FFN `relu(.)**2` activation
+  directly into its preceding GEMV's store (F0051's identified next lever). A first attempt at
+  this produced a complete-looking kernel+gate+model-wiring diff but the agent's session died
+  before verifying it on real hardware; redispatched to actually build, gate, benchmark, and
+  commit-or-roll-back on a rented card. Highest-blast-radius kernel work in this project, so
+  gated extremely conservatively (default-OFF env flag either way — see F0051/F0052 discipline).
+- **This Mac**: idle for GPU-heavy work by design — a parallel Qwen3.5-on-MLX accuracy pass ran
+  into real memory pressure and was stopped on direct instruction; not being retried. The Apple
   Silicon tier's accuracy story stops at "compression rate only, honestly labeled" until this
   Mac has headroom to try MATH500 again, or a different Apple Silicon machine is available.
 
