@@ -118,9 +118,20 @@ two-box setup, that's why.
 
 - Does 7.2B's int4 MATH500 collapse the way 1.5B's did, or hold up? (Running now.)
 - Is the Albatross reference itself using updated (faster) numbers than what this project's
-  §7 comparison table cites? Bo's reposted bounty mentions 13,000/17,000 tok/s decode/prefill
-  on a Pro 6000-class card — not yet reconciled against this project's own Albatross baseline
-  numbers, which may predate that update. Needs a direct check before citing either figure
-  against the other.
+  §7 comparison table cites? **Partially checked (2026-07-07):** `docs/BENCHMARKS.md` §7's
+  actual published tables don't create a live contradiction — the main table is explicitly
+  1.5B single-stream on matched cards (including a real RTX PRO 6000 row, 457.4 tok/s, and
+  our own 5090 re-tune work), and the only 7.2B content there is a *relative* stock→re-tuned
+  improvement table, not an absolute 7.2B-vs-Albatross large-batch number. The "10,250 tok/s
+  batch decode / 11,289 tok/s bsz1 prefill / 5,848 tok/s bsz320" 7.2B figures this project has
+  on record for Albatross live only in local memory (`project-rwkv-vllm-bounty.md`), never
+  published here, so there is nothing in the public docs for Bo's newer 13,000/17,000 figures
+  to contradict. What's still unresolved: whether to add Bo's newer number to our own docs at
+  all — doing that responsibly needs the bounty repost's verbatim text (not a paraphrase-of-a-
+  paraphrase; this project's own claims-need-numbers rule applies just as much to citing a
+  third party's number as to citing our own) plus a judgment call on card-comparability that
+  even Bo's own post reportedly hedges ("5090 would read lower, larger batch would read
+  higher, roughly comparable" — again, from memory, not verified against source). Not
+  resolving further until someone has the primary source in hand; deprioritized, not blocking.
 - Is the epilogue-fusion-into-GEMV kernel work (in flight) safe to ship, or does the call-site
   inventory reveal it's riskier than F0051 hoped? Not yet known.
