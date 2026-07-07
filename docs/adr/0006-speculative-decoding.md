@@ -2,14 +2,43 @@
 doc_kind: adr
 adr_id: 0006
 title: "RWKV-7 speculative decoding (req#6): recurrent-verify + O(1)-state rollback — a bespoke draft/target loop, NOT EAGLE"
-status: proposed
+status: "built — correctness gate passes (10/10); net speedup not yet achieved (see 2026-07-07 BUILD RESULT)"
 date: 2026-07-04
-last_verified_commit: "bd08540"
+last_verified_commit: "0cc881280 (sglang-upstream/rwkv7-spec-decode)"
 supersedes: []
 superseded_by: []
 ---
 
 # ADR-0006: RWKV-7 speculative decoding
+
+## 2026-07-07 BUILD RESULT (Sonnet 5) — Strategy B built for real, 10/10 correctness gate, cuda-graph speedup real but net still negative
+
+Full detail in `docs/findings/0046-spec-decode-strategy-b-build.md`. Summary for anyone scanning
+this ADR:
+
+- **Strategy B (the 2026-07-06 pivot below) is now actually implemented**, not just decided — a
+  prior handoff had conflated "decided in a memory note" with "built in the worker file," which
+  this build caught and corrected by reading the live code rather than trusting the note.
+- Two real logic bugs found via instrumentation (not guessed): `intermediate_ssm`/
+  `intermediate_conv_window` are indexed by request-ordinal-in-batch, not pool slot; and RWKV-7's
+  *second* token-shift (`conv[1]`, the FFN one) is never corrected by the generic upstream commit
+  hook, which only handles `conv[0]` — because RWKV-7's model code bypasses the generic
+  `AttentionBackend.forward_extend`/`forward_decode` dispatch that GDN/KDA/Lightning's verify
+  capture lives on. `rwkv7_backend.py` needed a small `is_target_verify` branch added to close
+  this gap (not budgeted in the original pivot plan).
+- **Gate: `bench/spec_gate.py` (written this session, didn't exist before) is 10/10** token-identical,
+  spec-on vs spec-off, greedy — held at both 128 and 256 generation length. The pre-existing
+  non-spec-decode regression suite (`test/registered/models/test_rwkv7.py`) stayed 3/3, zero
+  regression, after the shared `models/rwkv7.py` projection layer picked up a `gemv_mb`-routed fix
+  for a separate M>1 cuBLAS-reduction-order flip during verify.
+- **Speed: a hand-rolled `torch.cuda.CUDAGraph` capture for the draft's own K-1 step eager loop**
+  (not sglang's shared `DecodeCudaGraphRunner`, which hardcodes an EAGLE-family
+  `capture_forward_mode=TARGET_VERIFY` assumption incompatible with a plain recurrent draft) gives
+  a real, clean, all-7-test-prompts-positive **1.5–1.6× speedup on the draft decode step itself**.
+  But **net spec-on is still 2.6×–4.5× slower than spec-off** (down from 7× before the graph) —
+  correctness is done, speed is a real, gated, honest partial win, not yet the ADR's stated goal.
+- Three next-lever hypotheses recorded (per-layer state-clone cost, target-verify overhead,
+  per-round Python orchestration) — **none profiled yet**, flagged as inference not measurement.
 
 ## 2026-07-06 PIVOT (Opus) — main gained recurrent spec-V2; reuse upstream verify, build only the draft (Strategy B)
 
