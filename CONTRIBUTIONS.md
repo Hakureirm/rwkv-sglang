@@ -66,7 +66,30 @@ Each line: what + where + key number (with baseline) + verification gate + commi
 - **GPTQ for RWKV-7** (activation-aware, Hessian capture hook + streamed/
   sharded accumulation for models whose Hessian set exceeds GPU+RAM) —
   `bench/{calib_run,gptq_w4}.py`; 1.5B lambada −3.34pt (vs RTN −4.95);
-  `197c051`, `380cfb5`, `ad59947`.
+  `197c051`, `380cfb5`, `ad59947`. **Asymmetric refinement** (zero-point at the
+  existing group-64 granularity, zero kernel changes) closes 27-35% of the
+  fp16 gap depending on metric, though MATH500 avg@64 shows the reasoning-chain
+  collapse isn't purely bit-budget-driven (F0043); `cdb452d`.
+- **Qwen3.5 comparative benchmark methodology** — matched-size/quant head-to-
+  head protocol across cloud/desktop/Apple-Silicon tiers (`docs/BENCHMARKS.md`
+  §13), plus an independent **numpy-oracle correctness gate for Qwen3.5**
+  built from BlinkDL's own `run_rwkv7_qwen35.py` reference (`qwen35_gate/`) —
+  the same rigor this repo applies to its own RWKV-7 kernels, extended to a
+  third-party model so the comparison itself is trustworthy, not just the
+  speed numbers; F0044–F0050, gate commit `ecb47c5`.
+- **RWKV_SPEC speculative decoding** (Strategy B: chain-verify draft against
+  sglang main's spec-V2 plugin architecture, O(1) per-slot state snapshot/
+  restore, two RWKV-specific bugs root-caused and fixed) — token-identical
+  10/10 on `bench/spec_gate.py`; hand-rolled draft-decode CUDA graph gives a
+  real 1.5-1.6× draft-step speedup, honestly not yet net-positive end-to-end
+  (F0046); `45095b9`, writeup `cfe0101`.
+- **Kernel-launch-count profiling + epilogue fusion on high-bandwidth cards**
+  — real `torch.profiler` launch-count measurement (699 launches/decode step
+  on H100, correcting a stale ~144 estimate) identified and fused the
+  highest-launch-count unfused cluster (LoRA-output-gate elementwise math)
+  into one bit-exact kernel; H100 bsz1 +9.24% (ratio vs Albatross
+  0.592×→0.646×), L4 +1.22%, bsz8 control confirms clean A/B isolation
+  (F0051); `afa8c71`.
 - **Hand-written sparse sqrelu FFN + fused fp16 GEMV + fused elementwise**
   (M6 line) — `cuda/rwkv7_sparse_cmix.cu` (adapted, see §3), `fused.py`;
   fp16 single-stream 0.66→0.73× of the albatross mega-kernel at 1.5B bsz1.
