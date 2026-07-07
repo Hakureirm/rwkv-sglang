@@ -208,3 +208,91 @@ def fused_gate_corr(o_norm, r, k, r_k, v, g, num_heads):
     return out
 
 
+# ----------------------------------------------------------------------------
+# Kernel D: LoRA-output gate activations (bsz1 fp16 decode).
+#   w_log = -sigmoid(lo[0]) * INV_SQRT_E
+#   a     =  sigmoid(lo[1])
+#   v     =  v + (v_first - v) * sigmoid(lo[3])       (only when HAS_V, i.e. layer>0)
+# (g = lo[2] is an identity slice the caller keeps — not touched here.)
+# One launch replaces the ~5-7 tiny torch elementwise kernels (3 sigmoids + neg/mul
+# + sub/mul/add) that the profiler (H100, F0051) showed as the single largest
+# un-fused launch-count cluster in the per-layer decode step.
+#
+# BIT-EXACTNESS: reproduce torch's exact fp16 rounding (opmath_type<half>==float, so
+# each op computes in fp32 then rounds back to fp16 before the next). The one novelty
+# vs the other fused kernels is the transcendental: torch's fp16 sigmoid is
+#   (half)(1.f / (1.f + expf(-(float)x)))
+# so we compute sigmoid the SAME way — 1/(1+exp(-x)) in fp32 with tl.exp (libdevice
+# __nv_expf, == CUDA std::exp(float)) — then round to DT. enable_fp_fusion=False keeps
+# ptxas from contracting the round-away FMAs (same trick as the other kernels). The
+# byte-exactness of this (incl. the transcendental) is gated by bench/test_lora_gates.py
+# BEFORE the path is enabled — if tl.exp ever diverges from expf by a ULP that survives
+# the fp16 round, the gate fails and the caller keeps the torch path.
+# ----------------------------------------------------------------------------
+@triton.jit
+def _lora_gates_kernel(
+    lo_ptr, v_ptr, vfirst_ptr,
+    wlog_ptr, a_ptr, vout_ptr,
+    inv_sqrt_e,
+    H,
+    HAS_V: tl.constexpr,
+    BLOCK: tl.constexpr,
+):
+    hb = tl.program_id(0)
+    offs = hb * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < H
+    DT = wlog_ptr.dtype.element_ty
+
+    # sigmoid(x) computed as torch does it: 1/(1+exp(-x)) in fp32, rounded to DT.
+    lo0 = tl.load(lo_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+    s0 = (1.0 / (1.0 + tl.exp(-lo0))).to(DT).to(tl.float32)   # round to storage dtype
+    # -sigmoid(lo0) is exact in fp16; the *INV_SQRT_E multiply is the one rounded op.
+    wlog = ((-s0) * inv_sqrt_e).to(DT)
+    tl.store(wlog_ptr + offs, wlog, mask=mask)
+
+    lo1 = tl.load(lo_ptr + H + offs, mask=mask, other=0.0).to(tl.float32)
+    a = (1.0 / (1.0 + tl.exp(-lo1))).to(DT)
+    tl.store(a_ptr + offs, a, mask=mask)
+
+    if HAS_V:
+        lo3 = tl.load(lo_ptr + 3 * H + offs, mask=mask, other=0.0).to(tl.float32)
+        s3 = (1.0 / (1.0 + tl.exp(-lo3))).to(DT).to(tl.float32)
+        v = tl.load(v_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+        vf = tl.load(vfirst_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+        diff = (vf - v).to(DT).to(tl.float32)
+        prod = (diff * s3).to(DT).to(tl.float32)
+        vnew = (v + prod).to(DT)
+        tl.store(vout_ptr + offs, vnew, mask=mask)
+
+
+_INV_SQRT_E = 0.6065306597126334  # e^-0.5, == models/rwkv7.py:_INV_SQRT_E
+
+
+def fused_lora_gates(lo, v, v_first, has_v):
+    """lo: [C,H] fp16 (rows w,a,g[,v] in lora4_m1 order); v,v_first: [1,H] (or [H]) fp16.
+
+    Returns (w_log[1,H], a[1,H], v_out) where v_out is the updated v[1,H] when has_v
+    (layer>0) else the input v unchanged. Bit-identical to the torch gate math
+    (bench/test_lora_gates.py). g = lo[2:3] stays a caller-side slice (no kernel).
+    """
+    C, H = lo.shape
+    lo = lo.contiguous()
+    w_log = torch.empty(1, H, dtype=lo.dtype, device=lo.device)
+    a = torch.empty(1, H, dtype=lo.dtype, device=lo.device)
+    if has_v:
+        vflat = v.reshape(-1).contiguous()
+        vf = v_first.reshape(-1).contiguous()
+        v_out = torch.empty(1, H, dtype=lo.dtype, device=lo.device)
+    else:
+        # dummy pointers (kernel skips the v branch); keep v unchanged for the caller.
+        vflat = vf = lo  # unused when HAS_V=False
+        v_out = v
+    BLOCK = 1024
+    grid = (triton.cdiv(H, BLOCK),)
+    _lora_gates_kernel[grid](
+        lo, vflat, vf, w_log, a, (v_out if has_v else w_log),
+        _INV_SQRT_E, H, HAS_V=has_v, BLOCK=BLOCK, enable_fp_fusion=False,
+    )
+    return w_log, a, v_out
+
+

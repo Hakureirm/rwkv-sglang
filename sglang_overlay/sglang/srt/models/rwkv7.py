@@ -68,6 +68,7 @@ from sglang.srt.layers.attention.rwkv7_kernels.fused import (
     fused_gate_corr,
     fused_kk_kmix,
     fused_lerp6,
+    fused_lora_gates,
 )
 from sglang.srt.layers.linear import (
     ColumnParallelLinear,
@@ -131,7 +132,14 @@ _FUSED_LORA = os.environ.get("RWKV_FUSED_LORA", "0") == "1"
 # Fused LoRA wins only at small batch (measured crossover ~M=4→8); above this it
 # loses to cuBLAS-batched ReplicatedLinear, so gate lora4_m1/lora4_mn to T<=this.
 _FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "4"))
+# W1 (reverse-overtake): fuse the LoRA-output gate activations (w_log/a/v-residual
+# sigmoids + neg/mul/sub/add) into ONE launch on the bsz1 fp16 lora4_m1 path. The
+# H100 profile (F0051) found these ~5-7 tiny elementwise ops are the single largest
+# un-fused launch-count cluster per decode layer. Byte-exact vs torch gated by
+# bench/test_lora_gates.py (incl. the sigmoid transcendental) before default. OFF.
+_FUSED_GATES = os.environ.get("RWKV_FUSED_GATES", "0") == "1"
 _GLUE_ANNOUNCED = False  # one-time "R2 fused glue ENABLED" stderr notice (attn)
+_GATES_ANNOUNCED = False  # one-time "W1 fused LoRA gates ENABLED" notice
 _GLUE1_ANNOUNCED = False  # one-time notice (ffn shift_lerp1)
 
 # M6 measurement gate: log the per-token zero-fraction of the ffn sqrelu activation
@@ -730,11 +738,23 @@ class Rwkv7Attention(nn.Module):
                     xs = lp[2:2 + C].permute(1, 0, 2).contiguous()  # [T,C,H]
                     lo_mn = lora_fused.lora4_mn(xs, *self._lora_pack)  # [T,C,H]
         if lo is not None:
-            w_log = -torch.sigmoid(lo[0:1]) * _INV_SQRT_E
-            a = torch.sigmoid(lo[1:2])
-            g = lo[2:3]
-            if self.layer_id != 0:
-                v = v + (v_first - v) * torch.sigmoid(lo[3:4])
+            # W1: fuse the gate activations (3 sigmoids + neg/mul + v-residual) into
+            # one launch, else the per-op torch path (bit-identical, test_lora_gates.py).
+            if _FUSED_GATES:
+                global _GATES_ANNOUNCED
+                if self.layer_id == 0 and not _GATES_ANNOUNCED:
+                    import sys
+                    _GATES_ANNOUNCED = True
+                    print("[rwkv7] W1 fused LoRA gate activations ENABLED (fp16 bsz1 decode)",
+                          file=sys.stderr, flush=True)
+                w_log, a, v = fused_lora_gates(lo, v, v_first, self.layer_id != 0)
+                g = lo[2:3]
+            else:
+                w_log = -torch.sigmoid(lo[0:1]) * _INV_SQRT_E
+                a = torch.sigmoid(lo[1:2])
+                g = lo[2:3]
+                if self.layer_id != 0:
+                    v = v + (v_first - v) * torch.sigmoid(lo[3:4])
         elif lo_mn is not None:
             # lo_mn[:, c] is a STRIDED column slice of [T,C,H]; w_log/a/v get
             # materialized (contiguous) by sigmoid/arithmetic, but g is a raw slice

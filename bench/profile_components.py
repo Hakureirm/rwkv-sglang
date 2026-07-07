@@ -111,6 +111,39 @@ class _Backend:
         temporal[ci] = fs.to(temporal.dtype)
         return o.squeeze(0)
 
+    # ---- R2 fused paged token-shift + lerp glue (mirrors the real backend so the
+    # `kernels`/`decode` profiles exercise the CURRENT deployed fused stack; the
+    # standalone stub predated the glue and would AttributeError on fp16/bf16). ----
+    def _glue_conv(self, layer_id, conv_idx, normed):
+        if normed.dtype != torch.float16 or not self._decode:
+            return None
+        conv = self.req_to_token_pool.mamba2_layer_cache(layer_id).conv[conv_idx]
+        if conv.dtype != torch.float32 or not conv.is_contiguous():
+            return None
+        ci = self.forward_metadata.mamba_cache_indices
+        if ci.dtype != torch.int32 or not ci.is_contiguous():
+            return None
+        from sglang.srt.layers.attention.rwkv7_kernels import glue
+        if not glue.available():
+            return None
+        return conv, ci
+
+    def try_fused_shift_lerp6(self, normed, layer_id, conv_idx, mix6, forward_batch):
+        e = self._glue_conv(layer_id, conv_idx, normed)
+        if e is None or mix6.dtype != torch.float16:
+            return None
+        conv, ci = e
+        from sglang.srt.layers.attention.rwkv7_kernels import glue
+        return glue.shift_lerp6(normed.contiguous(), mix6, ci, conv)
+
+    def try_fused_shift_lerp1(self, normed, layer_id, conv_idx, x_k, forward_batch):
+        e = self._glue_conv(layer_id, conv_idx, normed)
+        if e is None or x_k.dtype != torch.float16:
+            return None
+        conv, ci = e
+        from sglang.srt.layers.attention.rwkv7_kernels import glue
+        return glue.shift_lerp1(normed.contiguous(), x_k.reshape(-1).contiguous(), ci, conv)
+
 
 class _FB:
     def __init__(self, backend, decode):
@@ -216,7 +249,9 @@ def make_state(cfg, T, decode, dtype, dev="cuda", nreq=1):
     caches = {0: _Cache(conv0, conv1, temporal),
               1: _Cache(conv0.clone(), conv1.clone(), temporal.clone())}
     pool = _Pool(caches)
-    ci = torch.arange(nreq, dtype=torch.long, device=dev)
+    # int32 cache indices == production (mamba_cache_indices); also the dtype the
+    # fused-glue eligibility check requires. token_shift / wkv_recurrent both accept it.
+    ci = torch.arange(nreq, dtype=torch.int32, device=dev)
     if decode:
         meta = _Meta(ci)  # nreq sequences, 1 token each
     else:
@@ -376,26 +411,18 @@ def fmt(comps):
     return "\n".join(out), tot
 
 
-def run_kernels(cfg, dtype, n_iter):
-    """Count CUDA kernel launches per layer/token + lm_head via torch.profiler (eager)."""
+def _profile_launches(fn, n_iter, warmup=30):
+    """Run fn() n_iter times under torch.profiler; return (rows, total_calls, total_us)
+    where rows = [(kernel_name, count, cuda_time_us), ...]. Counts DEVICE kernels only."""
     from torch.profiler import profile, ProfilerActivity
-    layer = Rwkv7DecoderLayer(cfg, 1).to("cuda").to(dtype).eval()
-    H = cfg.hidden_size
-    lm_head = nn.Linear(H, cfg.vocab_size, bias=False).to("cuda").to(dtype).eval()
-    be, fb = make_state(cfg, 1, True, dtype)
-    x = torch.randn(1, H, dtype=dtype, device="cuda")
-    v_first = torch.randn(1, H, dtype=dtype, device="cuda")
-    for _ in range(30):
-        o, _ = layer(fb, x, v_first); lm_head(o)
+    for _ in range(warmup):
+        fn()
     torch.cuda.synchronize()
     with profile(activities=[ProfilerActivity.CUDA], record_shapes=False) as prof:
         for _ in range(n_iter):
-            o, _ = layer(fb, x, v_first); lm_head(o)
+            fn()
         torch.cuda.synchronize()
-    # count device kernels
-    total_calls = 0
-    total_us = 0.0
-    rows = []
+    total_calls, total_us, rows = 0, 0.0, []
     for e in prof.key_averages():
         ct = getattr(e, "cuda_time_total", 0) or getattr(e, "device_time_total", 0) or 0
         if ct <= 0:
@@ -403,13 +430,39 @@ def run_kernels(cfg, dtype, n_iter):
         rows.append((e.key, e.count, ct))
         total_calls += e.count
         total_us += ct
-    rows.sort(key=lambda r: -r[2])
-    print(f"## KERNELS per layer(+lm_head) over {n_iter} iters (eager)")
-    print(f"# distinct CUDA kernels = {len(rows)} ; launches/iter = {total_calls/n_iter:.1f} ; "
-          f"GPU-busy/iter = {total_us/n_iter:.1f} us")
-    print(f"{'kernel':60s} {'#/iter':>7s} {'us/iter':>9s}")
-    for key, cnt, ct in rows[:30]:
-        print(f"{key[:60]:60s} {cnt/n_iter:7.1f} {ct/n_iter:9.2f}")
+    rows.sort(key=lambda r: -r[1])  # sort by COUNT (launch-overhead hypothesis)
+    return rows, total_calls, total_us
+
+
+def run_kernels(cfg, dtype, n_iter):
+    """Count CUDA kernel launches for ONE decoder layer and (separately) lm_head, then
+    extrapolate the full decode step = per-layer x L + lm_head + emb/final. torch.profiler
+    (eager). Rows sorted by LAUNCH COUNT (the launch-overhead-on-fast-cards hypothesis)."""
+    layer = Rwkv7DecoderLayer(cfg, 1).to("cuda").to(dtype).eval()
+    H, L = cfg.hidden_size, cfg.num_hidden_layers
+    lm_head = nn.Linear(H, cfg.vocab_size, bias=False).to("cuda").to(dtype).eval()
+    be, fb = make_state(cfg, 1, True, dtype)
+    x = torch.randn(1, H, dtype=dtype, device="cuda")
+    v_first = torch.randn(1, H, dtype=dtype, device="cuda")
+    hs = torch.randn(1, H, dtype=dtype, device="cuda")
+
+    lay_rows, lay_calls, lay_us = _profile_launches(
+        lambda: layer(fb, x, v_first), n_iter)
+    head_rows, head_calls, head_us = _profile_launches(lambda: lm_head(hs), n_iter)
+
+    lpl = lay_calls / n_iter          # launches per layer
+    hpl = head_calls / n_iter         # launches for lm_head
+    full = lpl * L + hpl + 2          # +emb +final_norm (~1 each, measured elsewhere)
+    print(f"## KERNEL LAUNCH COUNT (eager, {n_iter} iters, dtype={dtype})  L={L}")
+    print(f"# per-layer: distinct={len(lay_rows):3d}  launches/layer={lpl:6.1f}  "
+          f"GPU-busy/layer={lay_us/n_iter:8.1f}us")
+    print(f"# lm_head  : distinct={len(head_rows):3d}  launches={hpl:6.1f}  "
+          f"GPU-busy={head_us/n_iter:8.1f}us")
+    print(f"# ==> FULL DECODE STEP launches ~= {lpl:.1f}*{L} + {hpl:.1f} + 2 = {full:.0f}")
+    print(f"\n{'kernel (per LAYER, by count)':52s} {'#/layer':>8s} {'us/layer':>9s} {'us/launch':>10s}")
+    for key, cnt, ct in lay_rows[:40]:
+        c = cnt / n_iter
+        print(f"{key[:52]:52s} {c:8.2f} {ct/n_iter:9.2f} {ct/max(cnt,1):10.3f}")
 
 
 def main():
