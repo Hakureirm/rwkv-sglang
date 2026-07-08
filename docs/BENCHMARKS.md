@@ -887,18 +887,35 @@ cost-bounded operating point, not each mode's asymptotic ceiling).
 | RWKV-7 1.5B | fake_think (1,500 tok budget) | 40.60% (orig.) / 40.42% (current-HEAD) | 14.2% | 581 | F0024, own decreed metric |
 | Qwen3.5-2B | **non-thinking** (16,384 tok budget) | **67.63%** | **0.99%** | 4,659 | **headline for this tier** — matches Qwen3.5-2B's own documented default operating mode |
 | Qwen3.5-2B | thinking (16,384 tok budget) | 47.72% | 52.4% | 11,880 | reported alongside, not Qwen3.5-2B's default mode at this size; a disclosed floor, not the mode's ceiling (F0053) |
+| RWKV-7 7.2B | fake_think (1,500 tok budget) | **64.18%** | 6.3% | 481 | own decreed metric, 2026-07-08 |
+| Qwen3.5-9B | **non-thinking** (16,384 tok budget) | **86.28%** | **0.02%** | 1,809 | **headline for this tier** — clean convergence, matches Qwen3.5-9B's own documented default mode |
+| Qwen3.5-9B | thinking (16,384 tok budget) | *measuring — will land in this table* | — | — | pilot showed ~13% truncated at this budget; expect the same disclosed-floor framing as the 2B row above |
 
-Non-thinking is reported as the headline Qwen3.5-2B number specifically because
-Qwen3.5-2B's own model card states it "operates in non-thinking mode by default" — this
+Non-thinking is reported as the headline number for both tiers specifically because
+Qwen3.5's own model cards state non-thinking is the default operating mode — this
 project did not pick whichever mode happens to favor either side; the model's own documented
-default usage decided it. Read plainly, **Qwen3.5-2B beats RWKV-7 1.5B on this ruler in both
-modes** (67.63% and 47.72% vs 40.4-40.6%) — reported the same way a loss would be, per this
-project's own claims-need-numbers discipline. Thinking mode's truncation rate (52.4%) is
-disclosed plainly rather than folded into a single number that hides it: the pilot sweep
-behind this number (F0053) was still rising at every token budget tested up to 16,384, and
-32,768 (Qwen3.5's own documented general-purpose default length) was priced out on wall-clock
-grounds alone (a projected 16+ hours for one measurement) — so 47.72% is a real, complete
-500×64 result, but a lower bound on thinking mode's achievable score, not its ceiling.
+default usage decided it. Read plainly, **Qwen3.5 beats RWKV-7 on this ruler at both tested
+sizes** (2B: 67.63% vs 40.4-40.6%, a 27.2pt gap; 9B: 86.28% vs 64.18%, a 22.1pt gap) —
+reported the same way a loss would be, per this project's own claims-need-numbers
+discipline. The gap narrows at the larger size but stays large; both are genuine, clean,
+near-zero-truncation measurements (0.99% and 0.02% respectively), not noise. Thinking mode's
+truncation rate (52.4% at 2B) is disclosed plainly rather than folded into a single number
+that hides it: the pilot sweep behind this number (F0053) was still rising at every token
+budget tested up to 16,384, and 32,768 (Qwen3.5's own documented general-purpose default
+length) was priced out on wall-clock grounds alone (a projected 16+ hours for one
+measurement) — so 47.72% is a real, complete 500×64 result, but a lower bound on thinking
+mode's achievable score, not its ceiling. The 9B thinking-mode row is applying the same
+disclosed-floor treatment; its pilot showed ~13% truncated at the same 16,384 budget (a
+narrower gap than the 2B pilot's early readings, consistent with larger models generally
+converging faster on this benchmark), and the full 500×64 measurement is in flight.
+
+**The complete picture requires reading this table alongside §7's peak-concurrency
+throughput table, not in isolation.** On the accuracy axis measured here, Qwen3.5 leads at
+both tested sizes. On peak concurrent throughput — this project's own north-star metric, see
+`feedback-full-spectrum-not-single-stream` — RWKV-7 leads at both tested sizes (+21.9% at
+1.5B/2B, +43.7% at 7.2B/9B, same-precision bf16 peaks). These are two different capability
+axes, not a contradiction to resolve in either direction; a claim like "RWKV is faster" or
+"Qwen3.5 is better" is incomplete without saying on which axis.
 
 ### 13.5 Correctness
 
@@ -921,6 +938,9 @@ skipped — each has its own tracked follow-up.
 ---
 
 *In-progress (this page is updated as they land): 7.2B int4-GPTQ MATH500 avg@64 (§2/§4,
-decides the w4 Stage-2 question); continuing high-bandwidth-card kernel fusion work (§7);
-3090-on-main ladder; per-size decode/prefill grid vs Albatross retuned; Qwen3.5-9B MATH500
-avg@64 (§13.4 currently covers the 2B tier only, both modes, F0053).*
+decides the w4 Stage-2 question — asymmetric collapsed to a genuine ML phenomenon, not a
+code bug, root-caused to the `ffn.value`/`ffn.key` matrices' quantization sensitivity; a
+hybrid checkpoint exempting just those two from the asymmetric scheme is being validated
+now); continuing high-bandwidth-card kernel fusion work (§7); 3090-on-main ladder; per-size
+decode/prefill grid vs Albatross retuned; Qwen3.5-9B thinking-mode MATH500 avg@64 (the
+non-thinking headline for this tier landed above, clean at 0.02% truncated).*
