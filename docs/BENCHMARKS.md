@@ -217,25 +217,60 @@ parameters:
 | 7.2B MATH500 avg@64 | score | vs fp16 | truncated |
 |---|---:|---:|---:|
 | fp16 (baseline) | **64.18%** | — | 6.3% |
-| symmetric GPTQ int4 | **61.08%** | **−3.1pt** | 14.0% |
-| asymmetric GPTQ int4 | *measuring — will land in this table* | — | — |
+| **symmetric GPTQ int4 (recommended)** | **61.08%** | **−3.1pt** | 14.0% |
+| hybrid GPTQ int4 (ffn.value + ffn.key forced symmetric, rest asymmetric) | 56.03% | −8.15pt | 26.2% |
+| asymmetric GPTQ int4 (all matrices) | 47.78% | −16.4pt | 8.1% |
 
 **−3.1pt, not −25.6pt.** At 1.5B, symmetric int4 lost over a quarter of the model's MATH500
 score; at 7.2B, the identical quantization scheme costs three points. This is a dramatic,
 direct confirmation of the "bigger models quantize better" hypothesis this section flagged as
-untested a session ago — it's no longer a hypothesis. **Revised decision (pending the
-asymmetric number, but already strongly indicated): a full K-quant mixed-precision rewrite
-(Stage 2) does not look necessary at 7.2B** — plain symmetric GPTQ is already close enough to
-lossless on the hardest reasoning ruler this project has. The 1.5B collapse looks like a
-small-model-specific fragility, not a flaw in the quantization scheme itself; int4's honest
-scope is "a genuine memory/speed win at 7.2B+, use int8 instead of int4 for reasoning-heavy
-workloads specifically at 1.5B." Treat 1.5B int4 (symmetric or asymmetric) as a memory tool
-for non-reasoning workloads at that size, not a general-purpose lossless tier — w8g64 (int8,
-weight-only) remains the lossless quantized tier at every size measured. Raw:
+untested a session ago — it's no longer a hypothesis. **Decision: a full K-quant
+mixed-precision rewrite (Stage 2) does not look necessary at 7.2B** — plain symmetric GPTQ is
+already close enough to lossless on the hardest reasoning ruler this project has.
+
+**The asymmetric attempt at 7.2B — a real finding, not a bug, and not a usable checkpoint.**
+Full asymmetric GPTQ (the scheme that *helped* at 1.5B, closing 27% of the gap) instead
+collapsed at 7.2B, landing well below symmetric rather than above it. Root-caused via
+matrix-type ablation, not assumed: 32.2% of generations degenerated into a fixed,
+prompt-independent short answer (the literal string "The final answer is 2." appears verbatim
+across 44 different problems) — content-independent collapse, not gradual quality loss. Eight
+alternative explanations were systematically ruled out with evidence each (wrong checkpoint,
+corrupted weights, silent RTN fallback, a universal code bug — 1.5B's asymmetric path is
+provably fine, sampling/cuda-graph artifacts, kernel shape-boundary errors, runtime fp16
+rounding, and "asymmetric is objectively worse by MSE" — it is not: every one of the 192
+quantized matrices has *lower* reconstruction error under asymmetric encoding, exactly as the
+extra zero-point degree of freedom predicts). The actual cause: damage concentrates in the
+`ffn.value` and `ffn.key` matrices specifically (forcing just those two back to symmetric while
+leaving attention asymmetric drops the collapse rate on a curated probe set from 8/9 to 1/9 and
+3/9 respectively) — these are the only two of six quantized matrix types fed an always-non-negative,
+86–90%-sparse activation (`relu(k)²`), structurally unlike the roughly zero-mean activations
+attention and the rest of the FFN see. This echoes an earlier, independent finding
+([F0017](findings/0017-w4-int4-quant.md)) that asymmetric quantization systematically hurts
+this model family in a way plain weight-MSE doesn't predict — a recurring, real sensitivity,
+not a one-off.
+
+**The obvious fix attempt — a hybrid checkpoint exempting just those two matrix types from
+the asymmetric scheme — does not clear the bar either.** It recovers real ground over the
+fully-asymmetric checkpoint (47.78% → 56.03%, +8.25pt, confirming the diagnosis), but lands
+5pt *below* plain symmetric and, notably, with a *higher* truncation rate (26.2%) than either
+extreme — a different failure mode, not fewer failures: the fully-asymmetric checkpoint's
+degeneracy was a fast, short, content-independent collapse (low truncation, because a short
+wrong answer ends within budget); the hybrid checkpoint instead loses the thread mid-derivation
+and runs long without concluding, more often hitting the 1,500-token cap. **Verdict: plain
+symmetric GPTQ remains the recommended 7.2B int4 checkpoint.** The asymmetric line of
+investigation was worth running — it produced a real, evidenced finding about which matrices
+in this architecture are sensitive to which quantization schemes — but it did not produce a
+checkpoint worth shipping over the simpler symmetric baseline at this size. The 1.5B collapse
+looks like a small-model-specific fragility, not a flaw in the quantization scheme itself;
+int4's honest scope is "a genuine memory/speed win at 7.2B+ with symmetric encoding, use int8
+instead of int4 for reasoning-heavy workloads specifically at 1.5B." Treat 1.5B int4
+(symmetric or asymmetric) as a memory tool for non-reasoning workloads at that size, not a
+general-purpose lossless tier — w8g64 (int8, weight-only) remains the lossless quantized tier
+at every size measured. Raw:
 `bench/results/math500_greedy_w4gptq_5090main.json` (1.5B greedy),
-`bench/results/math500_avg64_7.2b_{fp16,sym,asym}.json` (7.2B avg@64),
-`docs/findings/0043-w4-asym-gptq.md` (1.5B full picture), a follow-up finding for 7.2B is
-pending the asymmetric run's completion.
+`bench/results/math500_avg64_7.2b_{fp16,sym,asym,hybrid_ffnvk}.json` (7.2B avg@64),
+`docs/findings/0043-w4-asym-gptq.md` (1.5B full picture); a follow-up finding doc for the 7.2B
+asymmetric collapse + hybrid investigation is pending.
 
 **The sm120 w8a8 kernel (GEMM microbench).** Upstream cutlass `int8_scaled_mm` does not
 compile for sm120, so on Blackwell consumer cards our hand-written s8-wmma GEMM (register-
