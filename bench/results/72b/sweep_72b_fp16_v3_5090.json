@@ -141,6 +141,6 @@
     "out_len": 256,
     "reqs_mult": 4,
     "min_reqs": 8,
-    "out": "/data/hakureirm/rwkv-sglang/bench/results/qwen35/rwkv7_7.2b_fp16_fullstack_resweep_5090_v3.json"
+    "out": "bench/results/qwen35/rwkv7_7.2b_fp16_fullstack_resweep_5090_v3.json"
   }
 }

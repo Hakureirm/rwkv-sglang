@@ -14,7 +14,7 @@
   "throughput_gen_tok_per_s": 3247.862750627835,
   "sample_per_sec": 6.71440008316416,
   "config": {
-    "model": "/data/hakureirm/rwkv-sglang/models/rwkv7-7.2b-fla",
+    "model": "models/rwkv7-7.2b-fla",
     "data": "bench/data/MATH500.jsonl",
     "temperature": 0.0,
     "top_p": 0.28,

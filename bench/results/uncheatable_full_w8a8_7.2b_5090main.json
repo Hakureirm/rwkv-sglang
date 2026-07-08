@@ -1,5 +1,5 @@
 {
-  "model": "/data/hakureirm/rwkv-sglang/models/rwkv7-7.2b-w8a8",
+  "model": "models/rwkv7-7.2b-w8a8",
   "ctx_len": 4000,
   "max_docs": 0,
   "datasets": {
