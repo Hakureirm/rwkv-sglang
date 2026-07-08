@@ -20,6 +20,29 @@ Replicated from REF (line numbers refer to that file):
     max_new_tokens=1500, ctx_limit=8192, sampler order temperature -> top_k -> top_p
     (sglang's sampler applies temperature, then top_k, then top_p - same order).
     No repetition penalty (REF L421 "penalty": "off").
+  * chatml_* sampling params are NOT REF's: the --top-p/--top-k/--temperature
+    defaults above are BlinkDL's RWKV-tuned values and must be explicitly
+    overridden on the command line when running chatml_thinking/chatml_direct
+    against a non-RWKV model -- pass that model's OWN documented sampling
+    recipe (e.g. its README's "Best Practices"/"Quickstart" tip box). Example,
+    Qwen3.5 (models/qwen3.5-{2b,9b}/README.md "Best Practices" section):
+      2B non-thinking (text tasks): temperature=1.0 top_p=1.00 top_k=20 presence_penalty=2.0
+      2B thinking     (text tasks): temperature=1.0 top_p=0.95 top_k=20 presence_penalty=1.5
+      9B non-thinking (general):    temperature=0.7 top_p=0.80 top_k=20 presence_penalty=1.5
+      9B thinking     (general):    temperature=1.0 top_p=0.95 top_k=20 presence_penalty=1.5
+    (9B's card also has a distinct "non-thinking + reasoning-tasks" row in its
+    Quickstart tip box that disagrees with its own later Best Practices section
+    for that one row -- 0.95/20/1.5 vs 1.0/40/2.0 -- the two sections agree on
+    every other row; resolve this at the call site with a documented choice,
+    don't silently pick one here.)
+  * --presence-penalty/--repetition-penalty (new args, default 0.0/1.0) map
+    straight through to sglang's own SamplingParams fields of the same name
+    (python/sglang/srt/sampling/sampling_params.py; presence_penalty in
+    [-2, 2], repetition_penalty in (0, 2], 1.0 = no-op). Defaults are sglang's
+    own no-op values, so fake_think/plain (RWKV) invocations that don't pass
+    these flags are byte-for-byte unaffected -- REF has no equivalent knob to
+    source a default from since it's an RWKV-only reference script and never
+    used repetition penalty (REF L421 above).
   * Stop conditions (REF process_next_token L257-L276 / finish_row L187-L199):
       - token 0 sampled  -> "eod"   (we pass stop_token_ids=[0]);
       - "\nUser:" in the decoded text -> "user_stop", completion is the text BEFORE
@@ -159,6 +182,12 @@ def one_rollout(sess, gen_url, ids, args):
                 "temperature": args.temperature,
                 "top_p": args.top_p,
                 "top_k": args.top_k,
+                # sglang SamplingParams fields, default 0.0/1.0 = no-op (matches
+                # REF L421 "penalty": "off" for fake_think/plain callers that don't
+                # pass these; chatml_* callers should pass the target model's own
+                # documented values, see module docstring).
+                "presence_penalty": args.presence_penalty,
+                "repetition_penalty": args.repetition_penalty,
                 "max_new_tokens": args.max_new_tokens,
                 # fake_think/plain: REF's ["\nUser:"] / [0] (L270-L272 / L263-L265).
                 # chatml_*: the model's own turn-end special token(s) -- computed
@@ -252,6 +281,12 @@ def main():
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--top-p", type=float, default=0.28)
     ap.add_argument("--top-k", type=int, default=32)
+    # sglang SamplingParams no-op defaults (0.0/1.0) -- fake_think/plain (RWKV, REF)
+    # never pass these so REF's "penalty": "off" behavior is unchanged; chatml_*
+    # callers should override with the target model's own documented values (see
+    # module docstring for Qwen3.5's).
+    ap.add_argument("--presence-penalty", type=float, default=0.0)
+    ap.add_argument("--repetition-penalty", type=float, default=1.0)
     ap.add_argument("--prompt-style", choices=("fake_think", "plain", "chatml_thinking", "chatml_direct"), default="fake_think")
     ap.add_argument("--verify-workers", type=int, default=8)  # REF L63
     ap.add_argument("--timeout", type=float, default=3600.0)
@@ -328,7 +363,11 @@ def main():
             "temperature": args.temperature, "top_p": args.top_p, "top_k": args.top_k,
             "max_new_tokens": args.max_new_tokens, "ctx_limit": args.ctx_limit,
             "sampler_order": "temperature -> top_k -> top_p",  # REF L419
-            "penalty": "off",                                   # REF L421
+            # presence_penalty=0.0/repetition_penalty=1.0 (the argparse defaults) are
+            # sglang's own no-op values == REF L421 "penalty": "off"; non-default
+            # values here mean a chatml_* run overrode them (see module docstring).
+            "presence_penalty": args.presence_penalty,
+            "repetition_penalty": args.repetition_penalty,
             "prompt_style": args.prompt_style,
             "stop_token_ids": args.stop_token_ids,
             "stop_strings": args.stop_strings,

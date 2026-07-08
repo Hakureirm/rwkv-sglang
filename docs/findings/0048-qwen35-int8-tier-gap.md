@@ -132,7 +132,7 @@ open follow-up if a future session wants a clean FP8 peak number.
 
 Sanity + speed JSONs on the 5090 tower (not copied into this repo, per the existing
 qwen35-benchmark-project convention of keeping comparison JSONs on the shared box):
-`/data/hakureirm/rwkv-sglang/bench/results/qwen35/qwen35_{2b,9b}_fp8_bsz1_5090.json`,
+`bench/results/qwen35/qwen35_{2b,9b}_fp8_bsz1_5090.json`,
 `qwen35_9b_fp8_sweep_5090.json` (the reliable 256-config run),
 `qwen35_9b_fp8_sweep_5090_v2.json` (the 288-config false-plateau, kept as a documented
 negative example). RWKV int8 reference numbers: §4 / [F0035](0035-7b-int8-concurrency-headroom.md)

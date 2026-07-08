@@ -1,0 +1,37 @@
+{
+  "num_tasks": 500,
+  "rollout": 64,
+  "total_generations": 32000,
+  "correct_generations": 21642,
+  "rollout_accuracy": 0.6763125,
+  "pass_at_rollout_accuracy": 0.97,
+  "ended_eod_rate": 0.9900625,
+  "ended_user_stop_rate": 0.0,
+  "truncated_rate": 0.0099375,
+  "mean_generated_tokens": 4658.58334375,
+  "generated_tokens_total": 149074667,
+  "gen_wall_time_s": 14944.83294916153,
+  "throughput_gen_tok_per_s": 9974.997211886784,
+  "sample_per_sec": 2.141208276389288,
+  "config": {
+    "model": "models/qwen3.5-2b",
+    "data": "bench/data/MATH500.jsonl",
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "top_k": 20,
+    "max_new_tokens": 16384,
+    "ctx_limit": 17408,
+    "sampler_order": "temperature -> top_k -> top_p",
+    "presence_penalty": 2.0,
+    "repetition_penalty": 1.0,
+    "prompt_style": "chatml_direct",
+    "stop_token_ids": [
+      248044,
+      248046
+    ],
+    "stop_strings": [
+      "<|im_start|>"
+    ],
+    "concurrency": 256
+  }
+}

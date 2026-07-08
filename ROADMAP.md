@@ -52,19 +52,25 @@ Two long-running jobs are the current critical path, both healthy and multi-hour
   fp16 baseline avg@64** (the reference point sym/asym get compared against) — this is the
   direct follow-up F0043 called for, and decides whether a full K-quant rewrite (Stage 2) is
   worth building at all. Not done yet; sym/asym runs still to follow after this baseline.
-- **Tower (RTX 5090)**: Qwen3.5-2B MATH500 avg@64. The first full run (chatml_thinking) came
-  back with **93.15% truncated generations** — a real methodology bug, not a result: the
-  harness inherited RWKV's own sampling defaults (`top_p=0.28`) instead of Qwen3.5's
-  documented thinking-mode settings, and had no `presence_penalty` support at all (Qwen3.5's
-  docs call for `presence_penalty=1.5` in thinking mode). Fixed (added presence_penalty
-  support, corrected sampling params per-mode), re-piloted at several token budgets to
-  right-size things before committing to a full re-run. **Non-thinking mode is done and
-  clean**: 67.6% accuracy, 0.99% truncated (Qwen3.5-2B's own documented default mode — a
-  real, unfavorable-to-RWKV result vs RWKV-7 1.5B's published 40.4-40.6%, reported honestly).
-  **Thinking mode is running now** at a capped budget (mnt=16384, a deliberate fallback from
-  the model's documented mnt=32768 default after pilot data showed a heavy-tailed truncation
-  curve that made the full 32768 budget impractically expensive — see
-  `memory/project-qwen35-benchmark.md` round 11 for the pilot sweep data behind this call).
+- **Tower (RTX 5090)**: Qwen3.5-2B MATH500 avg@64 — **DONE, both modes**. The first full run
+  (chatml_thinking) came back with **93.15% truncated generations** — a real methodology bug,
+  not a result: the harness inherited RWKV's own sampling defaults (`top_p=0.28`) instead of
+  Qwen3.5's documented thinking-mode settings, and had no `presence_penalty` support at all
+  (Qwen3.5's docs call for `presence_penalty=1.5` in thinking mode). Fixed (added
+  presence_penalty support, corrected sampling params per-mode), re-piloted at several token
+  budgets to right-size things before committing to a full re-run. **Non-thinking mode**: 67.63%
+  accuracy, 0.99% truncated (Qwen3.5-2B's own documented default mode — a real,
+  unfavorable-to-RWKV result vs RWKV-7 1.5B's published 40.4-40.6%, reported honestly).
+  **Thinking mode**: 47.72% accuracy, 52.4% truncated, at the capped mnt=16384 budget (a
+  deliberate fallback from the model's documented mnt=32768 default after pilot data showed a
+  heavy-tailed truncation curve that made the full 32768 budget impractically expensive — a
+  projected 16+ hours for one measurement). Both numbers beat RWKV-7 1.5B's own avg@64
+  (40.4-40.6%) — reported the same way the concurrency wins above are, per this project's
+  claims-need-numbers discipline. Full account, including the pool-pressure/retraction dynamic
+  that made the actual thinking-mode run take 13.3h against a 9.6h pre-run estimate: F0053. This
+  job is no longer active — Qwen3.5-9B was deliberately not attempted this session (2B alone
+  took ~17.5 GPU-hours across both modes); see F0053 "What's not done" for the explicit
+  disclosure.
 
 This Mac is idle for GPU-heavy work by design (the Apple-Silicon Qwen3.5-MATH500 attempt hit
 memory pressure and was stopped on direct instruction, not retried) — currently used for
@@ -84,9 +90,10 @@ state live rather than requiring manual SSH checks.
    exactly the data this decision needs — "measure first, don't build blind."
 2. **Qwen3.5 comparison → the actual BENCHMARKS chapter.** All the pieces (cloud speed, desktop
    speed, Apple Silicon speed, cloud accuracy, oracle-gate, and now the corrected MATH500
-   avg@64 numbers once thinking-mode lands) need assembling into one coherent, cross-referenced
-   chapter in `docs/BENCHMARKS.md`/`.zh-CN.md` §13.4 — currently still marked "in progress"
-   pending the thinking-mode result.
+   avg@64 numbers, both modes) have landed in `docs/BENCHMARKS.md`/`.zh-CN.md` §13.4 (F0053) —
+   this item is **done** for the 2B tier. Qwen3.5-9B's own MATH500 avg@64 (thinking +
+   non-thinking) remains not attempted (deliberately deprioritized this session, see F0053) and
+   is the one piece still missing from a fully-complete chapter.
 3. **High-bandwidth kernel work, next increment.** F0052 shipped a real but modest win; the
    next candidate per F0051/F0052's own ceiling analysis is 128-bit vectorized GEMV loads —
    not yet attempted, no agent currently assigned.
@@ -150,7 +157,9 @@ two-box setup, that's why.
   2026-07-07**: yes — F0052 shipped, byte-exact gate, real modest win, see "Active right now."
 - Does 7.2B int4's sym/asym MATH500 avg@64 pattern match 1.5B's (large collapse, asymmetric
   helps some but not enough), or does it hold up better at scale? Still running.
-- Does Qwen3.5-2B thinking mode's accuracy actually beat non-thinking's 67.6% once the capped
-  mnt=16384 budget finishes, given how much of the distribution was still truncated at that
-  budget in pilot testing (62.2%)? Genuinely unknown until the run completes — don't assume
-  either direction.
+- ~~Does Qwen3.5-2B thinking mode's accuracy actually beat non-thinking's 67.6% once the capped
+  mnt=16384 budget finishes?~~ **Resolved 2026-07-08**: no — thinking mode finished at 47.72%
+  avg@64 (52.4% truncated on the full 500×64 run), well below non-thinking's 67.63% (0.99%
+  truncated). Both still beat RWKV-7 1.5B's own 40.4-40.6%, but non-thinking is the stronger
+  and cleaner (lower-truncation) of the two Qwen3.5-2B numbers, consistent with it being the
+  model's better-converged mode at a bounded token budget — see F0053.

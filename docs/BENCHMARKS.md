@@ -831,7 +831,7 @@ attempting it ran into real memory pressure on this Mac and was stopped; this is
 gap, not a silent omission. See §12.6 for why the Apple Neural Engine isn't part of this
 picture either (feasibility gate FAIL, F0042).
 
-### 13.4 Accuracy — compression rate (the cloud-tier reading)
+### 13.4 Accuracy — compression rate and MATH500 avg@64 (the cloud-tier reading)
 
 | model | precision | pooled bpb | N |
 |---|---|---:|---:|
@@ -841,10 +841,32 @@ picture either (feasibility gate FAIL, F0042).
 **RWKV-7 1.5B compresses better than Qwen3.5-2B** despite being the smaller model — on this
 ruler (one of the two this project treats as decisive, per `feedback-benchmark-rigor`),
 RWKV-7 is ahead, corroborated by the same direction on the Apple Silicon tier above (two
-platforms, two independent implementations, same conclusion). **MATH500 avg@64 for Qwen3.5 is
-in progress** (a multi-hour job on the cloud tier as of this writing) — this section will be
-extended with that result rather than this document claiming a reasoning-quality verdict it
-doesn't have yet.
+platforms, two independent implementations, same conclusion).
+
+**MATH500 avg@64.** An earlier run of this measurement against Qwen3.5-2B had a real
+methodology bug (RWKV-tuned sampling parameters left in place for a non-RWKV model, plus no
+`presence_penalty` support in the harness at all) that produced 93.15% truncation and an
+unusable number; root-caused, fixed, and re-measured — see [F0053](findings/0053-qwen35-math500-sampling-fix.md)
+for the full account, including the pilot-driven token-budget decision (16,384, a disclosed,
+cost-bounded operating point, not each mode's asymptotic ceiling).
+
+| model | mode | avg@64 | truncated | mean gen tokens | note |
+|---|---|---:|---:|---:|---|
+| RWKV-7 1.5B | fake_think (1,500 tok budget) | 40.60% (orig.) / 40.42% (current-HEAD) | 14.2% | 581 | F0024, own decreed metric |
+| Qwen3.5-2B | **non-thinking** (16,384 tok budget) | **67.63%** | **0.99%** | 4,659 | **headline for this tier** — matches Qwen3.5-2B's own documented default operating mode |
+| Qwen3.5-2B | thinking (16,384 tok budget) | 47.72% | 52.4% | 11,880 | reported alongside, not Qwen3.5-2B's default mode at this size; a disclosed floor, not the mode's ceiling (F0053) |
+
+Non-thinking is reported as the headline Qwen3.5-2B number specifically because
+Qwen3.5-2B's own model card states it "operates in non-thinking mode by default" — this
+project did not pick whichever mode happens to favor either side; the model's own documented
+default usage decided it. Read plainly, **Qwen3.5-2B beats RWKV-7 1.5B on this ruler in both
+modes** (67.63% and 47.72% vs 40.4-40.6%) — reported the same way a loss would be, per this
+project's own claims-need-numbers discipline. Thinking mode's truncation rate (52.4%) is
+disclosed plainly rather than folded into a single number that hides it: the pilot sweep
+behind this number (F0053) was still rising at every token budget tested up to 16,384, and
+32,768 (Qwen3.5's own documented general-purpose default length) was priced out on wall-clock
+grounds alone (a projected 16+ hours for one measurement) — so 47.72% is a real, complete
+500×64 result, but a lower bound on thinking mode's achievable score, not its ceiling.
 
 ### 13.5 Correctness
 
@@ -866,7 +888,7 @@ skipped — each has its own tracked follow-up.
 
 ---
 
-*In-progress (this page is updated as they land): Qwen3.5 MATH500 avg@64 + compression on the
-cloud tier (§13.4); 7.2B int4-GPTQ MATH500 avg@64 (§2/§4, decides the w4 Stage-2 question);
-continuing high-bandwidth-card kernel fusion work (§7); 3090-on-main ladder; per-size
-decode/prefill grid vs Albatross retuned.*
+*In-progress (this page is updated as they land): 7.2B int4-GPTQ MATH500 avg@64 (§2/§4,
+decides the w4 Stage-2 question); continuing high-bandwidth-card kernel fusion work (§7);
+3090-on-main ladder; per-size decode/prefill grid vs Albatross retuned; Qwen3.5-9B MATH500
+avg@64 (§13.4 currently covers the 2B tier only, both modes, F0053).*
