@@ -136,7 +136,10 @@ _FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "4"))
 # sigmoids + neg/mul/sub/add) into ONE launch on the bsz1 fp16 lora4_m1 path. The
 # H100 profile (F0051) found these ~5-7 tiny elementwise ops are the single largest
 # un-fused launch-count cluster per decode layer. Byte-exact vs torch gated by
-# bench/test_lora_gates.py (incl. the sigmoid transcendental) before default. OFF.
+# bench/test_lora_gates.py (incl. the sigmoid transcendental). Raw env default OFF (opt-in,
+matches every other fast-path flag above); scripts/serve.sh exports this ON as of
+2026-07-08 as part of the recommended production combo (see that file's header for the
+combined-flags re-verification this promotion required).
 _FUSED_GATES = os.environ.get("RWKV_FUSED_GATES", "0") == "1"
 # W1 cont. (reverse-overtake, F0052): EPILOGUE-fuse the FFN channel-mix activation
 # relu(k)^2 INTO the ffn.key GEMV's store (one kernel), instead of running relu + pow
@@ -147,7 +150,11 @@ _FUSED_GATES = os.environ.get("RWKV_FUSED_GATES", "0") == "1"
 # that directly follows a GEMV output); the other 5 GEMV call sites (r/k/v/o + ffn.value)
 # have no such epilogue and are untouched — so this is a NEW op (gemv_m1_sqrelu), never a
 # change to the shared gemv_m1. Byte-exact vs torch.relu(gemv_m1(.))**2 gated by
-# bench/test_sqrelu_gate.py; greedy-EXACT end-to-end by verify_batch.py. Default OFF.
+# bench/test_sqrelu_gate.py; greedy-EXACT end-to-end by verify_batch.py. Mutually exclusive
+with RWKV_SPARSE_FFN (see `not self._sparse` below) — when sparse is eligible it wins (a
+real bandwidth win); this is the epilogue-fusion fallback for sparse's own dense-fallback
+path, not a second lever stacked on top of it. Raw env default OFF (opt-in, matches every
+other fast-path flag above); scripts/serve.sh exports this ON as of 2026-07-08.
 _FUSED_SQRELU = os.environ.get("RWKV_FUSED_SQRELU", "0") == "1"
 _GLUE_ANNOUNCED = False  # one-time "R2 fused glue ENABLED" stderr notice (attn)
 _GATES_ANNOUNCED = False  # one-time "W1 fused LoRA gates ENABLED" notice

@@ -373,13 +373,15 @@ ratios above are against the stock numbers; against the re-tuned track they are 
 bsz1 (554.0 vs 553.9). Our launch parameters re-select at warmup on any card+CUDA — the design
 difference the next table quantifies.
 
-**Ongoing work on the bandwidth gap (2026-07-07, F0051).** The table above is the default
-(all fusion flags off) configuration. A real kernel-launch profile on H100 (699 launches per
+**Ongoing work on the bandwidth gap (2026-07-07, F0051).** The table above predates F0051/F0052
+and reflects the config of the day (all fusion flags off). **As of 2026-07-08 that is no longer
+the recommended default** — see the promotion note at the end of this subsection. A real kernel-launch profile on H100 (699 launches per
 full decode step, not the ~144 an earlier internal estimate assumed — re-measured via
 `torch.profiler`, don't trust the old figure) found the highest-launch-count still-unfused
 cluster (the LoRA-output gate math: 3 sigmoids + surrounding elementwise) and fused it into
 one kernel, bit-exact on both sm_89 and sm_90 (`max_abs_diff = 0.0`), gated behind
-`RWKV_FUSED_GATES` (default off, additive, doesn't touch the numbers above). Measured effect,
+`RWKV_FUSED_GATES` (raw env default off, additive, doesn't touch the numbers above — see
+promotion note below). Measured effect,
 isolating exactly this change (a bsz8 control where the fusion doesn't fire shows ~0% change
 on both cards, confirming clean A/B isolation): **H100 bsz1 359.4→392.6 (+9.24%, ratio vs
 Albatross 0.592×→0.646×); L4 bsz1 82.1→83.1 (+1.22%)** — the much larger H100 gain for the
@@ -402,8 +404,20 @@ Byte-exact (`torch.equal`) on both sm_89 and sm_90, including a check that the q
 non-event on the low-bandwidth one, the same correlation as F0051 again, but a much smaller win
 than the LoRA-gate fusion (proportional to the smaller 2-launch cluster it collapses, vs. ~7-8).
 Kernel-level accounting shows the fused epilogue itself costs ~0 extra GPU time, so this **revises
-the ceiling above from ~0.69× to ~0.71×**. Gated behind `RWKV_FUSED_SQRELU` (default off, additive).
+the ceiling above from ~0.69× to ~0.71×**. Gated behind `RWKV_FUSED_SQRELU` (raw env default off,
+additive; mutually exclusive with `RWKV_SPARSE_FFN` by construction — it's the epilogue-fusion
+fallback for sparse's own dense-fallback path, not a second lever stacked on top of it).
 See [F0052](findings/0052-sqrelu-epilogue-fusion-highbw.md).
+
+**Promotion to default (2026-07-08).** Both flags are byte-exact gated individually (op-level +
+end-to-end `verify_batch.py` greedy-EXACT vs. the numpy oracle) with zero observed regressions on
+either tested card, and quantized-tier blast-radius containment confirmed. `scripts/serve.sh`
+(the recommended production launch) now exports both ON, re-verified with **all 7 fast-path flags
+on simultaneously** (1.5B fp16, cuda-graph, vs. numpy oracle): `OVERALL: PASS (all batches exact)`
+— the shipped combo is gated as a whole, not assumed to compose from individually-tested pieces.
+Disclosed scope gap: both are byte-exact-verified on sm_89 (L4) + sm_90 (H100) only, not the
+11-card matrix the other fast-path flags accumulated over time — a narrower-published-speed-number
+issue, not a correctness one (see `scripts/serve.sh` header for the full reasoning).
 
 ## 7b. Comparison with vllm-rwkv (the community vLLM fork)
 

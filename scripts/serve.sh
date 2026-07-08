@@ -47,6 +47,24 @@ export RWKV_SPARSE_FFN=1           # sparse sqrelu channel-mix value-proj (bsz1)
 export RWKV_FUSED_LORA=1           # fused 4-chain LoRA (M==1 lora4_m1 + batched lora4_mn)
 export RWKV_FUSED_GLUE=1           # fused paged token-shift + lerp (R2 attn+ffn)
 export RWKV_GEMV_AUTOTUNE=1        # arch-aware GEMV launch autotune (warmup only)
+# W1 reverse-overtake pair (F0051/F0052), promoted to default here 2026-07-08. GATES and
+# SQRELU are NOT two independent simultaneous wins: SQRELU only fires when `not self._sparse`
+# (models/rwkv7.py, mutually exclusive by construction — the sparse kernel applies its own
+# relu^2 and needs the raw un-fused k). With RWKV_SPARSE_FFN=1 above, SPARSE_FFN wins
+# whenever it's eligible (a real bandwidth win, skips ~90% of weight reads on real prompts);
+# SQRELU is the insurance policy for sparse's own internal dense-fallback path (line ~926,
+# "not buildable -> dense from here on"), not a second lever stacked on top. Both are still
+# correct to default ON together (harmless when redundant, real when sparse can't apply).
+# Verification: each byte-exact gated individually (op-level + end-to-end verify_batch.py
+# greedy-EXACT) and quantized-tier blast-radius-contained; re-verified here 2026-07-08 with
+# ALL 7 exports above ON simultaneously on 1.5B fp16 cuda-graph vs the numpy oracle —
+# OVERALL: PASS (all batches exact), so the literal combo this script ships is gated, not
+# assumed to compose. Known scope gap (disclose, don't hide): both are byte-exact-verified
+# on sm_89 (L4) + sm_90 (H100) only, not the full 11-card matrix the other 5 exports
+# accumulated — a narrower-published-speed-number issue, not a correctness one (an
+# arch-specific divergence would fail the routine oracle re-verify this project runs per box).
+export RWKV_FUSED_GATES=1          # fused LoRA-gate activations (sigmoids+neg/mul/sub/add)
+export RWKV_FUSED_SQRELU=1         # epilogue-fused ffn relu(k)^2 into the key GEMV's store
 
 COMMON=(--model-path "$MODEL" --dtype "$DTYPE" --trust-remote-code
         --port "$PORT" --mem-fraction-static "$MEMFRAC"
