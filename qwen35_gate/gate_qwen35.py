@@ -23,6 +23,13 @@ endpoint using the SAME input_ids the other two paths use (bypassing sglang's
 own tokenizer, for an apples-to-apples comparison). If omitted or
 unreachable, the sglang leg is skipped and the verdict is based on the
 numpy-vs-mlx comparison alone.
+
+`--skip-mlx` skips the mlx-lm leg entirely (and avoids importing `mlx_probe`,
+which pulls in `mlx`/`mlx_lm` -- Apple-Silicon-only packages not installable
+on a Linux/CUDA box). Added in F0054 (Qwen3.5-9B gate, run on an x86+CUDA
+box with no mlx-lm available) so this driver can run numpy-vs-sglang only;
+default is False so F0050's original 2B usage (numpy vs mlx vs sglang) is
+unchanged unless the flag is passed explicitly.
 """
 import argparse
 import json
@@ -31,7 +38,6 @@ import sys
 import numpy as np
 
 from numpy_reference import PROBE_TEXT, Qwen35
-import mlx_probe
 
 
 def rows_to_dict(rows):
@@ -67,6 +73,7 @@ def main():
     ap.add_argument("--sglang-url", default=None, help="e.g. http://host:30070 (native /generate API)")
     ap.add_argument("--probe", default=PROBE_TEXT)
     ap.add_argument("--out", default=None, help="write full JSON result here")
+    ap.add_argument("--skip-mlx", action="store_true", help="skip the mlx-lm leg (Apple Silicon only; see module docstring)")
     args = ap.parse_args()
 
     result = {"probe": args.probe, "pth": args.pth, "hf_dir": args.hf_dir}
@@ -77,10 +84,15 @@ def main():
     result["probe_tokens"] = tokens
     result["numpy_top10"] = np_rows
 
-    print("\n### 2/3: mlx-lm live (bf16) ###")
-    _, mlx_rows = mlx_probe.report(args.hf_dir, args.probe)
-    result["mlx_top10"] = mlx_rows
-    result["numpy_vs_mlx"] = compare("numpy_fp32", np_rows, "mlx_bf16", mlx_rows)
+    if not args.skip_mlx:
+        import mlx_probe
+
+        print("\n### 2/3: mlx-lm live (bf16) ###")
+        _, mlx_rows = mlx_probe.report(args.hf_dir, args.probe)
+        result["mlx_top10"] = mlx_rows
+        result["numpy_vs_mlx"] = compare("numpy_fp32", np_rows, "mlx_bf16", mlx_rows)
+    else:
+        print("\n### 2/3: mlx-lm live -- skipped (--skip-mlx given) ###")
 
     if args.sglang_url:
         print(f"\n### 3/3: sglang live ({args.sglang_url}) ###")
@@ -112,9 +124,8 @@ def main():
             json.dump(result, f, indent=2)
         print(f"\nwrote {args.out}")
 
-    ok = result["numpy_vs_mlx"]["verdict"] == "PASS"
-    if "numpy_vs_sglang" in result:
-        ok = ok and result["numpy_vs_sglang"]["verdict"] == "PASS"
+    checked_legs = [k for k in ("numpy_vs_mlx", "numpy_vs_sglang") if k in result]
+    ok = bool(checked_legs) and all(result[k]["verdict"] == "PASS" for k in checked_legs)
     print(f"\nGATE_QWEN35_{'PASS' if ok else 'FAIL'}")
     sys.exit(0 if ok else 1)
 

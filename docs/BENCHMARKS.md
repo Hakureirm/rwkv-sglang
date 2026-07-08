@@ -954,20 +954,30 @@ axes, not a contradiction to resolve in either direction; a claim like "RWKV is 
 
 ### 13.5 Correctness
 
-Qwen3.5's outputs in this comparison are not just "coherent-looking" — Qwen3.5-**2B** is
+Qwen3.5's outputs in this comparison are not just "coherent-looking" — both tested sizes are
 oracle-gated against BlinkDL's own independent numpy fp32 reference implementation (the same
-rigor this project always applies to its own RWKV-7 kernels), on both serving paths this
-comparison uses: mlx-lm (bf16) and sglang (bf16) both agree with the reference on top-1/top-5
-next-token distribution for a probe prompt, differences consistent with ordinary bf16
-rounding (F0050). **Qwen3.5-9B has not yet been gated this way** — not assumed to inherit the
-2B result, tracked as an open item.
+rigor this project always applies to its own RWKV-7 kernels). Qwen3.5-**2B**: mlx-lm (bf16)
+and sglang (bf16) both agree with the reference on top-1/top-5 next-token distribution for a
+probe prompt, differences consistent with ordinary bf16 rounding (F0050). Qwen3.5-**9B**: the
+sglang (bf16) serving path this project's 9B numbers actually run on agrees with the same
+reference — top-1 exact match, identical 10/10 top-10 token set, max absolute probability
+difference 0.0049 (F0054). Getting the 9B gate to pass required a real fix, not just new
+constants: 9B's linear-attention layer has an asymmetric key/query-vs-value head count (16 vs
+32) that upstream's own reference script's `np.split(qkv, 3)` cannot even run against (it
+requires three equal-width splits) — root-caused against HF transformers' actual
+`Qwen3_5GatedDeltaNet.forward()` and fixed with a GQA-style head-expansion the 2B/0.8B tiers
+never needed to exercise (both have matching key/value head counts, which is exactly why
+F0050 never surfaced this). The fix was verified two ways before being trusted: algebraically
+(hand-derived equivalence to HF's own reference recurrence) and empirically (the updated code,
+re-run against the untouched 2B checkpoint, reproduces F0050's exact published result to 5-6
+significant figures — a strict generalization, not a rewrite that happens to also work for 2B).
 
 ### 13.6 What this comparison does not yet cover (stated, not hidden)
 
 Int8-vs-int8 (no pre-quantized Qwen3.5 checkpoint exists, §13.1). MATH500 on Apple Silicon
 (memory-constrained, §13.3). A true compute-bound Qwen3.5-9B peak on 24GB hardware (memory
-ceiling reached first, §13.2). Qwen3.5-9B correctness oracle-gate (§13.5). Mobile and embedded
-device tiers (no such hardware available to this project). None of these are being silently
+ceiling reached first, §13.2). Mobile and embedded device tiers (no such hardware available
+to this project). None of these are being silently
 skipped — each has its own tracked follow-up.
 
 ---
