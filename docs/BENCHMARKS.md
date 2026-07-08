@@ -204,21 +204,38 @@ the thread mid-derivation and rambles to the token cap (57.7% truncation vs fp16
 1023 vs 581 generated tokens).
 
 **Asymmetric (scale+zero) quantization — the cheap fix, tried first — helps for real but doesn't
-solve it:** avg@64 improves to **0.2199** (truncation down to 30.5%), closing 27.4% of the gap to
-fp16. That's a smaller fractional recovery than the same fix gets on lambada (35.0%) or
-compression (32.9%) — the more decision-relevant the metric, the less a wider-but-still-4-bit
+solve it at 1.5B:** avg@64 improves to **0.2199** (truncation down to 30.5%), closing 27.4% of
+the gap to fp16. That's a smaller fractional recovery than the same fix gets on lambada (35.0%)
+or compression (32.9%) — the more decision-relevant the metric, the less a wider-but-still-4-bit
 encoding buys back, which reads as evidence this is closer to compounding error over a long
-reasoning chain than a simple "not enough bits" problem. **Decision (F0043): a full K-quant
-mixed-precision rewrite (Stage 2, Q4_K_M-style 4/6-bit mixed blocks) is not recommended yet** —
-the cheaper, more informative next step is checking whether 7.2B's int4 MATH500 collapses this
-badly too (only lambada has been checked there, at a much smaller −1.28pt hit than 1.5B's
-−3.34pt, consistent with "bigger models quantize better"); if 7.2B holds up fine on MATH500,
-int4's honest scope is "great memory tool at 7.2B+, use int8 instead of int4 for reasoning-heavy
-workloads at 1.5B" and Stage 2 isn't needed at all. Treat 1.5B int4 (symmetric or asymmetric) as
-a memory tool for non-reasoning workloads, not a general-purpose lossless tier — w8g64 (int8,
-weight-only) remains the lossless quantized tier. Raw:
-`bench/results/math500_greedy_w4gptq_5090main.json` (greedy),
-`docs/findings/0043-w4-asym-gptq.md` (full avg@64 + compression + lambada picture).
+reasoning chain than a simple "not enough bits" problem, *at this size*.
+
+**Update (2026-07-08): the 7.2B version of this question has landed, and it changes the
+picture substantially.** Same protocol (500×64 avg@64), same model family, four times the
+parameters:
+
+| 7.2B MATH500 avg@64 | score | vs fp16 | truncated |
+|---|---:|---:|---:|
+| fp16 (baseline) | **64.18%** | — | 6.3% |
+| symmetric GPTQ int4 | **61.08%** | **−3.1pt** | 14.0% |
+| asymmetric GPTQ int4 | *measuring — will land in this table* | — | — |
+
+**−3.1pt, not −25.6pt.** At 1.5B, symmetric int4 lost over a quarter of the model's MATH500
+score; at 7.2B, the identical quantization scheme costs three points. This is a dramatic,
+direct confirmation of the "bigger models quantize better" hypothesis this section flagged as
+untested a session ago — it's no longer a hypothesis. **Revised decision (pending the
+asymmetric number, but already strongly indicated): a full K-quant mixed-precision rewrite
+(Stage 2) does not look necessary at 7.2B** — plain symmetric GPTQ is already close enough to
+lossless on the hardest reasoning ruler this project has. The 1.5B collapse looks like a
+small-model-specific fragility, not a flaw in the quantization scheme itself; int4's honest
+scope is "a genuine memory/speed win at 7.2B+, use int8 instead of int4 for reasoning-heavy
+workloads specifically at 1.5B." Treat 1.5B int4 (symmetric or asymmetric) as a memory tool
+for non-reasoning workloads at that size, not a general-purpose lossless tier — w8g64 (int8,
+weight-only) remains the lossless quantized tier at every size measured. Raw:
+`bench/results/math500_greedy_w4gptq_5090main.json` (1.5B greedy),
+`bench/results/math500_avg64_7.2b_{fp16,sym,asym}.json` (7.2B avg@64),
+`docs/findings/0043-w4-asym-gptq.md` (1.5B full picture), a follow-up finding for 7.2B is
+pending the asymmetric run's completion.
 
 **The sm120 w8a8 kernel (GEMM microbench).** Upstream cutlass `int8_scaled_mm` does not
 compile for sm120, so on Blackwell consumer cards our hand-written s8-wmma GEMM (register-
@@ -235,7 +252,8 @@ GEMM, × = our speedup over fp16):
 The GEMM wins, but 1.5B e2e is 0.9466× fp16 (§5): the per-token activation-quant launch,
 not amortized across ~144 heterogeneous decode kernels, plus an already-excellent fp16
 baseline, eat the kernel's margin. That tax is latent on the VRAM-bound 7.2B case above,
-where int8's real win (2.90× concurrency) lives. Raw: `bench/verify_w8a8.py --bench`.
+where int8's real win (**1.86× concurrency**, corrected 2026-07-07 per F0047 — see above)
+lives. Raw: `bench/verify_w8a8.py --bench`.
 
 ## 5. Serving throughput (RWKV-7 1.5B, wall-clock, 64-in/256-out, concurrency sweep)
 
