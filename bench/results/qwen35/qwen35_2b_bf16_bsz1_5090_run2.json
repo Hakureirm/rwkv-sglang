@@ -1,0 +1,36 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 6.1,
+      "out_tokens": 2048,
+      "out_tok_per_s": 336.0,
+      "req_per_s": 1.312,
+      "lat_p50_s": 0.761,
+      "lat_p99_s": 0.766,
+      "per_stream_tok_s": 336.0
+    }
+  ],
+  "peak": {
+    "concurrency": 1,
+    "requests": 8,
+    "wall_s": 6.1,
+    "out_tokens": 2048,
+    "out_tok_per_s": 336.0,
+    "req_per_s": 1.312,
+    "lat_p50_s": 0.761,
+    "lat_p99_s": 0.766,
+    "per_stream_tok_s": 336.0
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "concurrencies": "1",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "bench/results/qwen35/qwen35_2b_bf16_bsz1_5090_run2.json"
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 21.34,
+      "out_tokens": 2048,
+      "out_tok_per_s": 96.0,
+      "req_per_s": 0.375,
+      "lat_p50_s": 2.667,
+      "lat_p99_s": 2.669,
+      "per_stream_tok_s": 96.0
+    },
+    {
+      "concurrency": 8,
+      "requests": 32,
+      "wall_s": 11.76,
+      "out_tokens": 8192,
+      "out_tok_per_s": 696.4,
+      "req_per_s": 2.72,
+      "lat_p50_s": 2.938,
+      "lat_p99_s": 2.942,
+      "per_stream_tok_s": 87.1
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 16.25,
+      "out_tokens": 32768,
+      "out_tok_per_s": 2016.1,
+      "req_per_s": 7.875,
+      "lat_p50_s": 4.078,
+      "lat_p99_s": 4.126,
+      "per_stream_tok_s": 63.0
+    },
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 19.48,
+      "out_tokens": 65536,
+      "out_tok_per_s": 3363.7,
+      "req_per_s": 13.139,
+      "lat_p50_s": 4.863,
+      "lat_p99_s": 4.892,
+      "per_stream_tok_s": 52.6
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 30.51,
+      "out_tokens": 131072,
+      "out_tok_per_s": 4295.8,
+      "req_per_s": 16.78,
+      "lat_p50_s": 7.606,
+      "lat_p99_s": 7.672,
+      "per_stream_tok_s": 33.6
+    },
+    {
+      "concurrency": 144,
+      "requests": 576,
+      "wall_s": 35.6,
+      "out_tokens": 147456,
+      "out_tok_per_s": 4142.1,
+      "req_per_s": 16.18,
+      "lat_p50_s": 8.868,
+      "lat_p99_s": 8.92,
+      "per_stream_tok_s": 28.8
+    }
+  ],
+  "peak": {
+    "concurrency": 128,
+    "requests": 512,
+    "wall_s": 30.51,
+    "out_tokens": 131072,
+    "out_tok_per_s": 4295.8,
+    "req_per_s": 16.78,
+    "lat_p50_s": 7.606,
+    "lat_p99_s": 7.672,
+    "per_stream_tok_s": 33.6
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "concurrencies": "1,8,32,64,128,144",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "bench/results/qwen35/qwen35_9b_bf16_sweep_5090_v2.json"
+  }
+}

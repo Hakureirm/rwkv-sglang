@@ -1,0 +1,102 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 23.33,
+      "out_tokens": 2048,
+      "out_tok_per_s": 87.8,
+      "req_per_s": 0.343,
+      "lat_p50_s": 2.917,
+      "lat_p99_s": 2.922,
+      "per_stream_tok_s": 87.8
+    },
+    {
+      "concurrency": 8,
+      "requests": 32,
+      "wall_s": 13.24,
+      "out_tokens": 8192,
+      "out_tok_per_s": 618.9,
+      "req_per_s": 2.418,
+      "lat_p50_s": 3.307,
+      "lat_p99_s": 3.312,
+      "per_stream_tok_s": 77.4
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 14.94,
+      "out_tokens": 32768,
+      "out_tok_per_s": 2192.7,
+      "req_per_s": 8.565,
+      "lat_p50_s": 3.728,
+      "lat_p99_s": 3.742,
+      "per_stream_tok_s": 68.5
+    },
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 18.26,
+      "out_tokens": 65536,
+      "out_tok_per_s": 3589.5,
+      "req_per_s": 14.022,
+      "lat_p50_s": 4.549,
+      "lat_p99_s": 4.572,
+      "per_stream_tok_s": 56.1
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 26.01,
+      "out_tokens": 131072,
+      "out_tok_per_s": 5039.3,
+      "req_per_s": 19.685,
+      "lat_p50_s": 6.468,
+      "lat_p99_s": 6.504,
+      "per_stream_tok_s": 39.4
+    },
+    {
+      "concurrency": 192,
+      "requests": 768,
+      "wall_s": 37.28,
+      "out_tokens": 196608,
+      "out_tok_per_s": 5273.4,
+      "req_per_s": 20.599,
+      "lat_p50_s": 9.097,
+      "lat_p99_s": 11.507,
+      "per_stream_tok_s": 27.5
+    },
+    {
+      "concurrency": 221,
+      "requests": 884,
+      "wall_s": 39.37,
+      "out_tokens": 226304,
+      "out_tok_per_s": 5748.0,
+      "req_per_s": 22.453,
+      "lat_p50_s": 9.787,
+      "lat_p99_s": 9.847,
+      "per_stream_tok_s": 26.0
+    }
+  ],
+  "peak": {
+    "concurrency": 221,
+    "requests": 884,
+    "wall_s": 39.37,
+    "out_tokens": 226304,
+    "out_tok_per_s": 5748.0,
+    "req_per_s": 22.453,
+    "lat_p50_s": 9.787,
+    "lat_p99_s": 9.847,
+    "per_stream_tok_s": 26.0
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "concurrencies": "1,8,32,64,128,192,221",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "bench/results/qwen35/rwkv7_7.2b_bf16_sweep_5090.json"
+  }
+}

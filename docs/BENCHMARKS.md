@@ -926,6 +926,15 @@ cost-bounded operating point, not each mode's asymptotic ceiling).
 | Qwen3.5-9B | **non-thinking** (16,384 tok budget) | **86.28%** | **0.02%** | 1,809 | **headline for this tier** — clean convergence, matches Qwen3.5-9B's own documented default mode |
 | Qwen3.5-9B | thinking (16,384 tok budget) | *not measured* | — | — | pilot showed ~13% truncated; the full run was intentionally stopped at 25% (see below) |
 
+Raw: `bench/results/math500_avg64_7.2b_{fp16,sym,asym,hybrid_ffnvk}.json` (RWKV-7 7.2B, all
+four w4 variants plus the fp16 baseline — see §4 for the full quantization write-up);
+`bench/results/qwen35_accuracy/math500_avg64_2b_chatml_direct_5090.json`,
+`math500_avg64_2b_chatml_thinking_5090.json` (superseded first attempt, kept for the
+93%-truncation postmortem in F0053, not cited as data), `math500_avg64_2b_chatml_thinking_5090_v2.json`
+(the corrected, cited run), and `math500_avg64_9b_chatml_direct_5090.json` (Qwen3.5; the 9B
+thinking-mode file does not exist — the run was stopped before producing one, see below);
+F0053 (the sampling-fix account) and F0024 (RWKV-7's own MATH500 protocol).
+
 Non-thinking is reported as the headline number for both tiers specifically because
 Qwen3.5's own model cards state non-thinking is the default operating mode — this
 project did not pick whichever mode happens to favor either side; the model's own documented

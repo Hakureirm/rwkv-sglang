@@ -1,0 +1,124 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 23.34,
+      "out_tokens": 2048,
+      "out_tok_per_s": 87.8,
+      "req_per_s": 0.343,
+      "lat_p50_s": 2.918,
+      "lat_p99_s": 2.919,
+      "per_stream_tok_s": 87.8
+    },
+    {
+      "concurrency": 8,
+      "requests": 32,
+      "wall_s": 13.24,
+      "out_tokens": 8192,
+      "out_tok_per_s": 618.5,
+      "req_per_s": 2.416,
+      "lat_p50_s": 3.309,
+      "lat_p99_s": 3.312,
+      "per_stream_tok_s": 77.3
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 14.93,
+      "out_tokens": 32768,
+      "out_tok_per_s": 2194.5,
+      "req_per_s": 8.572,
+      "lat_p50_s": 3.726,
+      "lat_p99_s": 3.739,
+      "per_stream_tok_s": 68.6
+    },
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 18.22,
+      "out_tokens": 65536,
+      "out_tok_per_s": 3596.0,
+      "req_per_s": 14.047,
+      "lat_p50_s": 4.541,
+      "lat_p99_s": 4.575,
+      "per_stream_tok_s": 56.2
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 26.03,
+      "out_tokens": 131072,
+      "out_tok_per_s": 5034.7,
+      "req_per_s": 19.667,
+      "lat_p50_s": 6.477,
+      "lat_p99_s": 6.509,
+      "per_stream_tok_s": 39.3
+    },
+    {
+      "concurrency": 192,
+      "requests": 768,
+      "wall_s": 36.58,
+      "out_tokens": 196608,
+      "out_tok_per_s": 5374.0,
+      "req_per_s": 20.992,
+      "lat_p50_s": 9.065,
+      "lat_p99_s": 9.431,
+      "per_stream_tok_s": 28.0
+    },
+    {
+      "concurrency": 221,
+      "requests": 884,
+      "wall_s": 39.36,
+      "out_tokens": 226304,
+      "out_tok_per_s": 5749.7,
+      "req_per_s": 22.46,
+      "lat_p50_s": 9.782,
+      "lat_p99_s": 9.834,
+      "per_stream_tok_s": 26.0
+    },
+    {
+      "concurrency": 256,
+      "requests": 1024,
+      "wall_s": 42.48,
+      "out_tokens": 262144,
+      "out_tok_per_s": 6171.3,
+      "req_per_s": 24.107,
+      "lat_p50_s": 10.554,
+      "lat_p99_s": 10.613,
+      "per_stream_tok_s": 24.1
+    },
+    {
+      "concurrency": 320,
+      "requests": 1280,
+      "wall_s": 58.25,
+      "out_tokens": 327680,
+      "out_tok_per_s": 5625.7,
+      "req_per_s": 21.976,
+      "lat_p50_s": 14.418,
+      "lat_p99_s": 14.737,
+      "per_stream_tok_s": 17.6
+    }
+  ],
+  "peak": {
+    "concurrency": 256,
+    "requests": 1024,
+    "wall_s": 42.48,
+    "out_tokens": 262144,
+    "out_tok_per_s": 6171.3,
+    "req_per_s": 24.107,
+    "lat_p50_s": 10.554,
+    "lat_p99_s": 10.613,
+    "per_stream_tok_s": 24.1
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "concurrencies": "1,8,32,64,128,192,221,256,320",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "bench/results/qwen35/rwkv7_7.2b_bf16_sweep_5090_v2.json"
+  }
+}
