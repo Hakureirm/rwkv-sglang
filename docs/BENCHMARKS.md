@@ -924,7 +924,7 @@ cost-bounded operating point, not each mode's asymptotic ceiling).
 | Qwen3.5-2B | thinking (16,384 tok budget) | 47.72% | 52.4% | 11,880 | reported alongside, not Qwen3.5-2B's default mode at this size; a disclosed floor, not the mode's ceiling (F0053) |
 | RWKV-7 7.2B | fake_think (1,500 tok budget) | **64.18%** | 6.3% | 481 | own decreed metric, 2026-07-08 |
 | Qwen3.5-9B | **non-thinking** (16,384 tok budget) | **86.28%** | **0.02%** | 1,809 | **headline for this tier** — clean convergence, matches Qwen3.5-9B's own documented default mode |
-| Qwen3.5-9B | thinking (16,384 tok budget) | *measuring — will land in this table* | — | — | pilot showed ~13% truncated at this budget; expect the same disclosed-floor framing as the 2B row above |
+| Qwen3.5-9B | thinking (16,384 tok budget) | *not measured* | — | — | pilot showed ~13% truncated; the full run was intentionally stopped at 25% (see below) |
 
 Non-thinking is reported as the headline number for both tiers specifically because
 Qwen3.5's own model cards state non-thinking is the default operating mode — this
@@ -939,10 +939,20 @@ that hides it: the pilot sweep behind this number (F0053) was still rising at ev
 budget tested up to 16,384, and 32,768 (Qwen3.5's own documented general-purpose default
 length) was priced out on wall-clock grounds alone (a projected 16+ hours for one
 measurement) — so 47.72% is a real, complete 500×64 result, but a lower bound on thinking
-mode's achievable score, not its ceiling. The 9B thinking-mode row is applying the same
-disclosed-floor treatment; its pilot showed ~13% truncated at the same 16,384 budget (a
-narrower gap than the 2B pilot's early readings, consistent with larger models generally
-converging faster on this benchmark), and the full 500×64 measurement is in flight.
+mode's achievable score, not its ceiling. The 9B thinking-mode row was intended to get the
+same disclosed-floor treatment — its pilot showed ~13% truncated at the same 16,384 budget,
+narrower than the 2B pilot's early readings — but **the full 500×64 run was deliberately
+stopped at 25% (8,000/32,000 rollouts) rather than completed.** Live monitoring found
+thinking-mode's long reasoning chains push per-request KV-cache residency up as the run
+progresses, throttling live concurrency from ~128 down to ~22 and degrading aggregate
+throughput over time (not a stall — a real, structural slowdown); the revised ETA for
+completion was multiple days, on a shared GPU another project on the same box was waiting on
+via this project's own newly-adopted SkyPilot scheduling discipline. Given the non-thinking
+result above is already the headline number for this tier and thinking mode is explicitly
+secondary, holding a shared card for days to chase it wasn't justified — the run was killed
+and the card released rather than finished. This row is left honestly blank rather than
+filled with a stale or extrapolated number; re-running it to completion (via `sky launch`,
+per the project's own new discipline) is a legitimate future action, not a closed door.
 
 **The complete picture requires reading this table alongside §7's peak-concurrency
 throughput table, not in isolation.** On the accuracy axis measured here, Qwen3.5 leads at
@@ -983,9 +993,10 @@ skipped — each has its own tracked follow-up.
 ---
 
 *In-progress (this page is updated as they land): 7.2B int4-GPTQ MATH500 avg@64 (§2/§4,
-decides the w4 Stage-2 question — asymmetric collapsed to a genuine ML phenomenon, not a
-code bug, root-caused to the `ffn.value`/`ffn.key` matrices' quantization sensitivity; a
-hybrid checkpoint exempting just those two from the asymmetric scheme is being validated
-now); continuing high-bandwidth-card kernel fusion work (§7); 3090-on-main ladder; per-size
-decode/prefill grid vs Albatross retuned; Qwen3.5-9B thinking-mode MATH500 avg@64 (the
-non-thinking headline for this tier landed above, clean at 0.02% truncated).*
+decides the w4 Stage-2 question — **resolved**: symmetric GPTQ recommended, the hybrid
+ffn.value/ffn.key fix partially recovers accuracy but doesn't clear the bar over plain
+symmetric, Stage 2 not warranted at 7.2B, see §4); continuing high-bandwidth-card kernel
+fusion work (§7); 3090-on-main ladder; per-size decode/prefill grid vs Albatross retuned;
+Qwen3.5-9B thinking-mode MATH500 avg@64 (deliberately not run to completion — see §13.4 —
+released a shared GPU for another project rather than holding it for days on a secondary
+metric; a legitimate re-run candidate via `sky launch`, not abandoned).*
