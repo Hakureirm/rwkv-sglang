@@ -22,7 +22,7 @@ slightly faster across the board.
 | plain meaning | "tokens per second once it's running" | "tokens per second from request sent to answer complete" |
 | includes prompt reading (TTFT)? | no | yes |
 | tool | `bench/serving_scale.py` | `bench/bsz_throughput.py` (64-in/256-out) |
-| used in | §3 single-request ladder, §4 quant | §5 sweeps, §6 fleet, §7 Albatross |
+| used in | §3 single-request ladder, §4 quant | §4b int4 speed, §5 sweeps, §6 fleet, §7 Albatross |
 
 Same config, same GPU: steady-state reads ~3% higher. Every table below says which window it uses.
 
@@ -142,7 +142,7 @@ Three modes, all with hand-written kernels, all arch-portable (JIT per GPU):
 |---|---|---|---|
 | int8 w8g64 (weight-only) | none measurable (greedy-exact; compression +0.0001) | small-batch speed (+13% over fp16 full stack at bsz1 on 5090) + half the weight bytes | ModelScope `Hakureirm/rwkv7-g1-1.5b-w8g64` |
 | int8 w8a8 (tensor-core) | compression 0.6161 (+0.0076, == cutlass); **MATH500 avg@64 0.3812 vs fp16 0.4042 = −2.3pt** (the low-variance ruler resolves a real reasoning cost the compression rate and greedy hid — same pattern as int4, far milder) | large-batch throughput king on sm80–90 (3090 peak 9,851 tok/s, 64-in/256-out). On sm120/Blackwell the upstream cutlass op does not exist; rwkv-sglang's own s8-wmma kernel (register-blocked V2, bit-exact gate, batch-invariant) now serves the tier there — the int8 GEMM beats fp16 cuBLAS at M≥512 (1.03–1.55×), while e2e peak is 20,991 tok/s (@c512, 64-in/256-out) = 0.9466× fp16 (the residual gap is the per-token activation-quant launch tax against an already-tuned fp16 baseline) | box-relayable |
-| int4 GPTQ | lambada −1.28pt at 7.2B (RTN would be −2.64); **1.5B MATH500 avg@64 collapses regardless of symmetric/asymmetric (−25.6pt / −18.6pt vs fp16 — see below)** | lowest VRAM: 7.2B in 4.6 GB weights, serves on a 16 GB T4 at 32.9 tok/s | ModelScope `Hakureirm/rwkv7-g1-{1.5b,7.2b}-w4gptq` |
+| int4 GPTQ | lambada −1.28pt at 7.2B (RTN would be −2.64); **1.5B MATH500 avg@64 collapses regardless of symmetric/asymmetric (−25.6pt / −18.6pt vs fp16 — see below)** | lowest VRAM: 7.2B in 4.6 GB weights, serves on a 16 GB T4 at 32.9 tok/s (reproduced 2026-07-09 at 32.8–33.6) + fastest single-stream decode on every card measured, 1.09–2.61× fp16 — full GPTQ/RTN/fp16 speed matrix in §4b | ModelScope `Hakureirm/rwkv7-g1-{1.5b,7.2b}-w4gptq` |
 
 Prequantized checkpoints are required (the loader reads qweight/scale keys; pointing the
 quant flags at an fp16 dir errors out by design).
@@ -289,6 +289,162 @@ not amortized across ~144 heterogeneous decode kernels, plus an already-excellen
 baseline, eat the kernel's margin. That tax is latent on the VRAM-bound 7.2B case above,
 where int8's real win (**1.86× concurrency**, corrected 2026-07-07 per F0047 — see above)
 lives. Raw: `bench/verify_w8a8.py --bench`.
+
+## 4b. int4 serving speed: GPTQ vs RTN vs fp16 (measured 2026-07-09/10)
+
+§4 answers what int4 *costs* (accuracy); this section answers how fast it *serves* — a
+direct question from BlinkDL: how fast is symmetric GPTQ int4? Protocol at every point
+below: 64-in/256-out fixed-shape sweep, live server + `bench/bsz_throughput.py`
+(wall-clock window), cuda-graph ON with explicit `--cuda-graph-max-bs`, one server per GPU
+at a time. "Gate" = greedy token match vs the fp32 numpy oracle (§1's ruler), run against
+the same serving setup that produced the speed numbers.
+
+**The direct answer: GPTQ and RTN are the same speed, everywhere.** At every card/model
+pair where both were measured — the 5090 at 0.1B/1.5B/7.2B, T4/L4/A10G at 1.5B, A10G at
+7.2B — every paired concurrency point agrees within 2.2%, most within 1% (5090 7.2B: within
+0.3% at all nine shared points; 5090 0.1B: mean |diff| 0.64% over the full 8-point sweep).
+This is exactly what the implementation predicts: both checkpoints execute the identical
+`rwkv7_w4` kernel path with the identical qweight/scale layout — GPTQ's calibration changes
+the *values* in the tensors, not one instruction at runtime. So GPTQ-vs-RTN is purely an
+accuracy choice (§2/§4: GPTQ wins), never a speed trade.
+
+### RTX 5090 (sm120, full kernel-stack env)
+
+**7.2B** (output tok/s; GPTQ and RTN gates both greedy-EXACT 8/8; fp16 spot-check on the
+same box 8/8):
+
+| concurrency | 1 | 8 | 16 | 32 | 48 | 64 | 96 | 128 | 256 | 384 | 512 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| GPTQ int4 | 184.2 | 894.8 | 1,610.1 | 2,708.7 | 3,609.4 | 4,149.6 | 2,051.0 | 2,613.4 | 3,797.6 | 4,500.4 | **4,918.5 (peak)** |
+| RTN int4 | 184.2 | — | — | 2,701.5 | 3,607.3 | 4,152.6 | 2,047.2 | 2,608.1 | 3,793.0 | 4,498.8 | 4,919.8 |
+| fp16 full stack (published F0047 line, its own grid) | 123.7 | 666.4 | — | 2,363.2 | — | 4,033.9 | — | 5,688.1 | 6,205.3 | — | — |
+
+The fp16 row is the already-published F0047-corrected sweep (peak **6,709.0 @c320**), cited
+for comparison, not re-measured — only the fp16 8/8 spot-check gate was re-run to confirm
+the env. Net: **int4 single-stream 184.2 vs 123.7 = +48.9% over fp16; int4 peak 4,918.5 =
+73% of fp16's 6,709** — int4 is the latency/VRAM tier, fp16 remains the high-concurrency
+throughput tier on this card.
+
+**A reproducible artifact, documented rather than smoothed over — the c=96 cliff.** The w4
+curve collapses from 4,149.6 @c64 to 2,051.0 @c96, then climbs back to 4,918.5 @c512. It is
+not noise: GPTQ and RTN reproduce it within 0.2% of each other (2,051.0 / 2,047.2), and the
+c=128 point repeated across two independent runs within 0.4 tok/s (2,613.4 / 2,613.8).
+Suspected mechanism — it matches the kernel's own structure, though it is not yet
+profile-confirmed: the hand-written w4 tiers cover M≤64 (gemv M=1, small-batch 2–8, wmma
+8–64; `sglang_overlay/sglang/srt/layers/attention/rwkv7_kernels/w4_linear.py`), and above
+M=64 every projection falls back to dequant→cuBLAS — the c=96 region pays a full per-step
+weight dequant at a batch still too small to amortize it, and by c≥256 amortization wins it
+back. Flagged for future kernel work (an M>64 int4 tier). Until then, 7.2B w4 operating
+guidance on this card: run c≤64 or c≥256; avoid the 96–128 trough.
+
+**1.5B** (all three configs measured the same day on matched launch flags):
+
+| config | c=1 | c=32 | c=128 | greedy gate |
+|---|---|---|---|---|
+| fp16 full stack | 336.1 | 6,917.2 | **17,694.6** | **24/24 EXACT** |
+| GPTQ int4 | **426.2** (+26.8%) | **7,312.8** (+5.7%) | 9,973.7 (0.56×) | 10/24 (expected at 1.5B — see warning) |
+| RTN int4 | 425.1 | 7,298.5 | 9,955.8 | 14/24 |
+
+RTN tracks GPTQ within 0.3% at all three points. **Accuracy warning, load-bearing: 1.5B
+int4 — either method — collapses on reasoning** (MATH500 avg@64 −25.6pt symmetric, §4); the
+10/24 and 14/24 gates are the serving-layer face of the same fact. The speed rows are
+kernel-valid measurements, but the 1.5B int4 checkpoints are **not recommended for
+reasoning workloads** — int8 w8g64 is the lossless tier at this size (§4). int4's honest
+1.5B scope is low-concurrency latency or memory-constrained non-reasoning serving.
+
+**0.1B** (measured 2026-07-09; c=1/32/128 + peak shown here, full 8-point sweeps in the
+raw files):
+
+| config | c=1 | c=32 | c=128 | peak @c=512 | greedy gate |
+|---|---|---|---|---|---|
+| fp16 full stack | 990.5 | 20,870.7 | 54,405.6 | **103,601** | **24/24 EXACT** |
+| GPTQ int4 | **1,157.9** | 20,203.1 | 53,787.5 | 93,997 | 4/24 — diverges, output stays coherent |
+| RTN int4 | 1,160.2 | 20,485.4 | 54,581.9 | 93,490 | 1/24 — **degenerates into literal repetition** |
+
+**Quality warning, printed next to the speed where it belongs: at 0.1B, RTN output is
+broken** — not "slightly different" but repetition collapse (first divergence at token 0).
+GPTQ at 0.1B diverges from the oracle yet remains coherent text. The speed rows are still
+valid measurements (fixed-length decode, ignore_eos — throughput does not depend on token
+identity), but deploying 0.1B RTN would be shipping a broken model at high speed. GPTQ-vs-RTN
+speed parity holds across all 8 sweep points (mean |diff| 0.64%) — the parity survives even
+where quality doesn't.
+
+**0.1B real workload** (ShareGPT, `python -m sglang.bench_serving`, 500 prompts): fp16
+31,255 output tok/s at rate=inf and 3,459 at rate=16; GPTQ 31,006 (−0.8%) and 3,476
+(+0.5%) — the fixed-shape parity carries over to variable-length load at this size. RTN
+ShareGPT was **not measured**: those two runs were blocked by an sglang-overlay version
+drift against the serving image used for the fp16/GPTQ pair — an honest gap, stated rather
+than papered over.
+
+Raw (5090): `bench/results/bsz_sweep_7.2b_w4gptq_5090.json` (c=1/32/128) +
+`bench/results/bsz_sweep_7.2b_w4gptq_5090_ext.json` (the other eight points),
+`bench/results/bsz_sweep_7.2b_w4rtn_5090.json`,
+`bench/results/bsz_sweep_1.5b_{fp16,w4gptq,w4rtn}_5090.json`,
+`bench/results/bsz_sweep_0.1b_{fp16,w4gptq,w4rtn}_5090.json`; gates
+`bench/results/greedy_gates_7.2b_{w4gptq,w4rtn,fp16_spotcheck}_5090.log`,
+`bench/results/greedy_gates_1.5b_{fp16,w4gptq,w4rtn}_5090.log`,
+`bench/results/greedy_gates_0.1b_w4_5090.log`; ShareGPT
+`bench/results/sharegpt_0.1b_{fp16,w4gptq}_5090_{rinf,r16}.log`; fp16 7.2B comparison line
+`bench/results/qwen35/rwkv7_7.2b_fp16_fullstack_resweep_5090_v3.json`.
+
+### Five more cards, same recipe (measured on the real cards)
+
+1.5B, output tok/s at c=1 / c=32 / c=128 (greedy gate in parens):
+
+| GPU | fp16 | GPTQ int4 | RTN int4 |
+|---|---|---|---|
+| T4 (sm75) | 64.0 / 1,225.5 / 2,648.3 (24/24 EXACT) | 114.4 / 1,140.1 / 1,820.5 (10/24) | 112.3 / 1,115.2 / 1,796.6 (14/24) |
+| L4 (sm89) | 74.1 / 1,634.9 / 3,551.3 (24/24 EXACT) | 149.4 / 2,110.4 / 2,776.7 (10/24) | 147.6 / 2,070.5 / 2,729.1 (14/24) |
+| A10G (sm86) | 103.7 / 2,539.5 / 5,578.6 (24/24 EXACT) | 191.9 / 2,722.6 / 3,734.2 (10/24) | 190.9 / 2,691.1 / 3,681.7 (14/24) |
+| A100-40GB (sm80) | 156.3 / 3,959.9 / 10,346.2 (24/24 EXACT) | 198.1 / 3,845.2 / 6,839.7 (10/24) | not re-run (parity above) |
+| H100 (sm90) | 226.1 / 6,025.5 / 16,482.7 (24/24 EXACT) | 246.5 / 5,172.3 / 9,842.6 (10/24) | not re-run (parity above) |
+
+7.2B, same columns:
+
+| GPU | fp16 | GPTQ int4 | RTN int4 |
+|---|---|---|---|
+| T4 | 16.3 / n.m. / n.m. | 32.8 / 288.5 / 390.5† (8/8 EXACT) | not re-run |
+| L4 | 17.1 / 405.6 / 723.4 | 44.7 / 538.8 / 625.5 (8/8 EXACT) | not re-run |
+| A10G | 28.9 / 726.4 / 1,223.8 | 67.5 / 797.3 / 946.2 (8/8 EXACT) | 68.0 / 800.5 / n.m. (8/8 EXACT) |
+| A100-40GB | 61.3 / 1,584.2 / 3,995.7 (8/8 EXACT) | 93.0 / 1,420.1 / 1,996.3 (8/8 EXACT) | not re-run |
+| H100 | 101.5 / 2,789.0 / 7,497.3 (8/8 EXACT) | 125.1 / 2,230.7 / 3,070.8 (8/8 EXACT) | not re-run |
+
+† T4 @c=128 on 7.2B is technically alive but overloaded — not a usable operating point: p50
+latency 72.5 s, p99 145.1 s, 3.1 tok/s per stream. n.m. = not measured. On the three
+smallest cards the 7.2B **fp16** oracle gate was killed by the per-run time budget (rc −9
+in the raw) — those fp16 cells carry no correctness claim; every 7.2B GPTQ/RTN gate that
+ran is 8/8 EXACT.
+
+**What the matrix says.**
+
+1. **int4 wins single-stream on every card, 1.09×–2.61× over fp16** (low end H100 @1.5B,
+   high end L4 @7.2B), and on every card the 7.2B ratio beats that same card's 1.5B ratio —
+   the bigger the model relative to the card, the more the 4× weight-byte cut matters.
+2. **fp16 overtakes at high concurrency everywhere measured** — batched fp16 GEMM beats
+   batched dequant+cuBLAS once weight bytes stop being the bottleneck. **The crossover
+   point is a property of the card, not of the model tier:** T4, A100-40GB and H100 cross
+   early (fp16 already ahead by c=32); L4 and A10G cross late (int4 still ahead at c=32,
+   fp16 ahead by c=128); the 5090 at 1.5B also crosses late. Wherever both model sizes were
+   measured on a card, the card keeps its crossover class. Why T4 groups with A100/H100
+   rather than with its bandwidth-class neighbours L4/A10G is unresolved — stated, not
+   explained away.
+3. **Bigger models quantize cleaner — now confirmed at the serving layer too:** 7.2B GPTQ
+   is greedy-EXACT on all six cards measured (5090, T4, L4, A10G, A100-40GB, H100); 1.5B is
+   exact nowhere (10/24 GPTQ / 14/24 RTN, the same match counts on every card and
+   architecture). An independent, serving-layer cross-check of §4's MATH500 verdict (7.2B
+   −3.1pt vs 1.5B −25.6pt) — two rulers, one conclusion.
+
+**Deliberately not run, and why:** RTN on A100/H100 at 1.5B and on T4/L4/A100/H100 at 7.2B
+— GPTQ≈RTN speed parity was already verified at seven paired card/model points above, and
+re-proving it per card buys nothing. B200/H200/A100-80GB/L40S — five cards already
+characterize the finding. **Pending:** the 3090 same-matrix run is currently blocked by
+container-registry blob failures on that box; it will be appended when the box recovers.
+
+Raw (other cards): `bench/results/w4_speed_fleet/` — one JSON per server run, named
+`<GPU>_<model>_<config>.json`, each carrying the device string, gate result and full sweep
+rows (`*_v2` / `*_c128` / `*_full` / `*_retry` / `*rtn2` = follow-up runs after a first
+attempt hit a time budget or stopped at a partial sweep; the partial first attempts are
+kept for the record).
 
 ## 5. Serving throughput (RWKV-7 1.5B, wall-clock, 64-in/256-out, concurrency sweep)
 

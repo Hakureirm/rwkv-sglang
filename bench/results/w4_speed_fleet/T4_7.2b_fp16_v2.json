@@ -1,0 +1,54 @@
+{
+  "label": "T4-fp16-v2",
+  "device": "Tesla T4",
+  "sm": "7.5",
+  "total_vram_mib": 14913,
+  "wall_s": 296.7,
+  "results": [
+    {
+      "kind": "verify",
+      "tag": "7.2b-fla",
+      "rc": -9,
+      "wall_s": 61.933554201999996,
+      "dtype": "bfloat16",
+      "cuda_graph": true,
+      "exact": null,
+      "match": null,
+      "n": null
+    },
+    {
+      "kind": "sweep",
+      "tag": "7.2b-fla",
+      "rc": 0,
+      "wall_s": 142.06614391799997,
+      "dtype": "bfloat16",
+      "concurrencies": "1",
+      "cuda_graph_max_bs": 1,
+      "rows": [
+        {
+          "concurrency": 1,
+          "requests": 8,
+          "wall_s": 125.83,
+          "out_tokens": 2048,
+          "out_tok_per_s": 16.3,
+          "req_per_s": 0.064,
+          "lat_p50_s": 15.74,
+          "lat_p99_s": 15.765,
+          "per_stream_tok_s": 16.3
+        }
+      ],
+      "peak": {
+        "concurrency": 1,
+        "requests": 8,
+        "wall_s": 125.83,
+        "out_tokens": 2048,
+        "out_tok_per_s": 16.3,
+        "req_per_s": 0.064,
+        "lat_p50_s": 15.74,
+        "lat_p99_s": 15.765,
+        "per_stream_tok_s": 16.3
+      },
+      "sweep_error": null
+    }
+  ]
+}

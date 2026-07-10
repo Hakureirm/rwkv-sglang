@@ -1,0 +1,65 @@
+{
+  "label": "A10G-fp16-v2",
+  "device": "NVIDIA A10G",
+  "sm": "8.6",
+  "total_vram_mib": 22588,
+  "wall_s": 252.4,
+  "results": [
+    {
+      "kind": "verify",
+      "tag": "7.2b-fla",
+      "rc": -9,
+      "wall_s": 46.374590756,
+      "dtype": "bfloat16",
+      "cuda_graph": true,
+      "exact": null,
+      "match": null,
+      "n": null
+    },
+    {
+      "kind": "sweep",
+      "tag": "7.2b-fla",
+      "rc": 0,
+      "wall_s": 134.059940374,
+      "dtype": "bfloat16",
+      "concurrencies": "1,32",
+      "cuda_graph_max_bs": 32,
+      "rows": [
+        {
+          "concurrency": 1,
+          "requests": 8,
+          "wall_s": 70.76,
+          "out_tokens": 2048,
+          "out_tok_per_s": 28.9,
+          "req_per_s": 0.113,
+          "lat_p50_s": 8.845,
+          "lat_p99_s": 8.846,
+          "per_stream_tok_s": 28.9
+        },
+        {
+          "concurrency": 32,
+          "requests": 128,
+          "wall_s": 45.39,
+          "out_tokens": 32768,
+          "out_tok_per_s": 722.0,
+          "req_per_s": 2.82,
+          "lat_p50_s": 11.327,
+          "lat_p99_s": 11.352,
+          "per_stream_tok_s": 22.6
+        }
+      ],
+      "peak": {
+        "concurrency": 32,
+        "requests": 128,
+        "wall_s": 45.39,
+        "out_tokens": 32768,
+        "out_tok_per_s": 722.0,
+        "req_per_s": 2.82,
+        "lat_p50_s": 11.327,
+        "lat_p99_s": 11.352,
+        "per_stream_tok_s": 22.6
+      },
+      "sweep_error": null
+    }
+  ]
+}

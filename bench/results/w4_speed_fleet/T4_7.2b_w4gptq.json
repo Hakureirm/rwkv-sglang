@@ -1,0 +1,65 @@
+{
+  "label": "T4-w4gptq",
+  "device": "Tesla T4",
+  "sm": "7.5",
+  "total_vram_mib": 14913,
+  "wall_s": 364.9,
+  "results": [
+    {
+      "kind": "verify",
+      "tag": "7.2b-w4gptq",
+      "rc": 0,
+      "wall_s": 136.501813201,
+      "dtype": "float16",
+      "cuda_graph": true,
+      "exact": true,
+      "match": 8,
+      "n": 8
+    },
+    {
+      "kind": "sweep",
+      "tag": "7.2b-w4gptq",
+      "rc": 0,
+      "wall_s": 154.511431549,
+      "dtype": "float16",
+      "concurrencies": "1,16",
+      "cuda_graph_max_bs": 16,
+      "rows": [
+        {
+          "concurrency": 1,
+          "requests": 8,
+          "wall_s": 61.0,
+          "out_tokens": 2048,
+          "out_tok_per_s": 33.6,
+          "req_per_s": 0.131,
+          "lat_p50_s": 7.667,
+          "lat_p99_s": 7.69,
+          "per_stream_tok_s": 33.6
+        },
+        {
+          "concurrency": 16,
+          "requests": 64,
+          "wall_s": 77.98,
+          "out_tokens": 16384,
+          "out_tok_per_s": 210.1,
+          "req_per_s": 0.821,
+          "lat_p50_s": 19.498,
+          "lat_p99_s": 19.528,
+          "per_stream_tok_s": 13.1
+        }
+      ],
+      "peak": {
+        "concurrency": 16,
+        "requests": 64,
+        "wall_s": 77.98,
+        "out_tokens": 16384,
+        "out_tok_per_s": 210.1,
+        "req_per_s": 0.821,
+        "lat_p50_s": 19.498,
+        "lat_p99_s": 19.528,
+        "per_stream_tok_s": 13.1
+      },
+      "sweep_error": null
+    }
+  ]
+}

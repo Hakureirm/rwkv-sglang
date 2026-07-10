@@ -1,0 +1,113 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 1.77,
+      "out_tokens": 2048,
+      "out_tok_per_s": 1157.9,
+      "req_per_s": 4.523,
+      "lat_p50_s": 0.221,
+      "lat_p99_s": 0.221,
+      "per_stream_tok_s": 1157.9
+    },
+    {
+      "concurrency": 8,
+      "requests": 32,
+      "wall_s": 1.42,
+      "out_tokens": 8192,
+      "out_tok_per_s": 5760.3,
+      "req_per_s": 22.501,
+      "lat_p50_s": 0.354,
+      "lat_p99_s": 0.357,
+      "per_stream_tok_s": 720.0
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 1.62,
+      "out_tokens": 32768,
+      "out_tok_per_s": 20203.1,
+      "req_per_s": 78.918,
+      "lat_p50_s": 0.398,
+      "lat_p99_s": 0.41,
+      "per_stream_tok_s": 631.3
+    },
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 1.93,
+      "out_tokens": 65536,
+      "out_tok_per_s": 33997.1,
+      "req_per_s": 132.801,
+      "lat_p50_s": 0.467,
+      "lat_p99_s": 0.487,
+      "per_stream_tok_s": 531.2
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 2.44,
+      "out_tokens": 131072,
+      "out_tok_per_s": 53787.5,
+      "req_per_s": 210.107,
+      "lat_p50_s": 0.578,
+      "lat_p99_s": 0.611,
+      "per_stream_tok_s": 420.2
+    },
+    {
+      "concurrency": 256,
+      "requests": 1024,
+      "wall_s": 3.66,
+      "out_tokens": 262144,
+      "out_tok_per_s": 71603.8,
+      "req_per_s": 279.702,
+      "lat_p50_s": 0.794,
+      "lat_p99_s": 1.115,
+      "per_stream_tok_s": 279.7
+    },
+    {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 4.58,
+      "out_tokens": 393216,
+      "out_tok_per_s": 85869.8,
+      "req_per_s": 335.429,
+      "lat_p50_s": 1.016,
+      "lat_p99_s": 1.252,
+      "per_stream_tok_s": 223.6
+    },
+    {
+      "concurrency": 512,
+      "requests": 2048,
+      "wall_s": 5.58,
+      "out_tokens": 524288,
+      "out_tok_per_s": 93996.8,
+      "req_per_s": 367.175,
+      "lat_p50_s": 1.245,
+      "lat_p99_s": 1.553,
+      "per_stream_tok_s": 183.6
+    }
+  ],
+  "peak": {
+    "concurrency": 512,
+    "requests": 2048,
+    "wall_s": 5.58,
+    "out_tokens": 524288,
+    "out_tok_per_s": 93996.8,
+    "req_per_s": 367.175,
+    "lat_p50_s": 1.245,
+    "lat_p99_s": 1.553,
+    "per_stream_tok_s": 183.6
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "concurrencies": "1,8,32,64,128,256,384,512",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "/data/bench5090/results/bsz_sweep_0.1b_w4gptq_5090.json"
+  }
+}

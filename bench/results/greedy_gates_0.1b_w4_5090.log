@@ -1,0 +1,18 @@
+=== greedy gate fp16 (dtype=bfloat16, model=/data/models/rwkv7-0.1b-fla) ===
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00, 25.66it/s]
+GREEDY MATCH 24/24  first_div=None  exact=True
+GOT  [37138, 45, 44312, 47, 20996, 304, 25740, 109, 37480, 4600, 332, 39990, 4596, 37138, 45, 44312, 45, 32227, 22748, 37924, 4596, 3491, 709, 47]
+EXP  [37138, 45, 44312, 47, 20996, 304, 25740, 109, 37480, 4600, 332, 39990, 4596, 37138, 45, 44312, 45, 32227, 22748, 37924, 4596, 3491, 709, 47]
+=== greedy gate w4gptq (dtype=float16, model=/data/models/rwkv7-0.1b-w4gptq) ===
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00,  8.89it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00,  8.88it/s]
+GREEDY MATCH 4/24  first_div=4  exact=False
+GOT  [37138, 45, 44312, 47, 3918, 22748, 37924, 4596, 3491, 709, 21265, 4600, 332, 47483, 4706, 44317, 51369, 21265, 46588, 7915, 47, 20996, 39990, 4600]
+EXP  [37138, 45, 44312, 47, 20996, 304, 25740, 109, 37480, 4600, 332, 39990, 4596, 37138, 45, 44312, 45, 32227, 22748, 37924, 4596, 3491, 709, 47]
+=== greedy gate w4rtn (dtype=float16, model=/data/models/rwkv7-0.1b-w4) ===
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00,  8.61it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00,  8.60it/s]
+GREEDY MATCH 1/24  first_div=0  exact=False
+GOT  [304, 25740, 109, 45, 300, 47, 69, 47, 304, 25740, 109, 45, 300, 47, 69, 47, 304, 25740, 109, 45, 300, 47, 69, 47]
+EXP  [37138, 45, 44312, 47, 20996, 304, 25740, 109, 37480, 4600, 332, 39990, 4596, 37138, 45, 44312, 45, 32227, 22748, 37924, 4596, 3491, 709, 47]

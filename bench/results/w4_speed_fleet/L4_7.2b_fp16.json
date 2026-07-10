@@ -1,0 +1,26 @@
+{
+  "label": "L4-fp16",
+  "device": "NVIDIA L4",
+  "sm": "8.9",
+  "total_vram_mib": 22563,
+  "wall_s": 68.1,
+  "results": [
+    {
+      "kind": "verify",
+      "tag": "7.2b-fla",
+      "rc": -9,
+      "wall_s": 49.993987118,
+      "dtype": "bfloat16",
+      "cuda_graph": true,
+      "exact": null,
+      "match": null,
+      "n": null
+    },
+    {
+      "kind": "sweep",
+      "tag": "7.2b-fla",
+      "error": "server failed",
+      "server_tail": "thon3.11/site-packages/sglang/srt/utils/hf_transformers_utils.py\", line 856, in get_tokenizer\n    raise e\n  File \"/usr/local/lib/python3.11/site-packages/sglang/srt/utils/hf_transformers_utils.py\", line 821, in get_tokenizer\n    tokenizer = AutoTokenizer.from_pretrained(\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/transformers/models/auto/tokenization_auto.py\", line 773, in from_pretrained\n    return tokenizer_class.from_pretrained(pretrained_model_name_or_path, *inputs, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/transformers/tokenization_utils_base.py\", line 1721, in from_pretrained\n    return cls._from_pretrained(\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/transformers/tokenization_utils_base.py\", line 1910, in _from_pretrained\n    tokenizer = cls(*init_inputs, **init_kwargs)\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/transformers/tokenization_utils_tokenizers.py\", line 341, in __init__\n    raise ValueError(\nValueError: Couldn't instantiate the backend tokenizer from one of: \n(1) a `tokenizers` library serialization file, \n(2) a slow tokenizer instance to convert or \n(3) an equivalent slow tokenizer class to instantiate and convert. \nYou need to have sentencepiece or tiktoken installed to convert a slow tokenizer to a fast one."
+    }
+  ]
+}

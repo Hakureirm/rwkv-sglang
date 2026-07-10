@@ -1,0 +1,76 @@
+{
+  "label": "H100-fp16",
+  "device": "NVIDIA H100 80GB HBM3",
+  "sm": "9.0",
+  "total_vram_mib": 81079,
+  "wall_s": 250.1,
+  "results": [
+    {
+      "kind": "verify",
+      "tag": "7.2b-fla",
+      "rc": 0,
+      "wall_s": 151.054193246,
+      "dtype": "bfloat16",
+      "cuda_graph": true,
+      "exact": true,
+      "match": 8,
+      "n": 8
+    },
+    {
+      "kind": "sweep",
+      "tag": "7.2b-fla",
+      "rc": 0,
+      "wall_s": 57.141830833,
+      "dtype": "bfloat16",
+      "concurrencies": "1,32,128",
+      "cuda_graph_max_bs": 128,
+      "rows": [
+        {
+          "concurrency": 1,
+          "requests": 8,
+          "wall_s": 20.18,
+          "out_tokens": 2048,
+          "out_tok_per_s": 101.5,
+          "req_per_s": 0.396,
+          "lat_p50_s": 2.522,
+          "lat_p99_s": 2.523,
+          "per_stream_tok_s": 101.5
+        },
+        {
+          "concurrency": 32,
+          "requests": 128,
+          "wall_s": 11.75,
+          "out_tokens": 32768,
+          "out_tok_per_s": 2789.0,
+          "req_per_s": 10.894,
+          "lat_p50_s": 2.922,
+          "lat_p99_s": 2.946,
+          "per_stream_tok_s": 87.2
+        },
+        {
+          "concurrency": 128,
+          "requests": 512,
+          "wall_s": 17.48,
+          "out_tokens": 131072,
+          "out_tok_per_s": 7497.3,
+          "req_per_s": 29.286,
+          "lat_p50_s": 4.307,
+          "lat_p99_s": 4.369,
+          "per_stream_tok_s": 58.6
+        }
+      ],
+      "peak": {
+        "concurrency": 128,
+        "requests": 512,
+        "wall_s": 17.48,
+        "out_tokens": 131072,
+        "out_tok_per_s": 7497.3,
+        "req_per_s": 29.286,
+        "lat_p50_s": 4.307,
+        "lat_p99_s": 4.369,
+        "per_stream_tok_s": 58.6
+      },
+      "sweep_error": null
+    }
+  ]
+}

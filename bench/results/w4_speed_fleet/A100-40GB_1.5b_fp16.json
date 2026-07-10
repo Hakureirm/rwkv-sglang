@@ -1,0 +1,76 @@
+{
+  "label": "A100-40GB-fp16",
+  "device": "NVIDIA A100-SXM4-40GB",
+  "sm": "8.0",
+  "total_vram_mib": 40441,
+  "wall_s": 149.5,
+  "results": [
+    {
+      "kind": "verify",
+      "tag": "1.5b-fla",
+      "rc": 0,
+      "wall_s": 56.51058931,
+      "dtype": "bfloat16",
+      "cuda_graph": true,
+      "exact": true,
+      "match": 24,
+      "n": 24
+    },
+    {
+      "kind": "sweep",
+      "tag": "1.5b-fla",
+      "rc": 0,
+      "wall_s": 39.24832901900001,
+      "dtype": "bfloat16",
+      "concurrencies": "1,32,128",
+      "cuda_graph_max_bs": 128,
+      "rows": [
+        {
+          "concurrency": 1,
+          "requests": 8,
+          "wall_s": 13.1,
+          "out_tokens": 2048,
+          "out_tok_per_s": 156.3,
+          "req_per_s": 0.611,
+          "lat_p50_s": 1.638,
+          "lat_p99_s": 1.639,
+          "per_stream_tok_s": 156.3
+        },
+        {
+          "concurrency": 32,
+          "requests": 128,
+          "wall_s": 8.27,
+          "out_tokens": 32768,
+          "out_tok_per_s": 3959.9,
+          "req_per_s": 15.468,
+          "lat_p50_s": 2.045,
+          "lat_p99_s": 2.093,
+          "per_stream_tok_s": 123.7
+        },
+        {
+          "concurrency": 128,
+          "requests": 512,
+          "wall_s": 12.67,
+          "out_tokens": 131072,
+          "out_tok_per_s": 10346.2,
+          "req_per_s": 40.415,
+          "lat_p50_s": 3.065,
+          "lat_p99_s": 3.158,
+          "per_stream_tok_s": 80.8
+        }
+      ],
+      "peak": {
+        "concurrency": 128,
+        "requests": 512,
+        "wall_s": 12.67,
+        "out_tokens": 131072,
+        "out_tok_per_s": 10346.2,
+        "req_per_s": 40.415,
+        "lat_p50_s": 3.065,
+        "lat_p99_s": 3.158,
+        "per_stream_tok_s": 80.8
+      },
+      "sweep_error": null
+    }
+  ]
+}
