@@ -376,6 +376,31 @@ ShareGPT was **not measured**: those two runs were blocked by an sglang-overlay 
 drift against the serving image used for the fp16/GPTQ pair — an honest gap, stated rather
 than papered over.
 
+**1.5B / 7.2B real workload** (ShareGPT, same client, 500 prompts, seed 42, measured
+2026-07-10; output tok/s):
+
+| model | config | rate=inf | rate=16 |
+|---|---|---|---|
+| 1.5B | fp16 full stack | **9,560.5** | 3,284.0 |
+| 1.5B | GPTQ int4 | 7,857.9 (−17.8%) | **3,347.8** (+1.9%) |
+| 7.2B | fp16 full stack | **2,995.4** | **2,552.8** |
+| 7.2B | GPTQ int4 | 2,209.0 (−26.3%) | 1,877.5 (−26.5%) |
+
+Reading: at rate=inf the server runs at full concurrency — squarely the M>64
+dequant+cuBLAS region — so w4 trails fp16 at both sizes, exactly what the synthetic
+crossover above predicts for this card. At a steady 16 req/s the 1.5B pair is parity
+(+1.9%, the same picture as 0.1B's −0.8%/+0.5%); the 7.2B pair is not, because 16 req/s ×
+~221 mean output tokens ≈ 3.5k tok/s of demand exceeds even fp16's own full-blast 2,995 —
+at 7.2B this rate is mild overload rather than steady state (same caveat class as §7c's
+3090 note), so the high-concurrency penalty stays visible (−26.5%). Protocol identity
+across rounds, checkable in the raws: same canonical ShareGPT_V3 file as the 0.1B round,
+and every run in both rounds processed exactly 198,233 input / 110,378 generated tokens —
+identical totals, so model size is the only variable. Both 7.2B servers ran capped at 344
+concurrency (a matched pair; a 512-slot state pool is ~17.4 GB of fp32 state at ≈34
+MB/request, which plus 13.9 GB of fp16 weights does not fit in 32 GB — 344 is the
+F0047-established safe ceiling, §4). RTN ShareGPT at 1.5B/7.2B: deliberately not run —
+GPTQ≈RTN speed parity is already verified at the seven paired points above.
+
 Raw (5090): `bench/results/bsz_sweep_7.2b_w4gptq_5090.json` (c=1/32/128) +
 `bench/results/bsz_sweep_7.2b_w4gptq_5090_ext.json` (the other eight points),
 `bench/results/bsz_sweep_7.2b_w4rtn_5090.json`,
@@ -384,7 +409,7 @@ Raw (5090): `bench/results/bsz_sweep_7.2b_w4gptq_5090.json` (c=1/32/128) +
 `bench/results/greedy_gates_7.2b_{w4gptq,w4rtn,fp16_spotcheck}_5090.log`,
 `bench/results/greedy_gates_1.5b_{fp16,w4gptq,w4rtn}_5090.log`,
 `bench/results/greedy_gates_0.1b_w4_5090.log`; ShareGPT
-`bench/results/sharegpt_0.1b_{fp16,w4gptq}_5090_{rinf,r16}.log`; fp16 7.2B comparison line
+`bench/results/sharegpt_{0.1b,1.5b,7.2b}_{fp16,w4gptq}_5090_{rinf,r16}.log`; fp16 7.2B comparison line
 `bench/results/qwen35/rwkv7_7.2b_fp16_fullstack_resweep_5090_v3.json`.
 
 ### Five more cards, same recipe (measured on the real cards)
@@ -559,7 +584,16 @@ false win from an L2-resident microbench caught and reverted — full diff and e
 | 7.2b | 1 / 8 / 32 | +0.0% / +3.5% / +0.0% | +1.2% / +2.9% / **+5.0%** |
 
 Single-stream decode does not move (memory-bandwidth wall — stock 7.2b at 147.0 tok/s already
-exceeds the author's own published 144.04); the batch shapes gain up to 13%. Our single-request
+exceeds the author's own published 144.04); the batch shapes gain up to 13%. A physics note so
+that 147.0 survives adversarial review: it is ~14% *above* the dense-fp16 read floor (13.9
+GB/step ÷ 1.792 TB/s theoretical ⇒ ≤128.7 tok/s), which is legitimate, not a timing artifact —
+Albatross's default channel-mix is a lossless sparse FFN (`CMIX_SPARSE="no-fc"`; its README
+calls it "sparse FFN (lossless)") that skips the `ffn.value` rows whose relu² activation is
+zero. At the 90.2% sqrelu sparsity we measured on 7.2B (`docs/design/m6-sparse-ffn.md`),
+per-step traffic is ~10.1 GB ⇒ ~1.48 TB/s effective — 87% of the 1.69 TB/s read bandwidth we
+measured on this card (ADR-0008 A0 probe). Our own bsz1 numbers ship the same class of
+optimization (`RWKV_SPARSE_FFN=1` in `scripts/serve.sh`), so neither engine's bsz1 decode
+should be judged against a dense-read ceiling. Our single-request
 ratios above are against the stock numbers; against the re-tuned track they are unchanged at
 bsz1 (554.0 vs 553.9). Our launch parameters re-select at warmup on any card+CUDA — the design
 difference the next table quantifies.

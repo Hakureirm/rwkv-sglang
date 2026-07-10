@@ -423,3 +423,157 @@ This repo: `sglang_overlay/sglang/srt/models/rwkv7.py` ·
 `throughput_{0.1b,1.5b}_fp16_5090.log}` · findings [[F0017]] [[F0020]] [[F0023]] [[F0027]]
 [[F0029]] [[F0046]] [[F0051]] [[F0052]] · ADR-0004 (no-FLA law) · ADR-0006 (spec-decode) ·
 ADR-0005 (reverse-overtake roadmap).
+
+## A0 results (2026-07-10, executed on the tower — measured)
+
+Stage A0 ran to completion on the 5090 tower (RTX 5090, driver 13.2 / CUDA runtime 12.9,
+torch 2.11.0+cu129, `rwkvmain` container). GPU verified idle (10 MiB / 0%) before and
+after each measurement. Probe source + raw outputs: `scratch/a0_probe/` (this repo,
+untracked) and the box copy under the project dir; spec-round profile raw:
+`scratch/a0_probe/rwkv_spec_prof.jsonl` (450 rounds).
+
+### A0.1 — 5090 ground truth (probe `a0_probe.cu`, `nvcc -O3 -arch=sm_120`, modes props/bw/coop/graph)
+
+Device (`cudaGetDeviceProperties`): **SMs = 170** · theoretical BW **1792.1 GB/s**
+(memClk 14001 MHz × 512-bit — stock, not overclocked) · **L2 = 96 MB** (the §2.2
+spec-estimate, confirmed) · smem/block opt-in **99 KB**, smem/SM 100 KB ·
+maxThreads/SM 1536 · cooperativeLaunch attr = 1.
+
+Achievable bandwidth (2 GiB buffers ≫ L2, float4 grid-stride kernels, 3 warmup +
+10 CUDA-event-timed iters, median):
+
+| pattern | GB/s | % of 1792 |
+|---|---|---|
+| read-only (grid-stride reduce) | **1691.7** | 94.4% |
+| write-only | 1686.3 | 94.1% |
+| triad (2r+1w) | 1553.9 | 86.7% |
+| copy kernel (1r+1w) | 1498.6 | 83.6% |
+| `cudaMemcpy` D2D | 1524.9 | 85.1% |
+
+**Use ~1.69 TB/s as the ceiling constant for decode** (weight streaming is ~99% reads),
+not 1.792 and not the 1.58–1.65 estimated in §2.1. The "@1792" ceilings shift down 5.6%:
+0.1B 5891 · 1.5B 600.7 · 1.5B-int4 1626 · 7.2B-int4 378 · 7.2B-fp16 121.4 tok/s.
+
+Cooperative launch + occupancy — every row below was actually LAUNCHED via
+`cudaLaunchCooperativeKernel` and passed a grid-wide two-phase reduction that requires
+the barrier (not compile-only), then timed 1000 × `grid.sync()`:
+
+| config | blocks/SM | co-resident grid | grid.sync() |
+|---|---|---|---|
+| 512 thr, 0 KB smem | 3 | 510 | 1.34 µs |
+| 512 thr, 48 KB | 2 | 340 | 1.00 µs |
+| **512 thr, 75 KB (§2.3 design shape)** | **1** | **170** | **0.91 µs** |
+| 512 thr, 99 KB (max opt-in) | 1 | 170 | 0.91 µs |
+| 256 thr, 0 KB | 6 | 1020 | 2.79 µs |
+| 128 thr, 0 KB | 12 | 2040 | 5.38 µs |
+
+The ~1 µs/barrier assumption in §2.3(1) is confirmed at the exact design shape; the
+barrier-budget math stands as written.
+
+**Coop-in-CUDA-graph: YES.** `cudaStreamBeginCapture(Global)` → coop launch →
+`EndCapture` → `Instantiate` → 2× replay, correct grid-synced result both times — probed
+at 8 blocks × 128 thr AND at the full 170 × 512 thr × 75 KB serving shape. §2.3(6)'s open
+question is closed on this stack: no "run outside the graph" fallback needed.
+
+### A0.2 — the albatross 7.2B "147.0 > 128.7 ceiling" anomaly: RESOLVED (lossless sparse FFN)
+
+The number is real, tight, and physical — §2.1(e) computed the ceiling for the wrong
+byte count. Audit trail:
+
+- Source: `bench/results/albatross_5090/retuned_summary.json` `7.2b/b1/decode`: stock
+  p50 6.8047 ms/step → 146.96 tok/s (3 runs, 0.065% spread; re-tuned +0.02%). Harness =
+  albatross's own `rwkv7_fast_v3a.py --cases 1x1`: CUDA-event-timed CUDA-graph replay of
+  one full forward, sync per iter — the timing itself is clean. Bo's published 144.04 is
+  the same benchmark (verbatim RESULT line in the Albatross README).
+- Weights: the loaded file is full fp16 — 14,400,007,869 B
+  (`models/rwkv7-g1/rwkv7-g1g-7.2b-20260523-ctx8192.pth`); memory clock is stock
+  (max 14001 MHz ⇒ 1792 GB/s). Not a smaller model, not an OC'd card, not a partial step.
+- Cause: **albatross's DEFAULT channel-mix is a lossless sparse path**
+  (`CMIX_SPARSE = "no-fc"` in `rwkv7_fast_v3a.py`; at B=1,T=1 it dispatches
+  `cmix_sparse_down_relu_one`, which reads only the `ffn.value` rows whose relu²
+  activation is nonzero — exact by construction, and labeled "sparse FFN (lossless)" in
+  Bo's own README @251103). Our measured 7.2B sqrelu zero-fraction is **90.2%** on real
+  prompts (`docs/design/m6-sparse-ffn.md`, 288 samples).
+- Byte math redone for that config: dense 13.94 GB/step, of which ffn.value 4.29 GB;
+  sparse-effective ≈ 13.94 − 0.902 × 4.29 = **10.07 GB/step** → 146.96 tok/s needs
+  **1.48 TB/s = 87.5% of the A0-measured 1.69 TB/s read bandwidth**. Entirely physical.
+  (Caveat: the v3a bench replays a fixed pseudo-random token from zero state, so its
+  effective sparsity is the bench input's, not real text's; any value in the 52–90%
+  bracket lands under the read ceiling, so the conclusion is insensitive to it.)
+- **Our own bsz1 numbers live in the same regime**: `scripts/serve.sh` exports
+  `RWKV_SPARSE_FFN=1` by default, so our 7.2B fp16 c=1 123.7 tok/s (2026-07-10 matrix)
+  is also a sparse-byte number — ≈ 1.25 TB/s effective at sparse bytes (74% of read
+  ceiling). At DENSE bytes it would imply 1.72 TB/s > the measured 1.69 achievable —
+  i.e. the dense 128.7 "ceiling" was never the right yardstick for EITHER engine.
+- Corollary for §2.1(b): albatross 1.5B 553.9 at sparse-effective bytes (2815 − 0.86 ×
+  805 = 2123 MB; our measured 1.5B sparsity 86.0%) = **1.18 TB/s = 69.5% of read
+  ceiling** — not "87% of ceiling" as §2.1(b) reads. Stage C's ≥554 target therefore
+  needs either ~87% dense-byte streaming or (better, and how albatross actually gets
+  there) the sparse value-proj carried INSIDE the megakernel — we already own that
+  kernel (m6/`sparse_cmix.py`). §2.1(a)'s 0.1B projection stands (sparse+measured-BW
+  adjustments move it slightly up, not down).
+- Docs action: clarifying physics note added next to the 147.0 line in
+  `docs/BENCHMARKS.md` §7 + zh mirror (working tree only, NOT committed — doc
+  consolidation runs in parallel; the edit is disjoint from the new int4 section).
+
+### A0.3 — the "55.5 ms spec round" profiled: the ~50 ms python residual DOES NOT EXIST
+
+Revival: the F0046 build is intact in `rwkvmain` (worker + spec-V2 plumbing on base
+b28bc10) — brief correction to this ADR's context: the build lives on sglang MAIN, not
+the v0.5.10 fork. Server boots and reproduces **51.8 tok/s median** on the
+`staging/spec_speed.py` suite (unprofiled, gen-len 256; F0046 measured 53.7 on 07-07 —
+same regime).
+
+Method: instrumented the deployed worker (container copy only; env-gated
+`RWKV_SPEC_PROFILE=1`; `torch.cuda.synchronize()` at phase boundaries so each phase wall
+includes its queued GPU work; restored byte-identical afterwards). 450 rounds, bs=1,
+K=4, 1.5B target + 0.1B draft, draft CUDA graph ON. Profiled run 51.1 tok/s (−1.4% vs
+unprofiled — the added syncs are nearly free because the phases already end in syncs).
+Median per round (p10–p90 spreads all within ±4%):
+
+| phase | ms | share |
+|---|---|---|
+| **target verify forward** (M=4 TARGET_VERIFY extend) | **19.00** | **76.3%** |
+| draft chain total | 4.57 | 18.3% |
+| — 3 draft forwards (hand-rolled CUDA graph) | 3.39 (1.13/step) | |
+| — 4 state snapshots (12 L × conv0/conv1/temporal `.clone()`) | 1.03 | |
+| — argmax `.item()` syncs + slot-idx + graph no-op check | 0.14 | |
+| per-row lm_head recompute (F0031 bit-exactness loop, 4 extra head GEMVs) | 0.66 | 2.6% |
+| eagle_sample + mamba commit + conv scatter + tolist + draft rollback + prep | 0.66 | 2.6% |
+| scheduler/HTTP gap between rounds (p50; p90 0.38) | 0.28 | 1.1% |
+| **round total** | **24.90** | |
+
+Two corrections to §2.2's premise:
+
+1. **The round is 24.9 ms, not 55.5.** The 55.5 figure divided 53.7 tok/s by F0029's
+   α-derived 2.98 tokens/round; the speed suite's actual acceptance is ≈1.27
+   tokens/round (accept 1.18–1.50 on 5/7 prompts; the 4.00 is an 8-token prompt).
+   51.8 tok/s × 24.9 ms ≈ 1.29 tokens/round — self-consistent. The "~50 ms
+   orchestration residual" was an artifact of multiplying by the wrong α, not a thing
+   that exists in the build.
+2. **Python/orchestration is ~2.5 ms/round (10%), not ~50.** The true sinks, in order:
+   (a) the **verify forward: 19.0 ms** — TARGET_VERIFY runs the eager varlen/extend
+   path (prefill CUDA graph is disabled for RWKV-7 at boot, and the graphed decode
+   runner can't take M=4), i.e. ~700 eager launches + T=4-padded triton prefill
+   kernels, vs ~4.2 ms for the plain graphed decode step (240.7 tok/s spec-off,
+   F0046); (b) **acceptance** (1.27 actual vs 2.98 assumed on this suite).
+   Consequences for the plan: a zero-cost megakernel draft (4.57 → ~1.3 ms) alone
+   moves spec-on only ~51.8 → ~60 tok/s. Stage B's net-win math must be restated as:
+   draft megakernel + a graphed/fused M=4 verify path bound the round at ≈ 1.3 + ~4.5
+   + ~2.5 ≈ 8.3 ms → ~155 tok/s at α≈1.27, ~360 tok/s at α≈2.98 — spec-off is 409.
+   **Spec-decode's net win is gated on verify-path engineering AND acceptance quality,
+   not on a python fix and not primarily on the draft kernel.** Stage A (0.1B
+   megakernel) is unaffected — its case never rested on spec-decode.
+
+### A0 exit criteria vs plan
+
+- ✅ Bandwidth constant for ceiling math: **1.69 TB/s read-dominated** (1.55 triad).
+- ✅ SMs + coop occupancy at the design shape: **170 blocks × 512 thr × 75 KB = 1/SM,
+  grid.sync 0.91 µs**, cooperative launch runs & verifies.
+- ✅ Coop-in-graph: **yes, at full shape** — integration fallback unnecessary.
+- ✅ 147.0 anomaly: **resolved — lossless sparse FFN (default-on in both engines);
+  bsz1 numbers are sparse-byte numbers and must not be judged against dense ceilings.**
+  Docs note added (uncommitted).
+- ✅ Spec-round split: table above. **A0's "can downgrade Stage B" clause fires:** the
+  50 ms residual was a derivation artifact; Stage B is re-scoped as draft-kernel +
+  verify-path + acceptance (three pieces, the last two now the binding ones).
