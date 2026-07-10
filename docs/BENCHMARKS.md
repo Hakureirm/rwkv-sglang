@@ -300,13 +300,19 @@ at a time. "Gate" = greedy token match vs the fp32 numpy oracle (§1's ruler), r
 the same serving setup that produced the speed numbers.
 
 **The direct answer: GPTQ and RTN are the same speed, everywhere.** At every card/model
-pair where both were measured — the 5090 at 0.1B/1.5B/7.2B, T4/L4/A10G at 1.5B, A10G at
-7.2B — every paired concurrency point agrees within 2.2%, most within 1% (5090 7.2B: within
-0.3% at all nine shared points; 5090 0.1B: mean |diff| 0.64% over the full 8-point sweep).
-This is exactly what the implementation predicts: both checkpoints execute the identical
-`rwkv7_w4` kernel path with the identical qweight/scale layout — GPTQ's calibration changes
-the *values* in the tensors, not one instruction at runtime. So GPTQ-vs-RTN is purely an
-accuracy choice (§2/§4: GPTQ wins), never a speed trade.
+pair where both were measured — the 5090 at 0.1B/1.5B/7.2B, the 3090 at 1.5B/7.2B,
+T4/L4/A10G at 1.5B, A10G at 7.2B — every paired concurrency point agrees within 2.2%, most
+within 1% (5090 7.2B: within 0.3% at all nine shared points; 5090 0.1B: mean |diff| 0.64%
+over the full 8-point sweep; 3090 1.5B: within 1.9% at all six points), with one scoped
+exception: the 3090's 7.2B pair differs by 3.1–4.2% at c=32/128 with RTN ahead
+(single-stream still agrees at 1.7%). Same kernel, same layout — the runtime is
+value-independent, so a calibration-induced speed difference has no mechanism there; we
+read the 3090 7.2B drift as run-to-run scatter of a saturated 24 GB card, and report it
+rather than average it away. This is exactly what the implementation predicts: both
+checkpoints execute the identical `rwkv7_w4` kernel path with the identical qweight/scale
+layout — GPTQ's calibration changes the *values* in the tensors, not one instruction at
+runtime. So GPTQ-vs-RTN is purely an accuracy choice (§2/§4: GPTQ wins), never a speed
+trade.
 
 ### RTX 5090 (sm120, full kernel-stack env)
 
@@ -325,17 +331,24 @@ the env. Net: **int4 single-stream 184.2 vs 123.7 = +48.9% over fp16; int4 peak 
 73% of fp16's 6,709** — int4 is the latency/VRAM tier, fp16 remains the high-concurrency
 throughput tier on this card.
 
-**A reproducible artifact, documented rather than smoothed over — the c=96 cliff.** The w4
-curve collapses from 4,149.6 @c64 to 2,051.0 @c96, then climbs back to 4,918.5 @c512. It is
-not noise: GPTQ and RTN reproduce it within 0.2% of each other (2,051.0 / 2,047.2), and the
-c=128 point repeated across two independent runs within 0.4 tok/s (2,613.4 / 2,613.8).
-Suspected mechanism — it matches the kernel's own structure, though it is not yet
-profile-confirmed: the hand-written w4 tiers cover M≤64 (gemv M=1, small-batch 2–8, wmma
-8–64; `sglang_overlay/sglang/srt/layers/attention/rwkv7_kernels/w4_linear.py`), and above
-M=64 every projection falls back to dequant→cuBLAS — the c=96 region pays a full per-step
-weight dequant at a batch still too small to amortize it, and by c≥256 amortization wins it
-back. Flagged for future kernel work (an M>64 int4 tier). Until then, 7.2B w4 operating
-guidance on this card: run c≤64 or c≥256; avoid the 96–128 trough.
+**A reproducible artifact, documented rather than smoothed over — the w4 cliff past
+c=64.** On the 5090 the w4 curve collapses from 4,149.6 @c64 to 2,051.0 @c96, then climbs
+back to 4,918.5 @c512. It is not noise: GPTQ and RTN reproduce it within 0.2% of each
+other (2,051.0 / 2,047.2), and the c=128 point repeated across two independent runs within
+0.4 tok/s (2,613.4 / 2,613.8). **Root cause confirmed (3090 fine map, 2026-07-10)** — this
+section originally flagged the mechanism as suspected; a dedicated concurrency map on the
+3090 has since pinned the edge at exactly **c=64→66** (1,429.5 tok/s @c=64 → 719.7 @c=66),
+which is the M=64 boundary where the hand-written w4 tiers end (gemv M=1, small-batch 2–8,
+wmma 8–64; `sglang_overlay/sglang/srt/layers/attention/rwkv7_kernels/w4_linear.py`) and
+every projection falls back to dequant→cuBLAS. Two architectures, one edge, one mechanism
+(sm86 + sm120 — the 5090's 64→96 gap simply never sampled the 65–95 range). Inside the
+fallback region the batch is too small to amortize the per-step full-weight dequant: the
+5090 wins it back by c≥256, while the 3090 never recovers its own c=64 level within the
+24 GB card's c≤128 envelope (1,087.7 @c=128 in the map vs 1,429.5 @c=64) and stays below
+fp16 throughout the region. Flagged for kernel work (an M>64 int4 tier). Operating
+guidance until then: run 7.2B w4 at c≤64 (both cards) or c≥256 (5090); avoid the trough
+just past 64. Raw: `bench/results/bsz_sweep_7.2b_w4gptq_3090_cliffmap.json` (c=48–128
+map), `bench/results/bsz_sweep_7.2b_w4gptq_3090_cliffmap_fine.json` (c=66/72/76).
 
 **1.5B** (all three configs measured the same day on matched launch flags):
 
@@ -376,30 +389,41 @@ ShareGPT was **not measured**: those two runs were blocked by an sglang-overlay 
 drift against the serving image used for the fp16/GPTQ pair — an honest gap, stated rather
 than papered over.
 
-**1.5B / 7.2B real workload** (ShareGPT, same client, 500 prompts, seed 42, measured
-2026-07-10; output tok/s):
+**1.5B / 7.2B real workload** (ShareGPT, same client, 500 prompts, seed 42; 5090 measured
+2026-07-10, 3090 rows added same day; output tok/s):
 
-| model | config | rate=inf | rate=16 |
-|---|---|---|---|
-| 1.5B | fp16 full stack | **9,560.5** | 3,284.0 |
-| 1.5B | GPTQ int4 | 7,857.9 (−17.8%) | **3,347.8** (+1.9%) |
-| 7.2B | fp16 full stack | **2,995.4** | **2,552.8** |
-| 7.2B | GPTQ int4 | 2,209.0 (−26.3%) | 1,877.5 (−26.5%) |
+| GPU | model | config | rate=inf | rate=16 |
+|---|---|---|---|---|
+| 5090 | 1.5B | fp16 full stack | **9,560.5** | 3,284.0 |
+| 5090 | 1.5B | GPTQ int4 | 7,857.9 (−17.8%) | **3,347.8** (+1.9%) |
+| 5090 | 7.2B | fp16 full stack | **2,995.4** | **2,552.8** |
+| 5090 | 7.2B | GPTQ int4 | 2,209.0 (−26.3%) | 1,877.5 (−26.5%) |
+| 3090 | 1.5B | fp16 full stack | **3,168.9** | **1,939.0** |
+| 3090 | 1.5B | GPTQ int4 | 2,967.9 (−6.3%) | 1,820.2 (−6.1%) |
+| 3090 | 7.2B | fp16 full stack | **755.8** | **734.8** |
+| 3090 | 7.2B | GPTQ int4 | 593.1 (−21.5%) | 591.4 (−19.5%) |
 
-Reading: at rate=inf the server runs at full concurrency — squarely the M>64
+Reading (5090): at rate=inf the server runs at full concurrency — squarely the M>64
 dequant+cuBLAS region — so w4 trails fp16 at both sizes, exactly what the synthetic
 crossover above predicts for this card. At a steady 16 req/s the 1.5B pair is parity
 (+1.9%, the same picture as 0.1B's −0.8%/+0.5%); the 7.2B pair is not, because 16 req/s ×
 ~221 mean output tokens ≈ 3.5k tok/s of demand exceeds even fp16's own full-blast 2,995 —
 at 7.2B this rate is mild overload rather than steady state (same caveat class as §7c's
-3090 note), so the high-concurrency penalty stays visible (−26.5%). Protocol identity
-across rounds, checkable in the raws: same canonical ShareGPT_V3 file as the 0.1B round,
-and every run in both rounds processed exactly 198,233 input / 110,378 generated tokens —
-identical totals, so model size is the only variable. Both 7.2B servers ran capped at 344
-concurrency (a matched pair; a 512-slot state pool is ~17.4 GB of fp32 state at ≈34
-MB/request, which plus 13.9 GB of fp16 weights does not fit in 32 GB — 344 is the
-F0047-established safe ceiling, §4). RTN ShareGPT at 1.5B/7.2B: deliberately not run —
-GPTQ≈RTN speed parity is already verified at the seven paired points above.
+3090 note), so the high-concurrency penalty stays visible (−26.5%). Reading (3090): fp16
+leads w4 at every point (fp16 +27% over GPTQ at 7.2B rate=inf) — this box cannot sustain
+16 req/s at either size (§7c already documents that for 1.5B; here the 7.2B GPTQ pair's
+two rates land nearly identical, 593.1 vs 591.4 = pure capacity saturation), so every
+3090 ShareGPT point is effectively the full-concurrency regime, where the synthetic matrix
+says fp16 wins — the two rulers agree. Protocol identity, checkable in the raws: all
+twelve 5090 runs (0.1B/1.5B/7.2B rounds) used the same canonical ShareGPT_V3 file and each
+processed exactly 198,233 input / 110,378 generated tokens; the eight 3090 runs used that
+box's own ShareGPT file — 161,035 / 98,420, identical across all eight — so within-box
+pairs are equal-conditions, while cross-box rows are not same-prompt comparisons. Both
+5090 7.2B servers ran capped at 344 concurrency (a matched pair; a 512-slot state pool is
+~17.4 GB of fp32 state at ≈34 MB/request, which plus 13.9 GB of fp16 weights does not fit
+in 32 GB — 344 is the F0047-established safe ceiling, §4); the 3090 7.2B legs ran at their
+box's 128 cap (see the ‡ note below). RTN ShareGPT: deliberately not run at 1.5B/7.2B on
+either box — GPTQ≈RTN speed parity is already verified at the nine paired points above.
 
 Raw (5090): `bench/results/bsz_sweep_7.2b_w4gptq_5090.json` (c=1/32/128) +
 `bench/results/bsz_sweep_7.2b_w4gptq_5090_ext.json` (the other eight points),
@@ -412,12 +436,13 @@ Raw (5090): `bench/results/bsz_sweep_7.2b_w4gptq_5090.json` (c=1/32/128) +
 `bench/results/sharegpt_{0.1b,1.5b,7.2b}_{fp16,w4gptq}_5090_{rinf,r16}.log`; fp16 7.2B comparison line
 `bench/results/qwen35/rwkv7_7.2b_fp16_fullstack_resweep_5090_v3.json`.
 
-### Five more cards, same recipe (measured on the real cards)
+### The desktop 3090 + five more cards, same recipe (measured on the real cards)
 
 1.5B, output tok/s at c=1 / c=32 / c=128 (greedy gate in parens):
 
 | GPU | fp16 | GPTQ int4 | RTN int4 |
 |---|---|---|---|
+| RTX 3090 (sm86)‡ | 220.1 / 3,517.9 / 7,077.5 (24/24 EXACT) | 298.0 / 3,550.3 / 4,811.2 (10/24) | 293.2 / 3,530.8 / 4,786.4 (14/24) |
 | T4 (sm75) | 64.0 / 1,225.5 / 2,648.3 (24/24 EXACT) | 114.4 / 1,140.1 / 1,820.5 (10/24) | 112.3 / 1,115.2 / 1,796.6 (14/24) |
 | L4 (sm89) | 74.1 / 1,634.9 / 3,551.3 (24/24 EXACT) | 149.4 / 2,110.4 / 2,776.7 (10/24) | 147.6 / 2,070.5 / 2,729.1 (14/24) |
 | A10G (sm86) | 103.7 / 2,539.5 / 5,578.6 (24/24 EXACT) | 191.9 / 2,722.6 / 3,734.2 (10/24) | 190.9 / 2,691.1 / 3,681.7 (14/24) |
@@ -428,6 +453,7 @@ Raw (5090): `bench/results/bsz_sweep_7.2b_w4gptq_5090.json` (c=1/32/128) +
 
 | GPU | fp16 | GPTQ int4 | RTN int4 |
 |---|---|---|---|
+| RTX 3090 (24 GB)‡ | 68.7 / 1,051.4 / 1,837.3 | 105.9 / 985.1 / 1,072.1 (8/8 EXACT) | 104.1 / 1,015.9 / 1,117.6 (8/8 EXACT) |
 | T4 | 16.3 / n.m. / n.m. | 32.8 / 288.5 / 390.5† (8/8 EXACT) | not re-run |
 | L4 | 17.1 / 405.6 / 723.4 | 44.7 / 538.8 / 625.5 (8/8 EXACT) | not re-run |
 | A10G | 28.9 / 726.4 / 1,223.8 | 67.5 / 797.3 / 946.2 (8/8 EXACT) | 68.0 / 800.5 / n.m. (8/8 EXACT) |
@@ -437,33 +463,62 @@ Raw (5090): `bench/results/bsz_sweep_7.2b_w4gptq_5090.json` (c=1/32/128) +
 † T4 @c=128 on 7.2B is technically alive but overloaded — not a usable operating point: p50
 latency 72.5 s, p99 145.1 s, 3.1 tok/s per stream. n.m. = not measured. On the three
 smallest cards the 7.2B **fp16** oracle gate was killed by the per-run time budget (rc −9
-in the raw) — those fp16 cells carry no correctness claim; every 7.2B GPTQ/RTN gate that
-ran is 8/8 EXACT.
+in the raw) — those fp16 cells carry no correctness claim; the 3090's 7.2B fp16 leg ran no
+oracle gate either (its 1.5B fp16 24/24 served as the box's stack sanity); every 7.2B
+GPTQ/RTN gate that ran is 8/8 EXACT.
+
+‡ 3090 (24 GB) scope, disclosed rather than smoothed: **(1)** serve.sh's default 512-slot
+state pool cannot boot **any** 7.2B tier on 24 GB (512 × ~33.5 MiB of RWKV state alone
+blows the budget), so every 3090 7.2B leg — fp16 and w4 alike — ran at
+`--max-running-requests 128`; the 7.2B c=128 values are that cap, not a swept optimum.
+**(2)** The 7.2B fp16 leg additionally needed the decode-graph capture list trimmed to
+`--cuda-graph-bs 1 32 128` (the full capture list OOMs at c=128 chunked prefill), and its
+ShareGPT legs `--chunked-prefill-size 2048`. **(3)** The 3090 container runs an earlier
+overlay snapshot in which the two fused-kernel flags later promoted to default
+(gates/sqrelu) are inert; its effective stack is the 5-env fast path. All six 3090 legs
+share that identical config — within-box comparisons are self-consistent — but absolute
+levels sit slightly below §5's published 3090 numbers (fp16 1.5B bsz1 220.1 here vs 230.7
+there). The 1.5B legs were swept to c=512 like the 5090: GPTQ 5,969.8 / **6,218.4 (peak)**
+/ 6,118.9 and RTN 5,860.8 / 6,184.1 (peak) / 6,170.0 at c=256/384/512, vs fp16 7,310.4 /
+**7,347.3 (peak)** / 6,994.2 — that fp16 peak lands in the same band as §5's published
+full-stack 7,257.7 @c=384 (+1.2%), an external consistency anchor for this box's whole
+matrix. Full boot flags, OOM notes and gate list:
+`bench/results/bsz_sweep_3090_serve_flags.log`.
 
 **What the matrix says.**
 
 1. **int4 wins single-stream on every card, 1.09×–2.61× over fp16** (low end H100 @1.5B,
-   high end L4 @7.2B), and on every card the 7.2B ratio beats that same card's 1.5B ratio —
-   the bigger the model relative to the card, the more the 4× weight-byte cut matters.
+   high end L4 @7.2B; the desktop 3090: 1.35× @1.5B, 1.54× @7.2B), and on every card the
+   7.2B ratio beats that same card's 1.5B ratio — the bigger the model relative to the
+   card, the more the 4× weight-byte cut matters.
 2. **fp16 overtakes at high concurrency everywhere measured** — batched fp16 GEMM beats
    batched dequant+cuBLAS once weight bytes stop being the bottleneck. **The crossover
    point is a property of the card, not of the model tier:** T4, A100-40GB and H100 cross
    early (fp16 already ahead by c=32); L4 and A10G cross late (int4 still ahead at c=32,
-   fp16 ahead by c=128); the 5090 at 1.5B also crosses late. Wherever both model sizes were
-   measured on a card, the card keeps its crossover class. Why T4 groups with A100/H100
-   rather than with its bandwidth-class neighbours L4/A10G is unresolved — stated, not
-   explained away.
+   fp16 ahead by c=128); the 5090 at 1.5B also crosses late; the 3090 crosses right at the
+   boundary on both sizes (7.2B: fp16 +6.7% by c=32; 1.5B: a dead heat at c=32, GPTQ +0.9%,
+   fp16 clearly ahead by c=128). Wherever both model sizes were measured on a card, the
+   card keeps its crossover class. Why T4 groups with A100/H100 rather than with its
+   bandwidth-class neighbours L4/A10G is unresolved — stated, not explained away.
 3. **Bigger models quantize cleaner — now confirmed at the serving layer too:** 7.2B GPTQ
-   is greedy-EXACT on all six cards measured (5090, T4, L4, A10G, A100-40GB, H100); 1.5B is
-   exact nowhere (10/24 GPTQ / 14/24 RTN, the same match counts on every card and
-   architecture). An independent, serving-layer cross-check of §4's MATH500 verdict (7.2B
-   −3.1pt vs 1.5B −25.6pt) — two rulers, one conclusion.
+   is greedy-EXACT on all seven cards measured (5090, 3090, T4, L4, A10G, A100-40GB,
+   H100); 1.5B is exact nowhere (10/24 GPTQ / 14/24 RTN, the same match counts on every
+   card and architecture — the 3090 even reproduces the same first-divergence tokens,
+   div@10 / div@14). An independent, serving-layer cross-check of §4's MATH500 verdict
+   (7.2B −3.1pt vs 1.5B −25.6pt) — two rulers, one conclusion.
 
 **Deliberately not run, and why:** RTN on A100/H100 at 1.5B and on T4/L4/A100/H100 at 7.2B
-— GPTQ≈RTN speed parity was already verified at seven paired card/model points above, and
-re-proving it per card buys nothing. B200/H200/A100-80GB/L40S — five cards already
-characterize the finding. **Pending:** the 3090 same-matrix run is currently blocked by
-container-registry blob failures on that box; it will be appended when the box recovers.
+— GPTQ≈RTN speed parity was already verified at nine paired card/model points above, and
+re-proving it per card buys nothing. B200/H200/A100-80GB/L40S — the cards measured already
+characterize the finding. (The 3090 run this section previously listed as pending —
+blocked by container-registry blob failures — has landed; its rows are above.)
+
+Raw (3090): `bench/results/bsz_sweep_{1.5b,7.2b}_{fp16,w4gptq,w4rtn}_3090.json`, gates
+`bench/results/greedy_gates_1.5b_{fp16,w4gptq,w4rtn}_3090.log` and
+`bench/results/greedy_gates_7.2b_{w4gptq,w4rtn}_3090.log`, ShareGPT
+`bench/results/sharegpt_{1.5b,7.2b}_{fp16,w4gptq}_3090_{rinf,r16}.log`, cliff map
+`bench/results/bsz_sweep_7.2b_w4gptq_3090_cliffmap{,_fine}.json`, boot-flag sidecar
+`bench/results/bsz_sweep_3090_serve_flags.log`.
 
 Raw (other cards): `bench/results/w4_speed_fleet/` — one JSON per server run, named
 `<GPU>_<model>_<config>.json`, each carrying the device string, gate result and full sweep

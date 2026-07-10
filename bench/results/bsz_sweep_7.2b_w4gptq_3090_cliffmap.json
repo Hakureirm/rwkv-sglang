@@ -1,0 +1,91 @@
+{
+  "rows": [
+    {
+      "concurrency": 48,
+      "requests": 192,
+      "wall_s": 36.72,
+      "out_tokens": 49152,
+      "out_tok_per_s": 1338.5,
+      "req_per_s": 5.228,
+      "lat_p50_s": 9.179,
+      "lat_p99_s": 9.437,
+      "per_stream_tok_s": 27.9
+    },
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 45.85,
+      "out_tokens": 65536,
+      "out_tok_per_s": 1429.5,
+      "req_per_s": 5.584,
+      "lat_p50_s": 11.425,
+      "lat_p99_s": 11.749,
+      "per_stream_tok_s": 22.3
+    },
+    {
+      "concurrency": 80,
+      "requests": 320,
+      "wall_s": 108.03,
+      "out_tokens": 81920,
+      "out_tok_per_s": 758.3,
+      "req_per_s": 2.962,
+      "lat_p50_s": 27.02,
+      "lat_p99_s": 27.322,
+      "per_stream_tok_s": 9.5
+    },
+    {
+      "concurrency": 96,
+      "requests": 384,
+      "wall_s": 112.66,
+      "out_tokens": 98304,
+      "out_tok_per_s": 872.6,
+      "req_per_s": 3.409,
+      "lat_p50_s": 28.032,
+      "lat_p99_s": 28.291,
+      "per_stream_tok_s": 9.1
+    },
+    {
+      "concurrency": 112,
+      "requests": 448,
+      "wall_s": 116.71,
+      "out_tokens": 114688,
+      "out_tok_per_s": 982.7,
+      "req_per_s": 3.839,
+      "lat_p50_s": 28.965,
+      "lat_p99_s": 29.387,
+      "per_stream_tok_s": 8.8
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 120.5,
+      "out_tokens": 131072,
+      "out_tok_per_s": 1087.7,
+      "req_per_s": 4.249,
+      "lat_p50_s": 29.969,
+      "lat_p99_s": 30.282,
+      "per_stream_tok_s": 8.5
+    }
+  ],
+  "peak": {
+    "concurrency": 64,
+    "requests": 256,
+    "wall_s": 45.85,
+    "out_tokens": 65536,
+    "out_tok_per_s": 1429.5,
+    "req_per_s": 5.584,
+    "lat_p50_s": 11.425,
+    "lat_p99_s": 11.749,
+    "per_stream_tok_s": 22.3
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30000,
+    "concurrencies": "48,64,80,96,112,128",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "bench/results/bsz_sweep_7.2b_w4gptq_3090_cliffmap.json"
+  }
+}

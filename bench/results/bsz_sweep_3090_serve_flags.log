@@ -1,0 +1,53 @@
+# Provenance: 3090 speed matrix + cliffmap + ShareGPT rows (2026-07-10)
+# Box: RTX 3090 24GB, sm86. All servers launched inside the long-lived
+# `rwkvmain` container (docker.1ms.run/lmsysorg/sglang:dev-cu12, up since 2026-07-06,
+# sglang 0.0.0.dev1+g754524d8d with the pre-drift rwkv7 overlay deployed in place).
+# Serve script: canonical repo scripts/serve.sh (7-export version, 2026-07-08),
+# copied into the container as /tmp/serve_canonical.sh.
+#
+# CAVEAT (comparability): the container's deployed overlay predates the W1 kernel
+# promotion -- it does NOT read RWKV_FUSED_GATES / RWKV_FUSED_SQRELU (verified:
+# grep over /sgl-workspace/sglang/python/sglang/srt returned no hits). Those two
+# exports were set but are inert here; the effective fast-path stack for ALL legs
+# on this box is the 5-env one (FAST_LINEAR / SPARSE_FFN / FUSED_LORA / FUSED_GLUE /
+# GEMV_AUTOTUNE). Internally consistent across all six legs.
+#
+# Common: --dtype float16 --trust-remote-code --page-size 1 --attention-backend triton
+#         --disable-piecewise-cuda-graph --disable-radix-cache --chunked-prefill-size 4096
+#         (MODE=throughput). Harness: bench/bsz_throughput.py --in-len 64 --out-len 256.
+# w4 legs additionally: RWKV_W4=1.
+#
+# Per-leg deltas:
+#   bsz_sweep_7.2b_w4gptq_3090.json : MEMFRAC=0.85 CGMAXBS=128 --max-running-requests 128
+#   bsz_sweep_7.2b_w4rtn_3090.json  : MEMFRAC=0.85 CGMAXBS=128 --max-running-requests 128
+#   bsz_sweep_7.2b_fp16_3090.json   : MEMFRAC=0.80 CGMAXBS=128 --max-running-requests 128
+#                                     --cuda-graph-bs 1 32 128   (see OOM notes below)
+#   bsz_sweep_1.5b_*_3090.json      : MEMFRAC=0.85 CGMAXBS=512 (serve.sh defaults,
+#                                     max-running-requests 512, full capture list)
+#   bsz_sweep_7.2b_w4gptq_3090_cliffmap.json / _fine.json : same boot config as the
+#                                     7.2b_w4gptq matrix leg (0.85 / 128 / 128).
+#
+# OOM findings (7.2B fp16 on 24GB, real, reproduced):
+#   1) serve.sh default --max-running-requests 512 cannot boot ANY 7.2B leg on 24GB:
+#      the mamba/RWKV state pool alone (512 x ~33.5MiB) exceeds the budget
+#      (ValueError in _profile_available_bytes; its suggested mem-fraction is
+#      misleading -- it ignores handle_max_mamba_cache).
+#   2) fp16 7.2B, memfrac 0.85, full 20-graph capture list: boots, survives c=1/32,
+#      OOMs at c=128 chunked prefill (wkv_recurrent fp32 final-state alloc, 64MiB,
+#      43MiB free). Memory: weights 13.44G + mamba pool 4.16G (128 slots) + graphs
+#      4.74G -> 0.80G headroom. memfrac 0.80 changes nothing (pools are not
+#      memfrac-scaled; re-tested, identical 22.77G torch alloc).
+#   3) Fix that keeps cuda-graph ON through c=128: trim decode capture list to
+#      --cuda-graph-bs 1 32 128 (graph mem 4.62G, headroom 0.92G) -> full sweep OK.
+#      Note: capture memory is dominated by the bs=128 workspace, not graph count.
+#   4) ShareGPT (avg ~322-token prompts) at 128-way still OOMed the 0.92G headroom
+#      (128MiB alloc, 543MiB fragmented reserve). --chunked-prefill-size 2048 (this
+#      leg only: sharegpt_7.2b_fp16_3090_*) fixed it; both rates completed, server
+#      stayed alive. The w4 legs needed none of this (weights 4.7G -> ample headroom,
+#      full default capture list, chunked-prefill 4096).
+#
+# Greedy gates (offline engine, bench/greedy_check.py, --dtype float16, no fast-path
+# envs; RWKV_W4=1 required for w4 checkpoints to accept qweight keys):
+#   7.2b w4gptq 8/8 exact | 7.2b w4rtn 8/8 exact
+#   1.5b w4gptq 10/24 first_div=10 | 1.5b w4rtn 14/24 first_div=14 (matches the
+#   documented prior gate byte-for-byte) | 1.5b fp16 24/24 exact (stack sanity).

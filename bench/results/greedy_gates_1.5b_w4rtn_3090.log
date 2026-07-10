@@ -1,0 +1,7 @@
+Failed to load generation config for /models/rwkv7-1.5b-w4: /models/rwkv7-1.5b-w4 does not appear to have a file named generation_config.json. Checkout 'https://huggingface.co//models/rwkv7-1.5b-w4/tree/main' for available files.. Proceeding without generation config.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:01<00:00,  1.07s/it]Multi-thread loading shards: 100% Completed | 1/1 [00:01<00:00,  1.07s/it]
+GREEDY MATCH 14/24  first_div=14  exact=False
+GOT  [37138, 45, 44312, 47, 11, 6699, 304, 25740, 109, 37480, 4600, 332, 47483, 4706, 22590, 30449, 4706, 37138, 47, 11, 6699, 304, 25740, 109]
+EXP  [37138, 45, 44312, 47, 11, 6699, 304, 25740, 109, 37480, 4600, 332, 47483, 4706, 37138, 21265, 44312, 47, 11, 6699, 304, 25740, 109, 37480]

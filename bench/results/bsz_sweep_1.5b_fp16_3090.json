@@ -1,0 +1,91 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 9.3,
+      "out_tokens": 2048,
+      "out_tok_per_s": 220.1,
+      "req_per_s": 0.86,
+      "lat_p50_s": 1.116,
+      "lat_p99_s": 1.496,
+      "per_stream_tok_s": 220.1
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 9.31,
+      "out_tokens": 32768,
+      "out_tok_per_s": 3517.9,
+      "req_per_s": 13.742,
+      "lat_p50_s": 2.28,
+      "lat_p99_s": 2.351,
+      "per_stream_tok_s": 109.9
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 18.52,
+      "out_tokens": 131072,
+      "out_tok_per_s": 7077.5,
+      "req_per_s": 27.646,
+      "lat_p50_s": 4.421,
+      "lat_p99_s": 4.705,
+      "per_stream_tok_s": 55.3
+    },
+    {
+      "concurrency": 256,
+      "requests": 1024,
+      "wall_s": 35.86,
+      "out_tokens": 262144,
+      "out_tok_per_s": 7310.4,
+      "req_per_s": 28.556,
+      "lat_p50_s": 8.325,
+      "lat_p99_s": 10.519,
+      "per_stream_tok_s": 28.6
+    },
+    {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 53.52,
+      "out_tokens": 393216,
+      "out_tok_per_s": 7347.3,
+      "req_per_s": 28.7,
+      "lat_p50_s": 12.425,
+      "lat_p99_s": 13.97,
+      "per_stream_tok_s": 19.1
+    },
+    {
+      "concurrency": 512,
+      "requests": 2048,
+      "wall_s": 74.96,
+      "out_tokens": 524288,
+      "out_tok_per_s": 6994.2,
+      "req_per_s": 27.321,
+      "lat_p50_s": 17.761,
+      "lat_p99_s": 19.855,
+      "per_stream_tok_s": 13.7
+    }
+  ],
+  "peak": {
+    "concurrency": 384,
+    "requests": 1536,
+    "wall_s": 53.52,
+    "out_tokens": 393216,
+    "out_tok_per_s": 7347.3,
+    "req_per_s": 28.7,
+    "lat_p50_s": 12.425,
+    "lat_p99_s": 13.97,
+    "per_stream_tok_s": 19.1
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30000,
+    "concurrencies": "1,32,128,256,384,512",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "bench/results/bsz_sweep_1.5b_fp16_3090.json"
+  }
+}

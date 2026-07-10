@@ -1,0 +1,91 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 6.98,
+      "out_tokens": 2048,
+      "out_tok_per_s": 293.2,
+      "req_per_s": 1.145,
+      "lat_p50_s": 0.857,
+      "lat_p99_s": 0.988,
+      "per_stream_tok_s": 293.2
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 9.28,
+      "out_tokens": 32768,
+      "out_tok_per_s": 3530.8,
+      "req_per_s": 13.792,
+      "lat_p50_s": 2.277,
+      "lat_p99_s": 2.358,
+      "per_stream_tok_s": 110.3
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 27.38,
+      "out_tokens": 131072,
+      "out_tok_per_s": 4786.4,
+      "req_per_s": 18.697,
+      "lat_p50_s": 6.681,
+      "lat_p99_s": 6.971,
+      "per_stream_tok_s": 37.4
+    },
+    {
+      "concurrency": 256,
+      "requests": 1024,
+      "wall_s": 44.73,
+      "out_tokens": 262144,
+      "out_tok_per_s": 5860.8,
+      "req_per_s": 22.894,
+      "lat_p50_s": 10.745,
+      "lat_p99_s": 11.376,
+      "per_stream_tok_s": 22.9
+    },
+    {
+      "concurrency": 384,
+      "requests": 1536,
+      "wall_s": 63.59,
+      "out_tokens": 393216,
+      "out_tok_per_s": 6184.1,
+      "req_per_s": 24.157,
+      "lat_p50_s": 15.084,
+      "lat_p99_s": 16.089,
+      "per_stream_tok_s": 16.1
+    },
+    {
+      "concurrency": 512,
+      "requests": 2048,
+      "wall_s": 84.97,
+      "out_tokens": 524288,
+      "out_tok_per_s": 6170.0,
+      "req_per_s": 24.101,
+      "lat_p50_s": 20.374,
+      "lat_p99_s": 21.292,
+      "per_stream_tok_s": 12.1
+    }
+  ],
+  "peak": {
+    "concurrency": 384,
+    "requests": 1536,
+    "wall_s": 63.59,
+    "out_tokens": 393216,
+    "out_tok_per_s": 6184.1,
+    "req_per_s": 24.157,
+    "lat_p50_s": 15.084,
+    "lat_p99_s": 16.089,
+    "per_stream_tok_s": 16.1
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30000,
+    "concurrencies": "1,32,128,256,384,512",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "bench/results/bsz_sweep_1.5b_w4rtn_3090.json"
+  }
+}
