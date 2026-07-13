@@ -60,6 +60,7 @@ from sglang.srt.distributed import (
     get_tensor_model_parallel_world_size,
 )
 from sglang.srt.layers.attention.rwkv7_kernels import fast_linear
+from sglang.srt.layers.attention.rwkv7_kernels import ln_fused
 from sglang.srt.layers.attention.rwkv7_kernels import lora_fused
 from sglang.srt.layers.attention.rwkv7_kernels import sparse_cmix
 from sglang.srt.layers.attention.rwkv7_kernels import w4_linear
@@ -137,9 +138,9 @@ _FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "4"))
 # H100 profile (F0051) found these ~5-7 tiny elementwise ops are the single largest
 # un-fused launch-count cluster per decode layer. Byte-exact vs torch gated by
 # bench/test_lora_gates.py (incl. the sigmoid transcendental). Raw env default OFF (opt-in,
-matches every other fast-path flag above); scripts/serve.sh exports this ON as of
-2026-07-08 as part of the recommended production combo (see that file's header for the
-combined-flags re-verification this promotion required).
+# matches every other fast-path flag above); scripts/serve.sh exports this ON as of
+# 2026-07-08 as part of the recommended production combo (see that file's header for the
+# combined-flags re-verification this promotion required).
 _FUSED_GATES = os.environ.get("RWKV_FUSED_GATES", "0") == "1"
 # W1 cont. (reverse-overtake, F0052): EPILOGUE-fuse the FFN channel-mix activation
 # relu(k)^2 INTO the ffn.key GEMV's store (one kernel), instead of running relu + pow
@@ -151,15 +152,70 @@ _FUSED_GATES = os.environ.get("RWKV_FUSED_GATES", "0") == "1"
 # have no such epilogue and are untouched — so this is a NEW op (gemv_m1_sqrelu), never a
 # change to the shared gemv_m1. Byte-exact vs torch.relu(gemv_m1(.))**2 gated by
 # bench/test_sqrelu_gate.py; greedy-EXACT end-to-end by verify_batch.py. Mutually exclusive
-with RWKV_SPARSE_FFN (see `not self._sparse` below) — when sparse is eligible it wins (a
-real bandwidth win); this is the epilogue-fusion fallback for sparse's own dense-fallback
-path, not a second lever stacked on top of it. Raw env default OFF (opt-in, matches every
-other fast-path flag above); scripts/serve.sh exports this ON as of 2026-07-08.
+# with RWKV_SPARSE_FFN (see `not self._sparse` below) — when sparse is eligible it wins (a
+# real bandwidth win); this is the epilogue-fusion fallback for sparse's own dense-fallback
+# path, not a second lever stacked on top of it. Raw env default OFF (opt-in, matches every
+# other fast-path flag above); scripts/serve.sh exports this ON as of 2026-07-08.
 _FUSED_SQRELU = os.environ.get("RWKV_FUSED_SQRELU", "0") == "1"
 _GLUE_ANNOUNCED = False  # one-time "R2 fused glue ENABLED" stderr notice (attn)
 _GATES_ANNOUNCED = False  # one-time "W1 fused LoRA gates ENABLED" notice
 _SQRELU_ANNOUNCED = False  # one-time "W1 fused ffn sqrelu ENABLED" notice
 _GLUE1_ANNOUNCED = False  # one-time notice (ffn shift_lerp1)
+
+# W1' (large-batch glue, vs vllm-rwkv PR#8's fused analogs): fuse the residual
+# add + LayerNorm at every layer norm boundary (pre-attn LN eats the previous
+# layer's pending ffn output, pre-ffn LN eats attn_out, the final norm eats the
+# last ffn output) into ONE kernel each - x_new written once, LN row stats from
+# registers. Bit-identical to torch add + nn.LayerNorm: rwkv7_ln.cu transcribes
+# torch's vectorized-LN Welford/reduction algorithm; gated by
+# bench/test_ln_fused.py (zero differing bytes) + greedy-EXACT e2e before ON.
+# Works at every batch size (shape-agnostic); the win is 1 launch + one x
+# round-trip per boundary, which the bs320 profile showed as stock-kernel glue.
+# Default OFF (opt-in, matches every other fast-path flag).
+_FUSED_ADDLN = os.environ.get("RWKV_FUSED_ADDLN", "0") == "1"
+# W1' cont.: fuse g_norm (GroupNorm) + the gate-correction epilogue
+# ((r*k*r_k).sum*v residual + output gate; their tmix_lnx_rkvres_xg analog)
+# into ONE kernel, replacing torch's RowwiseMoments + GroupNorm1d pair AND the
+# Triton _gate_corr launch, dropping the o_norm HBM round-trip. Bit-identical
+# transcription (incl. torch's fp16-rounded GroupNorm eps/mean/rstd quirks and
+# the Triton kernel's probed 64-wide summation tree); same gates as ADDLN.
+_FUSED_GNGC = os.environ.get("RWKV_FUSED_GNGC", "0") == "1"
+_ADDLN_ANNOUNCED = False  # one-time notice (fused residual-add + LayerNorm)
+_GNGC_ANNOUNCED = False  # one-time notice (fused GroupNorm + gate-corr)
+
+
+def _try_add_ln(x, delta, ln):
+    """W1' fused x_new = x + delta; y = ln(x_new) -> (x_new, y), or None.
+
+    Eligibility mirrors rwkv7_ln.cu's checks (fp16, contiguous, N%4==0,
+    N<=8192, affine fp16 LayerNorm) so ineligible shapes keep the exact torch
+    path. The fallback is byte-identical math, just unfused."""
+    if not _FUSED_ADDLN or delta is None:
+        return None
+    if not (
+        x.dtype == torch.float16
+        and delta.dtype == torch.float16
+        and x.is_contiguous()
+        and delta.is_contiguous()
+        and x.shape == delta.shape
+        and x.dim() == 2
+        and (x.shape[-1] % 4) == 0
+        and x.shape[-1] <= 8192
+    ):
+        return None
+    w = getattr(ln, "weight", None)
+    b = getattr(ln, "bias", None)
+    if w is None or b is None or w.dtype != torch.float16 or b.dtype != torch.float16:
+        return None
+    if not ln_fused.available():
+        return None
+    global _ADDLN_ANNOUNCED
+    if not _ADDLN_ANNOUNCED:
+        import sys
+        _ADDLN_ANNOUNCED = True
+        print("[rwkv7] W1' fused residual-add+LayerNorm ENABLED (fp16)",
+              file=sys.stderr, flush=True)
+    return ln_fused.add_ln(x, delta, ln)
 
 # M6 measurement gate: log the per-token zero-fraction of the ffn sqrelu activation
 # (relu(k)^2 == 0 iff k<=0). Reproduces the 86-90% figure in bench/results/sparse_ffn/
@@ -840,14 +896,34 @@ class Rwkv7Attention(nn.Module):
 
         o = be.recurrence(r, w_log, k, v, kk, a, self.layer_id, forward_batch)
         # o: [T, nh, hd]
-        o = self.g_norm(o.reshape(T, H))
-        if fused:
-            # o = (g_norm(o) + (r*k*r_k).sum(-1)*v) * g   (one launch)
-            o = fused_gate_corr(o, r, k, self.r_k, v, g, nh)
+        if (
+            _FUSED_GNGC
+            and fused
+            and x.dtype == torch.float16
+            and hd <= 64
+            and self.g_norm.weight.dtype == torch.float16
+            and ln_fused.available()
+        ):
+            # W1': GroupNorm + gate-corr epilogue in ONE kernel (bit-identical
+            # to g_norm + fused_gate_corr; gated by bench/test_ln_fused.py).
+            global _GNGC_ANNOUNCED
+            if self.layer_id == 0 and not _GNGC_ANNOUNCED:
+                import sys
+                _GNGC_ANNOUNCED = True
+                print("[rwkv7] W1' fused GroupNorm+gate-corr ENABLED (fp16)",
+                      file=sys.stderr, flush=True)
+            o = ln_fused.gn_gatecorr(
+                o.reshape(T, H), r, k, self.r_k, v, g, self.g_norm, nh
+            )
         else:
-            gate_corr = ((r * k * self.r_k).sum(dim=-1, keepdim=True) * v).reshape(T, H)
-            o = o + gate_corr
-            o = o * g
+            o = self.g_norm(o.reshape(T, H))
+            if fused:
+                # o = (g_norm(o) + (r*k*r_k).sum(-1)*v) * g   (one launch)
+                o = fused_gate_corr(o, r, k, self.r_k, v, g, nh)
+            else:
+                gate_corr = ((r * k * self.r_k).sum(dim=-1, keepdim=True) * v).reshape(T, H)
+                o = o + gate_corr
+                o = o * g
         out = _proj_gemv(self.o_proj, o, self._fast)
         return out, v_first
 
@@ -975,11 +1051,32 @@ class Rwkv7DecoderLayer(nn.Module):
         forward_batch: ForwardBatch,
         x: torch.Tensor,
         v_first: Optional[torch.Tensor],
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        attn_out, v_first = self.attn(forward_batch, self.attn_norm(x), v_first)
+        delta_in: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+        # W1' fused add+LN: `delta_in` is the previous boundary's residual
+        # branch (the last layer's ffn output) NOT yet added into the stream -
+        # add_ln folds that add into this layer's attn_norm read. The third
+        # return is this layer's pending ffn output for the next boundary.
+        # With RWKV_FUSED_ADDLN off (or ineligible) delta_in is always None and
+        # this is byte-for-byte the original x = x + attn_out / x + ffn(...)
+        # sequence.
+        if delta_in is not None:
+            fl = _try_add_ln(x, delta_in, self.attn_norm)
+            if fl is not None:
+                x, normed = fl
+            else:
+                x = x + delta_in
+                normed = self.attn_norm(x)
+        else:
+            normed = self.attn_norm(x)
+        attn_out, v_first = self.attn(forward_batch, normed, v_first)
+        fl = _try_add_ln(x, attn_out, self.ffn_norm)
+        if fl is not None:
+            x, normed2 = fl
+            return x, v_first, self.ffn(forward_batch, normed2)
         x = x + attn_out
         x = x + self.ffn(forward_batch, self.ffn_norm(x))
-        return x, v_first
+        return x, v_first, None
 
 
 class Rwkv7Model(nn.Module):
@@ -1068,10 +1165,20 @@ class Rwkv7Model(nn.Module):
                           f"vfsum={v_first.float().sum().item():.6f}",
                           file=sys.stderr, flush=True)
 
+        # W1' fused add+LN: each layer may hand back its ffn output un-added
+        # (pending); the next layer's fused attn_norm (or the final norm below)
+        # folds the add in. delta stays None with RWKV_FUSED_ADDLN off.
+        delta = None
         for i in range(self.start_layer, self.end_layer):
-            x, v_first = self.layers[i](forward_batch, x, v_first)
+            x, v_first, delta = self.layers[i](
+                forward_batch, x, v_first, delta_in=delta
+            )
 
         if not self.pp_group.is_last_rank:
+            if delta is not None:
+                # materialize before the PP send (same bits as the unfused add)
+                x = x + delta
+                delta = None
             # v_first (layer 0's value projection — under tp>1 the LOCAL head
             # slice, same layout on the matching tp rank of the next stage) rides
             # along with the hidden state: every later layer's v-residual mix
@@ -1108,6 +1215,11 @@ class Rwkv7Model(nn.Module):
                           file=sys.stderr, flush=True)
             return PPProxyTensors({"hidden_states": x, "v_first": v_first})
 
+        if delta is not None:
+            fl = _try_add_ln(x, delta, self.norm)
+            if fl is not None:
+                return fl[1]
+            x = x + delta
         x = self.norm(x)
         return x
 
