@@ -1,0 +1,113 @@
+{
+  "rows": [
+    {
+      "concurrency": 48,
+      "requests": 192,
+      "wall_s": 37.72,
+      "out_tokens": 49152,
+      "out_tok_per_s": 1303.0,
+      "req_per_s": 5.09,
+      "lat_p50_s": 9.315,
+      "lat_p99_s": 10.554,
+      "per_stream_tok_s": 27.1
+    },
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 46.58,
+      "out_tokens": 65536,
+      "out_tok_per_s": 1407.0,
+      "req_per_s": 5.496,
+      "lat_p50_s": 11.767,
+      "lat_p99_s": 12.003,
+      "per_stream_tok_s": 22.0
+    },
+    {
+      "concurrency": 66,
+      "requests": 264,
+      "wall_s": 108.51,
+      "out_tokens": 67584,
+      "out_tok_per_s": 622.8,
+      "req_per_s": 2.433,
+      "lat_p50_s": 27.468,
+      "lat_p99_s": 27.757,
+      "per_stream_tok_s": 9.4
+    },
+    {
+      "concurrency": 72,
+      "requests": 288,
+      "wall_s": 112.82,
+      "out_tokens": 73728,
+      "out_tok_per_s": 653.5,
+      "req_per_s": 2.553,
+      "lat_p50_s": 28.142,
+      "lat_p99_s": 28.299,
+      "per_stream_tok_s": 9.1
+    },
+    {
+      "concurrency": 80,
+      "requests": 320,
+      "wall_s": 114.83,
+      "out_tokens": 81920,
+      "out_tok_per_s": 713.4,
+      "req_per_s": 2.787,
+      "lat_p50_s": 28.631,
+      "lat_p99_s": 28.794,
+      "per_stream_tok_s": 8.9
+    },
+    {
+      "concurrency": 96,
+      "requests": 384,
+      "wall_s": 120.21,
+      "out_tokens": 98304,
+      "out_tok_per_s": 817.8,
+      "req_per_s": 3.194,
+      "lat_p50_s": 29.989,
+      "lat_p99_s": 30.254,
+      "per_stream_tok_s": 8.5
+    },
+    {
+      "concurrency": 112,
+      "requests": 448,
+      "wall_s": 125.75,
+      "out_tokens": 114688,
+      "out_tok_per_s": 912.0,
+      "req_per_s": 3.562,
+      "lat_p50_s": 31.401,
+      "lat_p99_s": 31.851,
+      "per_stream_tok_s": 8.1
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 131.28,
+      "out_tokens": 131072,
+      "out_tok_per_s": 998.4,
+      "req_per_s": 3.9,
+      "lat_p50_s": 32.683,
+      "lat_p99_s": 33.096,
+      "per_stream_tok_s": 7.8
+    }
+  ],
+  "peak": {
+    "concurrency": 64,
+    "requests": 256,
+    "wall_s": 46.58,
+    "out_tokens": 65536,
+    "out_tok_per_s": 1407.0,
+    "req_per_s": 5.496,
+    "lat_p50_s": 11.767,
+    "lat_p99_s": 12.003,
+    "per_stream_tok_s": 22.0
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30000,
+    "concurrencies": "48,64,66,72,80,96,112,128",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "bench/results/bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_base.json"
+  }
+}
