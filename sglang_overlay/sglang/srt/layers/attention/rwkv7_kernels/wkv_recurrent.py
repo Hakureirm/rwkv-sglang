@@ -47,9 +47,19 @@ only the HBM bytes of the carried state, not the arithmetic scheme. The fp32
 default remains the bitwise-oracle tier.
 """
 
+import os
+
 import torch
 import triton
 import triton.language as tl
+
+# W1': optional decode launch-config override for the fp16-STATE path only
+# ("BV,num_warps", e.g. RWKV_WKV_FP16_CFG=64,8). The fp32-state config stays
+# pinned below (its summation order is part of the bitwise-oracle tier); the
+# fp16-state path is already the lossy tier - the storage rounds the carried
+# state EVERY step, dwarfing the 1-ULP-class reordering a tile change causes -
+# and is re-gated by greedy + the lossy rulers with the override applied.
+_FP16_CFG = os.environ.get("RWKV_WKV_FP16_CFG", "")
 
 
 @triton.jit(do_not_specialize=["T"])
@@ -231,6 +241,18 @@ def wkv_recurrent(
     # batched == B=1) exact on knife-edge continuations under bf16.
     if cu_seqlens is None:
         BV, num_warps = min(32, NV), 4
+        # fp16-state decode only (lossy tier - see _FP16_CFG note above): allow
+        # a card-tuned tile. The fp32-state path never takes this branch.
+        if (
+            _FP16_CFG
+            and state_pool is not None
+            and state_pool.dtype == torch.float16
+        ):
+            try:
+                _b, _n = _FP16_CFG.split(",")
+                BV, num_warps = min(int(_b), NV), int(_n)
+            except ValueError:
+                pass
     else:
         BV, num_warps = min(16, NV), 4
     if _bv is not None:

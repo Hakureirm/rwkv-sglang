@@ -188,9 +188,17 @@ _FUSED_GNGC = os.environ.get("RWKV_FUSED_GNGC", "0") == "1"
 # levers (sparse_cmix / gemv_m1_sqrelu) - this covers the batched-decode /
 # prefill dense fallback those paths do not reach.
 _FUSED_RELUSQ = os.environ.get("RWKV_FUSED_RELUSQ", "0") == "1"
+# W1' cont.: batched LoRA-gate activations (their tmix_vres_gate analog) -
+# the M>_FUSED_LORA_MAX_BS sibling of RWKV_FUSED_GATES: at large batch the
+# w/a/v outer activations run as ~8 stock elementwise kernels per layer
+# (3 sigmoids + neg/mul + sub/mul/add); one kernel replaces them with the
+# exact torch rounding chain (same validated sigmoid form as fused_lora_gates).
+# The g_lora GEMM chain is untouched. Same gates as the other W1' fusions.
+_FUSED_VRESGATE = os.environ.get("RWKV_FUSED_VRESGATE", "0") == "1"
 _ADDLN_ANNOUNCED = False  # one-time notice (fused residual-add + LayerNorm)
 _GNGC_ANNOUNCED = False  # one-time notice (fused GroupNorm + gate-corr)
 _RELUSQ_ANNOUNCED = False  # one-time notice (fused relu^2, dense ffn path)
+_VRESGATE_ANNOUNCED = False  # one-time notice (batched LoRA-gate activations)
 
 
 def _try_add_ln(x, delta, ln):
@@ -878,11 +886,35 @@ class Rwkv7Attention(nn.Module):
             if self.layer_id != 0:
                 v = v + (v_first - v) * torch.sigmoid(lo_mn[:, 3])
         else:
-            w_log = -torch.sigmoid(self.w_lora(xw)) * _INV_SQRT_E
-            a = torch.sigmoid(self.a_lora(xa))
+            wl = self.w_lora(xw)
+            al = self.a_lora(xa)
             g = self.g_lora(xg)
-            if self.layer_id != 0:
-                v = v + (v_first - v) * torch.sigmoid(self.v_lora(xv))
+            vl = self.v_lora(xv) if self.layer_id != 0 else None
+            if (
+                _FUSED_VRESGATE
+                and x.dtype == torch.float16
+                and wl.is_contiguous()
+                and al.is_contiguous()
+                and v.is_contiguous()
+                and (vl is None or (vl.is_contiguous() and v_first.is_contiguous()))
+                and ln_fused.available()
+            ):
+                # W1': one kernel for the 3 sigmoids + w_log scale + v-residual
+                # mix (bit-identical chain; bench/test_ln_fused.py).
+                global _VRESGATE_ANNOUNCED
+                if not _VRESGATE_ANNOUNCED:
+                    import sys
+                    _VRESGATE_ANNOUNCED = True
+                    print("[rwkv7] W1' fused batched LoRA-gate activations ENABLED (fp16)",
+                          file=sys.stderr, flush=True)
+                w_log, a, v = ln_fused.vres_gates(
+                    wl, al, vl, v, v_first if vl is not None else None, _INV_SQRT_E
+                )
+            else:
+                w_log = -torch.sigmoid(wl) * _INV_SQRT_E
+                a = torch.sigmoid(al)
+                if vl is not None:
+                    v = v + (v_first - v) * torch.sigmoid(vl)
 
         if fused:
             # kk = L2norm(k·k_k) over hd; k <- k + k·(a-1)·k_a  (one launch)

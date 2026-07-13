@@ -61,6 +61,9 @@
 #include <torch/library.h>
 #include <cuda_fp16.h>
 
+#include <optional>
+#include <tuple>
+
 using dtype = at::Half;
 
 namespace {
@@ -357,7 +360,80 @@ __global__ void relu_sq_kernel(int64_t n, const dtype* __restrict__ x,
   }
 }
 
+// Batched LoRA-output gate activations (their tmix_vres_gate analog), the
+// M>4 sibling of fused.py's bsz1 _lora_gates_kernel: at large batch the LoRA
+// chains run as cuBLAS GEMMs and their OUTER activations run as ~8 stock
+// elementwise kernels per layer (3 sigmoids + neg/mul + sub/mul/add). One
+// kernel computes, per element, the exact torch rounding chain the deployed
+// path runs (each binary op fp32 -> rounded to fp16 before the next; sigmoid
+// is torch's (half)(1.f/(1.f+expf(-(float)x))), the same form the project's
+// bsz1 kernel byte-validated via bench/test_lora_gates.py):
+//   w_log = rnd((-rnd(sigmoid(wl))) * inv_sqrt_e)
+//   a     = rnd(sigmoid(al))
+//   v_new = rnd(v + rnd(rnd(vf - v) * rnd(sigmoid(vl))))      [HAS_V only]
+__global__ void vres_gates_kernel(int64_t n, bool has_v, float inv_sqrt_e,
+                                  const dtype* __restrict__ wl,
+                                  const dtype* __restrict__ al,
+                                  const dtype* __restrict__ vl,
+                                  const dtype* __restrict__ v,
+                                  const dtype* __restrict__ vf,
+                                  dtype* __restrict__ w_log,
+                                  dtype* __restrict__ a_out,
+                                  dtype* __restrict__ v_out) {
+  const int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i >= n) return;
+  const float s0 =
+      __half2float(__float2half_rn(1.f / (1.f + expf(-__half2float(wl[i])))));
+  w_log[i] = __float2half_rn((-s0) * inv_sqrt_e);
+  a_out[i] = __float2half_rn(1.f / (1.f + expf(-__half2float(al[i]))));
+  if (has_v) {
+    const float s3 =
+        __half2float(__float2half_rn(1.f / (1.f + expf(-__half2float(vl[i])))));
+    const float vv = __half2float(v[i]);
+    const float d = __half2float(__float2half_rn(__half2float(vf[i]) - vv));
+    const float p = __half2float(__float2half_rn(d * s3));
+    v_out[i] = __float2half_rn(vv + p);
+  }
+}
+
 }  // namespace
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor> vres_gates(
+    at::Tensor wl, at::Tensor al, std::optional<at::Tensor> vl_opt,
+    at::Tensor v, std::optional<at::Tensor> vf_opt, double inv_sqrt_e) {
+  const int64_t n = wl.numel();
+  const bool has_v = vl_opt.has_value();
+  TORCH_CHECK(wl.is_cuda() && wl.scalar_type() == at::kHalf && wl.is_contiguous(),
+              "vres_gates: wl CUDA fp16 contiguous");
+  TORCH_CHECK(al.scalar_type() == at::kHalf && al.numel() == n && al.is_contiguous(),
+              "vres_gates: al fp16 same numel");
+  TORCH_CHECK(v.scalar_type() == at::kHalf && v.numel() == n && v.is_contiguous(),
+              "vres_gates: v fp16 same numel");
+  if (has_v) {
+    TORCH_CHECK(vl_opt->scalar_type() == at::kHalf && vl_opt->numel() == n &&
+                    vl_opt->is_contiguous() && vf_opt.has_value() &&
+                    vf_opt->scalar_type() == at::kHalf && vf_opt->numel() == n &&
+                    vf_opt->is_contiguous(),
+                "vres_gates: vl/vf fp16 same numel");
+  }
+  auto w_log = at::empty_like(wl);
+  auto a_out = at::empty_like(wl);
+  auto v_out = has_v ? at::empty_like(v) : v;
+  if (n == 0) return {w_log, a_out, v_out};
+  auto stream = at::cuda::getCurrentCUDAStream();
+  const int threads = 256;
+  const int64_t blocks = (n + threads - 1) / threads;
+  vres_gates_kernel<<<static_cast<unsigned>(blocks), threads, 0, stream>>>(
+      n, has_v, static_cast<float>(inv_sqrt_e), wl.data_ptr<dtype>(),
+      al.data_ptr<dtype>(),
+      has_v ? vl_opt->data_ptr<dtype>() : wl.data_ptr<dtype>(),
+      v.data_ptr<dtype>(),
+      has_v ? vf_opt->data_ptr<dtype>() : wl.data_ptr<dtype>(),
+      w_log.data_ptr<dtype>(), a_out.data_ptr<dtype>(),
+      has_v ? v_out.data_ptr<dtype>() : w_log.data_ptr<dtype>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return {w_log, a_out, v_out};
+}
 
 at::Tensor relu_sq(at::Tensor x) {
   TORCH_CHECK(x.is_cuda() && x.scalar_type() == at::kHalf && x.is_contiguous(),
@@ -447,9 +523,13 @@ TORCH_LIBRARY(rwkv7_ln, m) {
       "gn_gatecorr(Tensor o, Tensor r, Tensor k, Tensor rk, Tensor v, Tensor g, "
       "Tensor gamma, Tensor beta, float eps, int nh) -> Tensor");
   m.def("relu_sq(Tensor x) -> Tensor");
+  m.def(
+      "vres_gates(Tensor wl, Tensor al, Tensor? vl, Tensor v, Tensor? vf, "
+      "float inv_sqrt_e) -> (Tensor, Tensor, Tensor)");
 }
 TORCH_LIBRARY_IMPL(rwkv7_ln, CUDA, m) {
   m.impl("add_ln", &add_ln);
   m.impl("gn_gatecorr", &gn_gatecorr);
   m.impl("relu_sq", &relu_sq);
+  m.impl("vres_gates", &vres_gates);
 }

@@ -70,6 +70,10 @@ def _register_fakes():
         @torch.library.register_fake("rwkv7_ln::relu_sq")
         def _fr(x):
             return torch.empty_like(x)
+
+        @torch.library.register_fake("rwkv7_ln::vres_gates")
+        def _fv(wl, al, vl, v, vf, inv_sqrt_e):
+            return torch.empty_like(wl), torch.empty_like(wl), torch.empty_like(v)
     except Exception:
         pass  # older torch without register_fake -> caller disables piecewise capture
 
@@ -89,6 +93,15 @@ def add_ln(x, delta, ln: torch.nn.LayerNorm):
 def relu_sq(x):
     """relu(x)**2 in one kernel (bit-identical to torch relu + pow on fp16)."""
     return torch.ops.rwkv7_ln.relu_sq(x)
+
+
+def vres_gates(wl, al, vl, v, v_first, inv_sqrt_e):
+    """Batched LoRA-gate activations: returns (w_log, a, v_new).
+
+    w_log = -sigmoid(wl) * inv_sqrt_e; a = sigmoid(al);
+    v_new = v + (v_first - v) * sigmoid(vl) (when vl is not None, layer>0)
+    - bit-identical to the torch op chain (bench/test_ln_fused.py)."""
+    return torch.ops.rwkv7_ln.vres_gates(wl, al, vl, v, v_first, inv_sqrt_e)
 
 
 def gn_gatecorr(o, r, k, r_k, v, g, gn: torch.nn.GroupNorm, nh: int):

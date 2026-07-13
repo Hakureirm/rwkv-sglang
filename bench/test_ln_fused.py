@@ -127,6 +127,32 @@ def test_relu_sq(quick=False):
     return fails
 
 
+def test_vres_gates(quick=False):
+    _INV_SQRT_E = 0.6065306597126334
+    gen = torch.Generator(device=DEV).manual_seed(20260717)
+    fails = 0
+    shapes = [(1, 2048), (320, 4096)] if quick else [
+        (1, 768), (7, 2048), (320, 4096), (4096, 2048)]
+    for shape in shapes:
+        for has_v in (False, True):
+            for kind in ("uniform", "heavy", "tiny"):
+                wl = _mk(shape, gen, kind)
+                al = _mk(shape, gen, kind)
+                v = _mk(shape, gen, kind)
+                vl = _mk(shape, gen, kind) if has_v else None
+                vf = _mk(shape, gen, kind) if has_v else None
+                ref_w = -torch.sigmoid(wl) * _INV_SQRT_E
+                ref_a = torch.sigmoid(al)
+                ref_v = v + (vf - v) * torch.sigmoid(vl) if has_v else v
+                got_w, got_a, got_v = ln_fused.vres_gates(wl, al, vl, v, vf, _INV_SQRT_E)
+                db = _diff_bytes(ref_w, got_w) + _diff_bytes(ref_a, got_a) + _diff_bytes(ref_v, got_v)
+                status = "OK " if db == 0 else "FAIL"
+                if db:
+                    fails += 1
+                print(f"[vres_gates] shape={shape} has_v={int(has_v)} {kind:8s} diff={db} {status}")
+    return fails
+
+
 def probe_sum_tree(trials=6, T=4096):
     """Isolate the 64-wide reduction: out == fp16(tree_sum(r_head_row))."""
     gen = torch.Generator(device=DEV).manual_seed(20260715)
@@ -161,6 +187,7 @@ def main():
     fails += test_add_ln(args.quick)
     fails += test_gn_gatecorr(args.quick)
     fails += test_relu_sq(args.quick)
+    fails += test_vres_gates(args.quick)
     print("OVERALL:", "PASS" if fails == 0 else f"FAIL ({fails} cases)")
     sys.exit(0 if fails == 0 else 1)
 
