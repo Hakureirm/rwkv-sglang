@@ -246,7 +246,9 @@ class Rwkv7StateShape:
     RWKV-7 has two width-2 (prev-token) token-shifts per layer: one for the
     time-mix (attn) block, one for the channel-mix (ffn) block. Each is stored as
     a `(hidden_size, conv_kernel-1=1)` conv state. The recurrent WKV state S is
-    `(num_heads, head_dim, head_dim)` and is kept fp32 by the kernels.
+    `(num_heads, head_dim, head_dim)`, stored at the configured temporal dtype
+    (fp32 default; fp16 under RWKV_STATE_FP16 - the WKV kernel accumulates fp32
+    in-register either way and casts on load/store).
     """
 
     conv: List[tuple[int, int]]

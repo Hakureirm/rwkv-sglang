@@ -7,8 +7,10 @@ torch and hands the backend already-projected per-head tensors. This backend own
 the two pieces of recurrent state in the MambaPool:
 
   * conv[0] / conv[1] : the two width-2 (prev-token) token-shift states
-                        (attn / ffn), shape (size+1, hidden, 1), fp32.
-  * temporal          : the WKV recurrent state S, shape (size+1, H, K, V), fp32.
+                        (attn / ffn), shape (size+1, hidden, 1), fp32 always.
+  * temporal          : the WKV recurrent state S, shape (size+1, H, K, V),
+                        fp32 (fp16 storage under RWKV_STATE_FP16=1; the WKV
+                        kernel casts on load/store, fp32 in-register math).
 
 The model calls `token_shift(...)` (before projections) and `recurrence(...)`
 (after projections) directly on this backend instance, which it obtains via
@@ -226,7 +228,7 @@ class Rwkv7AttnBackend(MambaAttnBackendBase):
     ) -> torch.Tensor:
         """r,w,k,kk,a: [num_tokens, H, K]; v: [num_tokens, H, V]. Returns [num_tokens, H, V]."""
         cache = self.req_to_token_pool.mamba2_layer_cache(layer_id)
-        temporal = cache.temporal  # [size+1, H, K, V] fp32
+        temporal = cache.temporal  # [size+1, H, K, V] fp32 (fp16 under RWKV_STATE_FP16)
         md = self.forward_metadata
         cache_indices = md.mamba_cache_indices
 

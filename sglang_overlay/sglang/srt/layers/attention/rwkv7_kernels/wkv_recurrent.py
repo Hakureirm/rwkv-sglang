@@ -38,6 +38,13 @@ backend call sites are unchanged:
   * `kk` is L2-normalized by the caller; `a_kernel=-kk`, `b_kernel=kk*a` formed here
   * `scale` is applied to r
   * state [N, H, K, V] fp32; returns (o[B, T, H, V], final_state[N, H, K, V] or None)
+
+STATE STORAGE DTYPE (W1'): the kernel is dtype-polymorphic on the state buffer -
+loads cast up to fp32 (`.to(tl.float32)`), stores round to the buffer's dtype
+(`S.to(p_ht.dtype.element_ty)`), and ALL in-register accumulation stays fp32
+regardless. So an fp16 state pool (RWKV_STATE_FP16=1, configs/rwkv7.py) changes
+only the HBM bytes of the carried state, not the arithmetic scheme. The fp32
+default remains the bitwise-oracle tier.
 """
 
 import torch
@@ -233,8 +240,9 @@ def wkv_recurrent(
 
     o = torch.empty_like(v)
     # In-place indexed-state mode: the WKV kernel reads AND writes the paged pool slots
-    # cache_indices[i] directly (state_pool is [size+1, H, K, V] fp32), skipping the
-    # temporal[ci] gather + scatter the backend used to do. Same reduction math + bits.
+    # cache_indices[i] directly (state_pool is [size+1, H, K, V], fp32 or fp16 storage),
+    # skipping the temporal[ci] gather + scatter the backend used to do. Same reduction
+    # math (+ same bits at fp32; fp16 storage rounds the carried state per step).
     indexed = state_pool is not None
     if indexed:
         h0 = ht_out = state_pool

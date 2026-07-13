@@ -106,9 +106,28 @@ class Rwkv7Config(PretrainedConfig):
         # M1: keep BOTH conv (token-shift) and temporal (recurrent S) in fp32 for
         # exact oracle parity. (Default conv dtype is bf16, which would corrupt the
         # token-shift values and break greedy match.)
+        #
+        # W1' opt-in: RWKV_STATE_FP16=1 stores the temporal WKV state S as fp16.
+        # STORAGE only - the WKV kernel keeps fp32 in-register accumulation and
+        # casts on the HBM load/store (wkv_recurrent.py is dtype-polymorphic).
+        # At bs>=64 decode the fp32 state r+w is the single largest HBM stream
+        # (the kernel already runs at ~96% of the bandwidth wall), so halving the
+        # state bytes is the dominant large-batch lever; it also halves per-req
+        # state (the MambaPool allocates at this dtype -> ~2x slot cap). This
+        # leaves the bitwise-oracle tier: default stays fp32/OFF, and the flag is
+        # gated on the lossy-tier rulers (lambada + compression rate) instead.
+        # Precedent: albatross WKV_MODE=fp16 (Bo's default) and vllm-rwkv PR#8
+        # both ship fp16 WKV state. conv (token-shift) stays fp32 ALWAYS: its
+        # traffic is negligible and rounding it breaks greedy for zero win.
+        import os
         import torch
 
-        dtype = Mamba2StateDType(conv=torch.float32, temporal=torch.float32)
+        temporal_dtype = (
+            torch.float16
+            if os.environ.get("RWKV_STATE_FP16", "0") == "1"
+            else torch.float32
+        )
+        dtype = Mamba2StateDType(conv=torch.float32, temporal=temporal_dtype)
         return Rwkv7CacheParams(
             shape=shape, layers=self.linear_layer_ids, dtype=dtype
         )
