@@ -65,6 +65,28 @@ export RWKV_GEMV_AUTOTUNE=1        # arch-aware GEMV launch autotune (warmup onl
 # arch-specific divergence would fail the routine oracle re-verify this project runs per box).
 export RWKV_FUSED_GATES=1          # fused LoRA-gate activations (sigmoids+neg/mul/sub/add)
 export RWKV_FUSED_SQRELU=1         # epilogue-fused ffn relu(k)^2 into the key GEMV's store
+# W1' large-batch glue set (2026-07-13), same bar as the rest of this stack:
+# byte-exact vs the live reference ops (bench/test_ln_fused.py, zero differing
+# bytes incl. a 1.57M-row summation-tree probe), greedy 24/24 EXACT per fusion
+# and with ALL exports here + RWKV_STATE_FP16 combined, verify_batch
+# --cuda-graph OVERALL PASS. They fuse the stock torch add/LN/GroupNorm/gate/
+# relu^2/sigmoid glue the bs320 decode profile flagged vs vllm-rwkv PR#8's
+# hand-fused ops. Per-fusion serving attribution (7.2B fp16 shape A c=320,
+# 5090, on top of RWKV_STATE_FP16): the H-tiled shift+lerp glue +3.8%;
+# addln/gngc/relusq/vresgate +0.1..1.1% loop each alone, sub-additive
+# stacked (full set 8,931 -> 9,406 tok/s serving). Scope note: byte-exact-
+# verified on sm_120 (5090) so far - same narrower-arch disclosure as
+# GATES/SQRELU above.
+export RWKV_FUSED_ADDLN=1          # fused residual-add + LayerNorm (all norm boundaries)
+export RWKV_FUSED_GNGC=1           # fused GroupNorm + gate-corr epilogue (attn output)
+export RWKV_FUSED_RELUSQ=1         # fused relu(k)^2 on the M>1 dense ffn path
+export RWKV_FUSED_VRESGATE=1       # fused batched LoRA-gate activations (w/a/v)
+# NOT exported: RWKV_STATE_FP16 (fp16 temporal WKV state). It leaves the
+# bitwise-oracle tier (a numerics change, not a reordering), so it stays a
+# deliberate per-deployment opt-in despite passing its lossy-tier gates
+# (lambada full delta +0.0002, compression N=300 delta +1e-6 bpb; see
+# configs/rwkv7.py). Opt in for peak-throughput serving:
+#   RWKV_STATE_FP16=1 bash scripts/serve.sh ...   # halves WKV state bytes
 
 COMMON=(--model-path "$MODEL" --dtype "$DTYPE" --trust-remote-code
         --port "$PORT" --mem-fraction-static "$MEMFRAC"
