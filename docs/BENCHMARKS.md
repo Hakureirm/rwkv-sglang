@@ -1059,8 +1059,58 @@ below traces back to this one structural fact.
 | 1.5B | 2B | primary tier |
 | 7.2B | 9B | primary tier, largest int8/state-size payoff |
 
+**Normalizing for unequal size.** The tier sizes are honestly labeled but not equal — and the
+totals overstate how unequal the *decode work* is. Steady-state decode applies the model body
+once per generated token (bandwidth-bound at small batch: bytes read ∝ params; compute-bound at
+large batch: FLOPs ∝ params), while the embedding table contributes only a single-row gather,
+and the vision tower + MTP block that ship inside these Qwen3.5 checkpoints are never executed
+in a text-only benchmark. Non-embedding parameters — the standard cross-family size denominator,
+excluding both vocabulary matrices on both sides — are therefore the right per-step work measure
+(the logits matrix, which genuinely *is* touched once per step, is quantified as an alternative
+accounting below rather than ignored). Exact accounting, method: tensor-shape sums read directly
+from each served checkpoint's safetensors headers (host-side header parse, no weights loaded),
+keys grouped into embedding / lm_head / vision / MTP / body:
+
+| model | total | embedding | lm_head | vision+MTP (idle here) | non-emb (decode-active) | within-tier ratio |
+|---|---:|---:|---:|---:|---:|---:|
+| RWKV-7 1.5B | 1.527B | 0.134B | 0.134B | — | **1.259B** (1,258,969,088) | 1× |
+| Qwen3.5-2B | 2.274B | 0.509B | tied, counted once | 0.392B | **1.373B** (1,373,265,728) | 1.091× |
+| RWKV-7 7.2B | 7.199B | 0.268B | 0.268B | — | **6.662B** (6,662,270,976) | 1× |
+| Qwen3.5-9B | 9.653B | 1.017B | 1.017B | 0.699B | **6.920B** (6,919,565,824) | 1.039× |
+
+The decode-active gap (1.091×, 1.039×) is far smaller than the total-size gap (1.489×, 1.341×):
+most of the headline size difference is vocabulary (Qwen3.5 V=248,320 vs RWKV-7 V=65,536) plus
+the vision/MTP weights idle in this comparison. Re-reading §13.1's same-precision bf16 headline
+numbers as size-adjusted throughput (tok/s × non-emb params, B·tok/s — each generated token
+applies every decode-active parameter once, so this is proportional to sustained bytes/s at
+small batch and FLOP/s at large batch):
+
+| tier | metric | RWKV-7 raw → normalized | Qwen3.5 raw → normalized | normalized verdict (raw) |
+|---|---|---:|---:|---|
+| 1.5B/2B | bsz1 | 256.6 → 323.1 | 335.8–336.3 → 461.1–461.8 | Qwen3.5 **+42.9%** (raw +31.0%) |
+| 1.5B/2B | peak | 21,431.9 → 26,982 | 17,587.0 → 24,152 | RWKV-7 **+11.7%** (raw +21.9%) |
+| 7.2B/9B | bsz1 | 87.7 → 584.3 | 96.0 → 664.3 | Qwen3.5 **+13.7%** (raw +9.4%) |
+| 7.2B/9B | peak | 6,171.3 → 41,115 | 4,295.8 → 29,725 | RWKV-7 **+38.3%** (raw +43.7%) |
+
+Normalization moves every margin toward Qwen3.5 and flips no verdict: Qwen3.5's bsz1 leads
+widen (it moves more decode-active bytes per step *and* still decodes faster), RWKV-7's
+peak-concurrency leads narrow but hold. The same ×1.091/×1.039 rescaling applies to any
+same-precision row in this section — e.g. §13.2's 3090 1.5B/2B peak margin (+11.7% raw)
+narrows to +2.4% normalized, close to a tie. One accounting choice is disclosed rather than
+buried: the logits projection is read/computed once per generated token, and counting it into
+the denominator too (adds 0.134B/0.268B for RWKV-7 but 0.509B/1.017B for Qwen3.5 — 3.8× the
+vocabulary means 3.8× the logits matrix, and tying reduces memory, not per-step traffic) flips
+the 1.5B/2B normalized peak to Qwen3.5 +10.8%, while the 7.2B/9B peak stays RWKV-7 +25.5%. So
+the small tier's per-param peak verdict is accounting-sensitive; the 7.2B/9B one is robust
+under both accountings. Raw, unnormalized numbers remain this section's primary claims — this
+block is the size-fairness cross-check, not a replacement.
+
 Weights: same engine (sglang main, native `qwen3_5.py` support, no fork needed), same
-precision per row. **Qwen3.5 requires `--dtype bfloat16`** — `float16` crashes on a dtype
+precision per row. This is also a strongest-available-config comparison, not a weak-baseline
+one: the shared engine, sglang, is one of the serving engines Qwen3.5's own model card
+"strongly recommend[s]" for production and high-throughput deployment — Qwen3.5 runs here on a
+first-class path its own vendor endorses, not on an engine foreign to it.
+**Qwen3.5 requires `--dtype bfloat16`** — `float16` crashes on a dtype
 branch bug in a shared hybrid-SSM Triton kernel (`causal_conv1d_triton.py`, used generically by
 Mamba2/Qwen3-Next/Qwen3.5, not something we patch — out of this project's blast radius; use the
 checkpoint's native bf16 instead). This means RWKV-7's headline **fp16** numbers elsewhere in
