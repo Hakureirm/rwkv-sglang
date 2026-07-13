@@ -180,8 +180,17 @@ _FUSED_ADDLN = os.environ.get("RWKV_FUSED_ADDLN", "0") == "1"
 # transcription (incl. torch's fp16-rounded GroupNorm eps/mean/rstd quirks and
 # the Triton kernel's probed 64-wide summation tree); same gates as ADDLN.
 _FUSED_GNGC = os.environ.get("RWKV_FUSED_GNGC", "0") == "1"
+# W1' cont.: relu(k)^2 as ONE kernel on the M>1 dense ffn path (their
+# `relu_square` analog; torch runs it as 2 elementwise launches + a k-sized
+# HBM round-trip). Pure elementwise -> bit-exact by construction (relu is
+# exact; pow2 = fp32 square rounded once, reproduced verbatim), still gated
+# by bench/test_ln_fused.py + greedy. The M==1 path keeps its own better
+# levers (sparse_cmix / gemv_m1_sqrelu) - this covers the batched-decode /
+# prefill dense fallback those paths do not reach.
+_FUSED_RELUSQ = os.environ.get("RWKV_FUSED_RELUSQ", "0") == "1"
 _ADDLN_ANNOUNCED = False  # one-time notice (fused residual-add + LayerNorm)
 _GNGC_ANNOUNCED = False  # one-time notice (fused GroupNorm + gate-corr)
+_RELUSQ_ANNOUNCED = False  # one-time notice (fused relu^2, dense ffn path)
 
 
 def _try_add_ln(x, delta, ln):
@@ -1009,7 +1018,22 @@ class Rwkv7FeedForward(nn.Module):
                     self._sparse = False  # not buildable → dense from here on
             if self._value_tiled is not None:
                 return sparse_cmix.sparse_cmix(k, self._value_tiled, self.hidden_size)
-        act = torch.relu(k) ** 2
+        if (
+            _FUSED_RELUSQ
+            and k.dtype == torch.float16
+            and k.is_contiguous()
+            and ln_fused.available()
+        ):
+            # W1': relu(k)^2 in one kernel (bit-identical; test_ln_fused.py).
+            global _RELUSQ_ANNOUNCED
+            if self.layer_id == 0 and not _RELUSQ_ANNOUNCED:
+                import sys
+                _RELUSQ_ANNOUNCED = True
+                print("[rwkv7] W1' fused ffn relu^2 ENABLED (fp16 dense path)",
+                      file=sys.stderr, flush=True)
+            act = ln_fused.relu_sq(k)
+        else:
+            act = torch.relu(k) ** 2
         if _LOG_SPARSITY:
             import sys
             zf = (act == 0).float().mean().item()

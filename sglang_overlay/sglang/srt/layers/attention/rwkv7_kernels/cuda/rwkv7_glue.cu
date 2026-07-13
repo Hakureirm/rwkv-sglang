@@ -47,6 +47,13 @@ using dtype = at::Half;
 // conv <- float(normed_fp16).
 
 // attn entry: out[6,T,H] = lerp6(normed, prev);  conv[ci] <- normed.
+// Grid is (T, ceil(H/Threads)): every element is touched by exactly ONE
+// thread and the math is pure elementwise, so H-tiling changes nothing about
+// the bits (re-gated by bench/test_glue.py). The original 1-block-per-token
+// launch was sized for the bsz1 decode path this kernel was built for; at
+// bs320 serving it left the SMs under-filled (320 blocks) and measured
+// SLOWER than the unfused gather/index_put cluster it replaces (W1' leg
+// attribution) - the tiled grid scales with T*H.
 template <int Threads>
 __global__ __launch_bounds__(Threads, 2) void shift_lerp6_kernel(
     int T, int H, int S,
@@ -58,17 +65,17 @@ __global__ __launch_bounds__(Threads, 2) void shift_lerp6_kernel(
   const int t = blockIdx.x;
   const int ci = cache_indices[t];
   const int64_t obase = static_cast<int64_t>(t) * H;
+  const int k = blockIdx.y * Threads + threadIdx.x;
+  if (k >= H) return;
   if (ci < 0 || ci >= S) {  // PAD_SLOT_ID (-1) padded replay: no conv access, zero the discarded row
-    for (int k = threadIdx.x; k < H; k += Threads) {
 #pragma unroll
-      for (int j = 0; j < 6; ++j)
-        out[static_cast<int64_t>(j) * T * H + obase + k] = __float2half_rn(0.f);
-    }
+    for (int j = 0; j < 6; ++j)
+      out[static_cast<int64_t>(j) * T * H + obase + k] = __float2half_rn(0.f);
     return;
   }
   const dtype* xr = normed + static_cast<int64_t>(t) * H;
   float* cr = conv + static_cast<int64_t>(ci) * H;
-  for (int k = threadIdx.x; k < H; k += Threads) {
+  {
     const float x = static_cast<float>(xr[k]);
     const float sh = __half2float(__float2half_rn(cr[k]));  // prev.to(fp16) BEFORE scatter
     cr[k] = x;                                              // conv <- normed.to(fp32)
@@ -94,13 +101,15 @@ __global__ __launch_bounds__(Threads, 2) void shift_lerp1_kernel(
   const int t = blockIdx.x;
   const int ci = cache_indices[t];
   dtype* orow = out + static_cast<int64_t>(t) * H;
+  const int k = blockIdx.y * Threads + threadIdx.x;  // (T, ceil(H/Threads)) grid, see lerp6
+  if (k >= H) return;
   if (ci < 0 || ci >= S) {  // PAD_SLOT_ID (-1) padded replay: no conv access, zero the discarded row
-    for (int k = threadIdx.x; k < H; k += Threads) orow[k] = __float2half_rn(0.f);
+    orow[k] = __float2half_rn(0.f);
     return;
   }
   const dtype* xr = normed + static_cast<int64_t>(t) * H;
   float* cr = conv + static_cast<int64_t>(ci) * H;
-  for (int k = threadIdx.x; k < H; k += Threads) {
+  {
     const float x = static_cast<float>(xr[k]);
     const float sh = __half2float(__float2half_rn(cr[k]));
     cr[k] = x;
@@ -128,7 +137,9 @@ at::Tensor shift_lerp6(at::Tensor normed, at::Tensor mix6,
   if (T == 0 || H == 0) return out;
   auto stream = at::cuda::getCurrentCUDAStream();
   constexpr int kThreads = 256;
-  shift_lerp6_kernel<kThreads><<<static_cast<int>(T), kThreads, 0, stream>>>(
+  const dim3 grid6(static_cast<unsigned>(T),
+                   static_cast<unsigned>((H + kThreads - 1) / kThreads));
+  shift_lerp6_kernel<kThreads><<<grid6, kThreads, 0, stream>>>(
       static_cast<int>(T), static_cast<int>(H), static_cast<int>(conv.size(0)),
       normed.data_ptr<dtype>(),
       mix6.data_ptr<dtype>(), cache_indices.data_ptr<int>(),
@@ -153,7 +164,9 @@ at::Tensor shift_lerp1(at::Tensor normed, at::Tensor x_k,
   if (T == 0 || H == 0) return out;
   auto stream = at::cuda::getCurrentCUDAStream();
   constexpr int kThreads = 256;
-  shift_lerp1_kernel<kThreads><<<static_cast<int>(T), kThreads, 0, stream>>>(
+  const dim3 grid1(static_cast<unsigned>(T),
+                   static_cast<unsigned>((H + kThreads - 1) / kThreads));
+  shift_lerp1_kernel<kThreads><<<grid1, kThreads, 0, stream>>>(
       static_cast<int>(T), static_cast<int>(H), static_cast<int>(conv.size(0)),
       normed.data_ptr<dtype>(),
       x_k.data_ptr<dtype>(), cache_indices.data_ptr<int>(),

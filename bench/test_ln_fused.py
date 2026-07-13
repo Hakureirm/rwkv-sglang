@@ -105,6 +105,28 @@ def test_gn_gatecorr(quick=False):
     return fails
 
 
+def test_relu_sq(quick=False):
+    gen = torch.Generator(device=DEV).manual_seed(20260716)
+    fails = 0
+    shapes = [(1, 8192), (320, 16384)] if quick else [
+        (1, 3072), (7, 8192), (320, 16384), (4096, 8192), (320, 5120)]
+    for shape in shapes:
+        for kind in ("uniform", "heavy", "tiny"):
+            x = _mk(shape, gen, kind)
+            # force exact zeros / negative zero / fp16 extremes into the mix
+            x[..., :7] = torch.tensor(
+                [0.0, -0.0, -1.0, 65504.0, -65504.0, 5.96e-8, -5.96e-8],
+                device=DEV, dtype=torch.float16)
+            ref = torch.relu(x) ** 2
+            got = ln_fused.relu_sq(x)
+            db = _diff_bytes(ref, got)
+            status = "OK " if db == 0 else "FAIL"
+            if db:
+                fails += 1
+            print(f"[relu_sq] shape={shape} {kind:8s} diff={db} {status}")
+    return fails
+
+
 def probe_sum_tree(trials=6, T=4096):
     """Isolate the 64-wide reduction: out == fp16(tree_sum(r_head_row))."""
     gen = torch.Generator(device=DEV).manual_seed(20260715)
@@ -138,6 +160,7 @@ def main():
     fails = probe_sum_tree(trials=2 if args.quick else 6)
     fails += test_add_ln(args.quick)
     fails += test_gn_gatecorr(args.quick)
+    fails += test_relu_sq(args.quick)
     print("OVERALL:", "PASS" if fails == 0 else f"FAIL ({fails} cases)")
     sys.exit(0 if fails == 0 else 1)
 

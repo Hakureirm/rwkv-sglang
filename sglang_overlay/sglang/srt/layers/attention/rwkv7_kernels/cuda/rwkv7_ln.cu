@@ -341,7 +341,38 @@ __global__ void gn_gatecorr_kernel(int D, float eps /* fp16-rounded by host */,
   }
 }
 
+// y = relu(x)^2 in ONE kernel (their `relu_square` analog). The reference is
+// torch.relu(k) ** 2 on fp16: relu is exact (max(x,0), no rounding); pow2
+// computes float(r)*float(r) and rounds once. Both reproduced verbatim; pure
+// elementwise, so fusing the pair is bit-exact by construction (gated anyway
+// by bench/test_ln_fused.py). Fires on the M>1 dense ffn path - the M==1
+// path already has gemv_m1_sqrelu / sparse_cmix.
+__global__ void relu_sq_kernel(int64_t n, const dtype* __restrict__ x,
+                               dtype* __restrict__ y) {
+  const int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i < n) {
+    float v = __half2float(x[i]);
+    float r = v > 0.f ? v : 0.f;
+    y[i] = __float2half_rn(r * r);
+  }
+}
+
 }  // namespace
+
+at::Tensor relu_sq(at::Tensor x) {
+  TORCH_CHECK(x.is_cuda() && x.scalar_type() == at::kHalf && x.is_contiguous(),
+              "relu_sq: x CUDA fp16 contiguous");
+  auto y = at::empty_like(x);
+  const int64_t n = x.numel();
+  if (n == 0) return y;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  const int threads = 256;
+  const int64_t blocks = (n + threads - 1) / threads;
+  relu_sq_kernel<<<static_cast<unsigned>(blocks), threads, 0, stream>>>(
+      n, x.data_ptr<dtype>(), y.data_ptr<dtype>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return y;
+}
 
 std::tuple<at::Tensor, at::Tensor> add_ln(at::Tensor x, at::Tensor delta,
                                           at::Tensor gamma, at::Tensor beta,
@@ -415,8 +446,10 @@ TORCH_LIBRARY(rwkv7_ln, m) {
   m.def(
       "gn_gatecorr(Tensor o, Tensor r, Tensor k, Tensor rk, Tensor v, Tensor g, "
       "Tensor gamma, Tensor beta, float eps, int nh) -> Tensor");
+  m.def("relu_sq(Tensor x) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(rwkv7_ln, CUDA, m) {
   m.impl("add_ln", &add_ln);
   m.impl("gn_gatecorr", &gn_gatecorr);
+  m.impl("relu_sq", &relu_sq);
 }

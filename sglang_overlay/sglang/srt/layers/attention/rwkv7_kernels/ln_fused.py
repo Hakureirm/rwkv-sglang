@@ -66,6 +66,10 @@ def _register_fakes():
         @torch.library.register_fake("rwkv7_ln::gn_gatecorr")
         def _fg(o, r, k, rk, v, g, gamma, beta, eps, nh):
             return torch.empty_like(o)
+
+        @torch.library.register_fake("rwkv7_ln::relu_sq")
+        def _fr(x):
+            return torch.empty_like(x)
     except Exception:
         pass  # older torch without register_fake -> caller disables piecewise capture
 
@@ -80,6 +84,11 @@ def add_ln(x, delta, ln: torch.nn.LayerNorm):
     Caller guards eligibility (fp16, contiguous, N % 4 == 0, N <= 8192,
     affine LayerNorm) - mirrors models/rwkv7.py _addln_eligible."""
     return torch.ops.rwkv7_ln.add_ln(x, delta, ln.weight, ln.bias, ln.eps)
+
+
+def relu_sq(x):
+    """relu(x)**2 in one kernel (bit-identical to torch relu + pow on fp16)."""
+    return torch.ops.rwkv7_ln.relu_sq(x)
 
 
 def gn_gatecorr(o, r, k, r_k, v, g, gn: torch.nn.GroupNorm, nh: int):
