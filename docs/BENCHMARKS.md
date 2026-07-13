@@ -699,6 +699,72 @@ Disclosed scope gap: both are byte-exact-verified on sm_89 (L4) + sm_90 (H100) o
 11-card matrix the other fast-path flags accumulated over time — a narrower-published-speed-number
 issue, not a correctness one (see `scripts/serve.sh` header for the full reasoning).
 
+## 7a. Albatross at large batch: same code on a single RTX 5090 (7.2B fp16)
+
+The tables above stop at batch 32; Albatross's own headline numbers live at the other end of
+the batch axis — the README's "15000+ / 17000+ / 21000+" tok/s (7.2B decode B1024 / prefill
+T1024 / batch-prefill B32×T32) and the chart published alongside. Attribution first, because
+it decides how the table below should be read: **per Bo Peng's own public statement on Zhihu
+(2026-07-10), the official headline numbers were measured on an RTX Pro 6000**, not a 5090 —
+in his words: "这里是用pro6000测的,5090会低一些,但更大bsz会更高,因此差不多" ("this was
+measured on a Pro 6000; a 5090 will be a bit lower, but larger bsz climbs higher, so it comes
+out about the same"). The grid below is the same public code at the same commit (`343147a`,
+the `faster3a` tree plus the `faster3_2605` variant the README names its headline numbers
+under, author-default script, flags and protocol) on a single, fully idle **RTX 5090** —
+published so 5090 users have a same-card reference to put next to the official Pro 6000
+figures. Two cards, one code; here are both sets of numbers.
+
+7.2B fp16, tok/s. Each cell = mean of two independent process repeats (each repeat = the
+author's default protocol: 1 warmup + 3 timed iters, CUDA-event p50):
+
+| shape (B seqs × T tokens) | class | faster3a stock | faster3a re-tuned (ours) | faster3_2605 stock | official headline (RTX Pro 6000, per Bo) |
+|---|---|---|---|---|---|
+| 1 × 1 | decode | 147.5 | 147.4 | 83.9 | 144.04 (chart) |
+| 8 × 1 | decode | 898.5 | 929.5 | 741.7 | 913 (chart) |
+| 32 × 1 | decode | 2955.0 | 2955.3 | 2847.8 | 2851 (chart) |
+| 64 × 1 | decode | 4662.2 | 4663.8 | **5335.5** | — |
+| 128 × 1 | decode | 8914.1 | 8899.1 | 8592.0 | — |
+| 256 × 1 | decode | 9622.2 | 9627.3 | 9522.4 | 13126 (chart) |
+| 1024 × 1 | decode | 10648.0 | 10739.7 | 10426.6 | "15000+" (README) |
+| 1 × 256 | prefill | 9751.2 | 9742.8 | 9699.3 | — |
+| 1 × 1024 | prefill | 11276.8 | 11380.0 | 11138.2 | "17000+" (README) |
+| 16 × 16 | batch prefill | 11603.4 | 11612.1 | 11478.3 | 17291 (chart) |
+| 32 × 32 | batch prefill | 13829.5 | 13929.2 | 13675.5 | "21000+" (README) |
+
+Reading notes, in the order they matter:
+
+- **The methodology cross-validates at small batch.** At the small-batch shapes the official
+  chart and this grid share (B1/B8/B32 decode), the stock numbers land within ±4% of the
+  chart even across the two different cards (147.5 vs 144.04, 898.5 vs 913, 2955.0 vs 2851) —
+  exactly the "差不多" (about the same) regime Bo describes for small batch. The B1 147.5
+  here vs the 147.0 quoted in §7 prose is protocol, not drift: this grid runs the
+  author-default 1-warmup/3-iter loop, the earlier number came from our longer
+  3-warmup/20-iter re-run (0.3% apart).
+- **At large batch the two cards separate.** The 5090 lands 27–34% below the Pro 6000
+  headline figures (best variant per shape: B256 9,627 vs 13,126; B16×16 11,612 vs 17,291;
+  and against the README's "15000+/17000+/21000+": 10,740 / 11,380 / 13,929). Same code,
+  different card — the direction Bo's own statement anticipates. An independent community
+  reproduction on another RTX 5090 (shared in community chat; not a published artifact,
+  variant/tuning unknown) lands within ~5% of this grid at all three README shapes.
+- **The two trees trade places by shape.** `faster3_2605` is much slower single-stream on
+  this card (83.9 vs 147.5 at B1) but is the faster tree at B64 (5,335.5 vs 4,662.2, +14%);
+  everywhere else `faster3a` leads. Our 5090 re-tune (the same 14-edit diff as above,
+  `bench/results/albatross_5090/retuned_diff.txt`) adds ≤1% at the large-batch shapes; B8's
+  +3.5% remains the biggest re-tune win, matching the per-size table above.
+- **One OOM, disclosed.** The `faster3a` full-grid process OOMs at B1024 on the 32 GB card
+  after the preceding cases; the two `faster3a` B1024 cells were measured in a dedicated
+  fresh process (recorded as their own run-groups in the raw). `faster3_2605` completed the
+  whole grid, B1024 included, in one process.
+- **Scope guard.** This is a kernel-harness measurement class: static uniform batches inside
+  one forward loop — no scheduler, no dynamic batching, no API (§7 lead). Our own engine's
+  7.2B numbers are full-stack serving measurements and live in §4b/§5 — the two classes are
+  not cell-to-cell comparable, which is why our numbers stay out of this table.
+
+Repeat stability: the two process repeats agree within 0.11% on every cell except the two
+B128 cells (0.46% stock / 0.82% re-tuned). Raw (both repeats, p10/p50/p90 per cell, and the
+official/community reference numbers as recorded):
+`bench/results/albatross_5090/large_batch_grid.json`.
+
 ## 7b. Comparison with vllm-rwkv (the community vLLM fork)
 
 Measured 2026-07-06 under strictly equal conditions, **RWKV-7 1.5B**: same GPUs (RTX 3090 + RTX
