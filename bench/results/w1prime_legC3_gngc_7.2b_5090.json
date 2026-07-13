@@ -1,0 +1,36 @@
+{
+  "rows": [
+    {
+      "concurrency": 320,
+      "requests": 1280,
+      "wall_s": 181.31,
+      "out_tokens": 1638400,
+      "out_tok_per_s": 9036.5,
+      "req_per_s": 7.06,
+      "lat_p50_s": 45.297,
+      "lat_p99_s": 45.384,
+      "per_stream_tok_s": 28.2
+    }
+  ],
+  "peak": {
+    "concurrency": 320,
+    "requests": 1280,
+    "wall_s": 181.31,
+    "out_tokens": 1638400,
+    "out_tok_per_s": 9036.5,
+    "req_per_s": 7.06,
+    "lat_p50_s": 45.297,
+    "lat_p99_s": 45.384,
+    "per_stream_tok_s": 28.2
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "concurrencies": "320",
+    "in_len": 128,
+    "out_len": 1280,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "/data/bench5090/results/legC3_gngc.json"
+  }
+}

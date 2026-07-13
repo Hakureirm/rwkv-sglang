@@ -1,0 +1,27 @@
+{
+  "methodology": "Two independent, complementary measurements of the same 7.2B fp16 shape-A (128in/1280out) decode step at bs=320 on the 5090, both reproduced in this session from landed raw artifacts (not re-quoted from memory).",
+  "scheduler_step_time": {
+    "tool": "bench-internal scratch/w1prime/steptime.py: parses the sglang server's own per-iteration 'gen throughput (token/s)' log line at #running-req==bs, reports the median implied step time (bs / thr_p50)",
+    "note": "distinct from the wall-clock sweep throughput in the wNprime_leg*.json files (client-side, includes ramp-up/ramp-down over the whole sweep); this is the server-internal steady-state per-iteration figure",
+    "rows": [
+      {"leg": "legA_anchor (baseline, nothing W1' on)", "log": "server logs not landed (verbose ServerArgs dump repeats every line; leak-scrubbing not worth it for a value already captured cleanly here) - reproduced 2026-07-13 from the tower's scratch/w1prime/server_legA_anchor.log", "windows": 127, "thr_p50_tok_s": 8147.8, "thr_mean_tok_s": 7969.9, "step_p50_ms": 39.27},
+      {"leg": "legB_state (RWKV_STATE_FP16 only)", "windows": 128, "thr_p50_tok_s": 9677.1, "thr_mean_tok_s": 9464.6, "step_p50_ms": 33.07},
+      {"leg": "legFinal_A (state-fp16 + shift-lerp + addLN + GNGC + relu^2 + VRESGATE)", "windows": 128, "thr_p50_tok_s": 10132.3, "thr_mean_tok_s": 9898.1, "step_p50_ms": 31.58},
+      {"leg": "legG1_vres (same flags as legFinal_A, focused single-point re-measurement)", "windows": 127, "thr_p50_tok_s": 10221.8, "thr_mean_tok_s": 9988.0, "step_p50_ms": 31.31}
+    ],
+    "headline": "step_p50 39.27ms (anchor) -> 31.31ms (final, legG1_vres) at bs=320"
+  },
+  "kernel_time_breakdown": {
+    "tool": "scratch/gapattr/agg_trace.py against a torch-profiler chrome trace of our own runner (12 measured decode steps, bs=320, shape A, ANCHOR config i.e. before any W1' fix) - competitor-free: this trace and this breakdown involve only our own kernels, no competitor code or data",
+    "trace_source": "scratch/gapattr/prof_ours/*.trace.json.gz on the tower (not landed here: a 2.7MB gzipped chrome trace with no unique information beyond the aggregate below; reproducible from server_legA_anchor-equivalent boot + sglang's /start_profile)",
+    "gpu_busy_total_ms_per_step": 35.88,
+    "device_span_ms_per_step": 36.2161,
+    "top_kernel_categories_ms_per_step": {
+      "gemm_family (2x cutlass tensorop f16 s16816gemm, the compute-bound projections)": 18.1671,
+      "wkv_recurrent_kernel (fp32 state)": 12.4429,
+      "wmma_lora_gemms (2x cutlass wmma, small-N LoRA path)": 0.8981,
+      "glue_elementwise_and_norm (gate_corr, layer_norm, add, kk_kmix, RowwiseMoments, gather, index_put, copy, sigmoid, lerp6, GroupNorm, splitKreduce, clamp, pow, float16_copy, binary mul, x2)": 3.4739
+    },
+    "attribution_note": "GEMM-family (~50-53% of GPU busy) already runs at the compute wall - not addressed by this work. Of the remaining ~16.8-17.7ms/step ('improvable', bucketing-dependent on whether the two small LoRA wmma kernels count as compute-wall or glue): WKV state kernel is 70-74%, the glue-kernel cluster is 26-30% - closely corroborates, without claiming pixel-exact reproduction of, the originally-cited 73%/30% split (that figure came from a session-specific bucketing not independently re-derivable byte-for-byte from this trace alone)."
+  }
+}

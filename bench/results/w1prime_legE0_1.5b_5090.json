@@ -1,0 +1,36 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 4.86,
+      "out_tokens": 2048,
+      "out_tok_per_s": 421.2,
+      "req_per_s": 1.645,
+      "lat_p50_s": 0.608,
+      "lat_p99_s": 0.608,
+      "per_stream_tok_s": 421.2
+    }
+  ],
+  "peak": {
+    "concurrency": 1,
+    "requests": 8,
+    "wall_s": 4.86,
+    "out_tokens": 2048,
+    "out_tok_per_s": 421.2,
+    "req_per_s": 1.645,
+    "lat_p50_s": 0.608,
+    "lat_p99_s": 0.608,
+    "per_stream_tok_s": 421.2
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30071,
+    "concurrencies": "1",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "/data/bench5090/results/legE0_15b.json"
+  }
+}

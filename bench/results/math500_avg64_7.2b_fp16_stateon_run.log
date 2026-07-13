@@ -1,0 +1,72 @@
+[gate] start Tue Jul 14 01:20:10 AM CST 2026
+[gate] server ready Tue Jul 14 01:20:36 AM CST 2026; one-time fast-path notices:
+
+  0%|          | 0/16 [00:00<?, ?it/s]
+Capturing batches (bs=96 avail_mem=15.53 GB):   0%|          | 0/16 [00:00<?, ?it/s][rwkv7] R2 fused paged shift+lerp6 glue ENABLED (decode, fp16)
+
+Capturing batches (bs=2 avail_mem=15.01 GB):  81%|████████▏ | 13/16 [00:00<00:00, 19.52it/s]
+Capturing batches (bs=1 avail_mem=15.01 GB):  81%|████████▏ | 13/16 [00:00<00:00, 19.52it/s][rwkv7] M6 sparse channel-mix value-proj ENABLED (bsz1 decode, fp16)
+
+Capturing batches (bs=96 avail_mem=15.53 GB):   6%|▋         | 1/16 [00:00<00:05,  2.95it/s]
+Capturing batches (bs=88 avail_mem=15.47 GB):   6%|▋         | 1/16 [00:00<00:05,  2.95it/s]
+Capturing batches (bs=80 avail_mem=15.46 GB):   6%|▋         | 1/16 [00:00<00:05,  2.95it/s]
+Capturing batches (bs=72 avail_mem=15.46 GB):   6%|▋         | 1/16 [00:00<00:05,  2.95it/s]
+Capturing batches (bs=72 avail_mem=15.46 GB):  25%|██▌       | 4/16 [00:00<00:01,  9.81it/s]
+Capturing batches (bs=64 avail_mem=15.46 GB):  25%|██▌       | 4/16 [00:00<00:01,  9.81it/s]
+Capturing batches (bs=56 avail_mem=15.45 GB):  25%|██▌       | 4/16 [00:00<00:01,  9.81it/s]
+Capturing batches (bs=48 avail_mem=15.45 GB):  25%|██▌       | 4/16 [00:00<00:01,  9.81it/s]
+Capturing batches (bs=48 avail_mem=15.45 GB):  44%|████▍     | 7/16 [00:00<00:00, 14.76it/s]
+Capturing batches (bs=40 avail_mem=15.44 GB):  44%|████▍     | 7/16 [00:00<00:00, 14.76it/s]
+Capturing batches (bs=32 avail_mem=15.44 GB):  44%|████▍     | 7/16 [00:00<00:00, 14.76it/s]
+Capturing batches (bs=24 avail_mem=15.43 GB):  44%|████▍     | 7/16 [00:00<00:00, 14.76it/s]
+Capturing batches (bs=24 avail_mem=15.43 GB):  62%|██████▎   | 10/16 [00:00<00:00, 18.42it/s]
+Capturing batches (bs=16 avail_mem=15.43 GB):  62%|██████▎   | 10/16 [00:00<00:00, 18.42it/s]
+Capturing batches (bs=12 avail_mem=15.42 GB):  62%|██████▎   | 10/16 [00:00<00:00, 18.42it/s]
+Capturing batches (bs=8 avail_mem=15.42 GB):  62%|██████▎   | 10/16 [00:00<00:00, 18.42it/s] 
+Capturing batches (bs=8 avail_mem=15.42 GB):  81%|████████▏ | 13/16 [00:00<00:00, 19.52it/s]
+Capturing batches (bs=4 avail_mem=15.42 GB):  81%|████████▏ | 13/16 [00:00<00:00, 19.52it/s][rwkv7] M9 fused LoRA path ENABLED (fp16 decode, M1+batched)
+[rwkv7] M6 fused fp16 GEMV projection path armed (fp16 bsz1 decode only; inactive for other dtypes)
+[rwkv7] R2 fused paged shift+lerp1 (ffn) glue ENABLED (decode, fp16)
+[rwkv7] W1' fused batched LoRA-gate activations ENABLED (fp16)
+[rwkv7] W1' fused ffn relu^2 ENABLED (fp16 dense path)
+[rwkv7] W1' fused GroupNorm+gate-corr ENABLED (fp16)
+[rwkv7] W1' fused residual-add+LayerNorm ENABLED (fp16)
+[gate] harness starting Tue Jul 14 01:20:36 AM CST 2026
+problems=500 samples=64 total_generations=32000
+[transformers] You are using a model of type `rwkv7` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+  1600/32000 rollouts (155s)
+  3200/32000 rollouts (270s)
+  4800/32000 rollouts (387s)
+  6400/32000 rollouts (527s)
+  8000/32000 rollouts (672s)
+  9600/32000 rollouts (817s)
+  11200/32000 rollouts (958s)
+  12800/32000 rollouts (1090s)
+  14400/32000 rollouts (1242s)
+  16000/32000 rollouts (1409s)
+  17600/32000 rollouts (1512s)
+  19200/32000 rollouts (1669s)
+  20800/32000 rollouts (1811s)
+  22400/32000 rollouts (1946s)
+  24000/32000 rollouts (2090s)
+  25600/32000 rollouts (2212s)
+  27200/32000 rollouts (2375s)
+  28800/32000 rollouts (2521s)
+  30400/32000 rollouts (2663s)
+  32000/32000 rollouts (2831s)
+verifying rows=32000 workers=8
+Timeout during comparison
+Timeout during comparison
+Timeout during comparison
+Timeout during comparison
+
+===== MATH500 avg@64 =====
+avg@64 (rollout_accuracy): 63.86%  (20436/32000)
+pass@64: 83.00%
+eod 93.5%  user_stop 0.0%  truncated 6.5%
+throughput: 15457666 gen tokens / 2831.3s = 5459.6 tok/s (client wall; see server log for its own count)
+wrote /data/bench5090/results/math500_gate/math500_avg64_7.2b_fp16_stateon.json and /data/bench5090/results/math500_gate/math500_avg64_7.2b_fp16_stateon_generations.jsonl
+MATH500_SGLANG_RESULT {"num_tasks": 500, "rollout": 64, "total_generations": 32000, "correct_generations": 20436, "rollout_accuracy": 0.638625, "pass_at_rollout_accuracy": 0.83, "ended_eod_rate": 0.9355, "ended_user_stop_rate": 0.0, "truncated_rate": 0.0645, "mean_generated_tokens": 483.0520625, "generated_tokens_total": 15457666, "gen_wall_time_s": 2831.3027760982513, "throughput_gen_tok_per_s": 5459.559511081972, "sample_per_sec": 11.302217576354872, "config": {"model": "/data/models/rwkv7-7.2b-fla", "data": "bench/data/MATH500.jsonl", "temperature": 1.0, "top_p": 0.28, "top_k": 32, "max_new_tokens": 1500, "ctx_limit": 8192, "sampler_order": "temperature -> top_k -> top_p", "presence_penalty": 0.0, "repetition_penalty": 1.0, "prompt_style": "fake_think", "stop_token_ids": [0], "stop_strings": ["\nUser:"], "concurrency": 96}}
+[gate] harness rc=0 Tue Jul 14 02:08:02 AM CST 2026
+[gate] post-run GPU memory.used: 12 MiB
+[gate] GATE_RUN_DONE rc=0

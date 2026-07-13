@@ -1,0 +1,58 @@
+{
+  "rows": [
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 65.55,
+      "out_tokens": 327680,
+      "out_tok_per_s": 4999.1,
+      "req_per_s": 3.906,
+      "lat_p50_s": 16.371,
+      "lat_p99_s": 16.389,
+      "per_stream_tok_s": 78.1
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 84.5,
+      "out_tokens": 655360,
+      "out_tok_per_s": 7755.6,
+      "req_per_s": 6.059,
+      "lat_p50_s": 21.022,
+      "lat_p99_s": 21.338,
+      "per_stream_tok_s": 60.6
+    },
+    {
+      "concurrency": 320,
+      "requests": 1280,
+      "wall_s": 175.52,
+      "out_tokens": 1638400,
+      "out_tok_per_s": 9334.7,
+      "req_per_s": 7.293,
+      "lat_p50_s": 43.777,
+      "lat_p99_s": 43.933,
+      "per_stream_tok_s": 29.2
+    }
+  ],
+  "peak": {
+    "concurrency": 320,
+    "requests": 1280,
+    "wall_s": 175.52,
+    "out_tokens": 1638400,
+    "out_tok_per_s": 9334.7,
+    "req_per_s": 7.293,
+    "lat_p50_s": 43.777,
+    "lat_p99_s": 43.933,
+    "per_stream_tok_s": 29.2
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "concurrencies": "64,128,320",
+    "in_len": 128,
+    "out_len": 1280,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "/data/bench5090/results/legFinal_A.json"
+  }
+}
