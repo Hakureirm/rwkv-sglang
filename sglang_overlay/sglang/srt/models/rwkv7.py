@@ -255,6 +255,15 @@ _SPARSE_FFN = os.environ.get("RWKV_SPARSE_FFN", "0") == "1"
 # produced by bench/quant_w4.py (carries .qweight/.scale instead of .weight). Default OFF.
 _W4 = os.environ.get("RWKV_W4", "0") == "1"
 
+# W1 stage-1 (task#52): w4a8 large-M tensor-core path. When on, W4Linear's M>64
+# dispatch goes to gemm_w4a8_tc (per-token int8 activations x int4 weights on the
+# s8 wmma pipeline) instead of dequant->cuBLAS, whose ~36 bits/element effective
+# weight traffic is the measured M=64 concurrency cliff (7.2B GPTQ c=64->66 =
+# 1429.5->719.7 tok/s on 3090). Semantics change at M>64 (w4a16 -> w4a8), so this
+# is opt-in until the Stage-3 accuracy certification; bit-exactness vs the integer
+# reference is gated by bench/verify_w4a8.py. Requires sm80+ (self-gates).
+_W4_TC_LARGE_M = os.environ.get("RWKV_W4_TC_LARGE_M", "0") == "1"
+
 # M8: weight-only int8 (w8a16) — same hand-written kernel family as w4 but 8-bit:
 # near-lossless (per-group int8 RTN), faster than fp16 at small M (1/2 the weight
 # bytes), and — unlike the cutlass w8a8 path (sm80–90 only) — JIT-builds and runs on
@@ -375,6 +384,18 @@ class W4Linear(nn.Module):
             # (weight HBM traffic = 1/4 of cuBLAS fp16; wmma fp32 accumulate).
             if 8 < M <= 64 and (self.out_features % 64) == 0 and w4_linear.tc_supported():
                 return w4_linear.gemm_w4_tc(x, self.qweight, self.scale)
+            # large-M (RWKV_W4_TC_LARGE_M, opt-in): w4a8 — per-token s8 activations
+            # x int4 weights on the s8 wmma pipeline. Kills the M=64 cliff of the
+            # dequant fallback below (~36 bits/element weight traffic). Semantics
+            # are w4a8 here (not w4a16) — Stage-3 certifies accuracy e2e. The
+            # kernel wants the scale transposed ([K/64, N]: coalesced per-group
+            # reads); cache it per layer, like the w8a8 K-pad weight cache.
+            if M > 64 and _W4_TC_LARGE_M and w4_linear.tc_s8_supported():
+                scale_t = getattr(self, "_scale_t", None)
+                if scale_t is None:
+                    scale_t = self.scale.t().contiguous()
+                    self._scale_t = scale_t
+                return w4_linear.gemm_w4a8_tc(x, self.qweight, scale_t)
         # M>64 / prefill: dequant -> cuBLAS (compute-bound regime; weight read amortized)
         w = w4_linear.dequant(self.qweight, self.scale, self.group).to(x.dtype)
         return torch.nn.functional.linear(x, w)

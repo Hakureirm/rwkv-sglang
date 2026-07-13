@@ -2,14 +2,14 @@
 """Offline weight-only int4 quantizer: fla RWKV-7 checkpoint -> w4 checkpoint.
 
 Quantizes ONLY the big linear projections (r/k/v/o + ffn key/value) to group-wise
-symmetric int4 (GROUP=128, matching rwkv7_w4.cu), storing for each `<name>.weight`:
+symmetric int4 (GROUP=64, matching rwkv7_w4.cu), storing for each `<name>.weight`:
   <name>.qweight : uint8 [N, K/2]  (2 signed nibbles/byte, little-endian along K)
-  <name>.scale   : fp16  [N, K/128]
+  <name>.scale   : fp16  [N, K/64]
 All other tensors (LoRA rank matrices, norms, embeddings, lm_head, WKV params) are
 kept at original precision — they are tiny and/or precision-sensitive. Writes a
 `quantization: rwkv_w4` marker + group size into config.json.
 
-  python bench/quant_w4.py --model <fla_dir> --out <w4_dir> [--group 128]
+  python bench/quant_w4.py --model <fla_dir> --out <w4_dir> [--group 64]
 
 The packing/scale convention is validated bit-identically by bench/verify_w4.py.
 """

@@ -12,6 +12,7 @@ bitsandbytes (its nf4 GEMV is slower than fp16 at M==1) and no FLA. Built WITHOU
 Numerics validated bit-identically vs the dequant reference in bench/verify_w4.py
 (rel err ~2e-4, i.e. same ULP as torch's own fp16 matmul).
 """
+import os
 from pathlib import Path
 
 import torch
@@ -66,6 +67,10 @@ def _register_fakes():
         def _gemm_w4_tc_fake(x, qweight, scale):
             return x.new_empty((x.shape[0], qweight.shape[0]))
 
+        @torch.library.register_fake("rwkv7_w4::gemm_w4a8_tc")
+        def _gemm_w4a8_tc_fake(x, qweight, scale, x_scale, algo):
+            return scale.new_empty((x.shape[0], qweight.shape[0]))
+
         @torch.library.register_fake("rwkv7_w4::dequant_w4")
         def _dequant_w4_fake(qweight, scale):
             return scale.new_empty((qweight.shape[0], qweight.shape[1] * 2))
@@ -96,6 +101,51 @@ def gemm_w4_tc(x: torch.Tensor, qweight: torch.Tensor, scale: torch.Tensor) -> t
     is 1/4 of a cuBLAS fp16 GEMM. Deterministic per-row reduction order (fixed k-loop),
     independent of batch composition. Caller guards fp16 + M<=64 + K%64==0 + N%64==0."""
     return torch.ops.rwkv7_w4.gemm_w4_tc(x.contiguous(), qweight, scale)
+
+
+# algo for the w4a8 large-M kernel: -1 auto (64-row tile from M>=192, or already
+# from M=65 when N>=4096 — the measured 3090 crossover, see the .cu launcher);
+# 0/1 force. Speed-only knob — both tiles are bit-identical (same per-group fp32
+# chain per element; gated by bench/verify_w4a8.py).
+_W4A8_ALGO = int(os.environ.get("RWKV_W4A8_ALGO", "-1"))
+
+_TC_S8_SUPPORTED = None
+
+
+def tc_s8_supported() -> bool:
+    """gemm_w4a8_tc needs sm80+ (cp.async + s8 wmma fragments; the device code is
+    empty below that). Distinct from tc_supported() (sm70+, fp16 wmma)."""
+    global _TC_S8_SUPPORTED
+    if _TC_S8_SUPPORTED is None:
+        try:
+            _TC_S8_SUPPORTED = torch.cuda.get_device_capability()[0] >= 8
+        except Exception:
+            _TC_S8_SUPPORTED = False
+    return _TC_S8_SUPPORTED
+
+
+def gemm_w4a8_tc(x: torch.Tensor, qweight: torch.Tensor, scale_t: torch.Tensor,
+                 algo: int = None) -> torch.Tensor:
+    """y[M,N] for M>64 (high-concurrency decode / prefill) via w4a8: per-token int8
+    activation quant (sglang's per_token_quant_int8, the same op the w8a8 tier uses)
+    + int4-weight s8xs8 tensor-core GEMM (rwkv7_w4.cu::gemm_w4a8_tc). Weight HBM
+    traffic is 1/4 of fp16 and the MMAs run at the s8 rate — this replaces the
+    dequant->cuBLAS fallback whose ~36 bits/element weight traffic lost to fp16
+    (the M=64 concurrency cliff). Semantics are w4a8 (quantized activations), NOT
+    the w4a16 of the M<=64 kernels — accuracy is certified separately (Stage 3).
+
+    `scale_t` is the TRANSPOSED scale, fp16 [K/64, N] contiguous — i.e.
+    `.scale.t().contiguous()`, computed once and cached per layer by the caller
+    (W4Linear stashes it as `_scale_t`): the kernel's per-group scale reads are
+    coalesced in this layout and scattered in the checkpoint's [N, K/64].
+    Caller guards fp16 + M>64 + K%64==0 + tc_s8_supported()."""
+    from sglang.srt.layers.quantization.int8_kernel import per_token_quant_int8
+
+    x_q, x_scale = per_token_quant_int8(x.contiguous())
+    return torch.ops.rwkv7_w4.gemm_w4a8_tc(
+        x_q, qweight, scale_t, x_scale.reshape(-1),
+        _W4A8_ALGO if algo is None else algo,
+    )
 
 
 # ---- weight-only int8 family (rwkv7_w8.cu) — same skeleton, near-lossless accuracy,
