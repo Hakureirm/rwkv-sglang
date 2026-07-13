@@ -350,6 +350,35 @@ guidance until then: run 7.2B w4 at c≤64 (both cards) or c≥256 (5090); avoid
 just past 64. Raw: `bench/results/bsz_sweep_7.2b_w4gptq_3090_cliffmap.json` (c=48–128
 map), `bench/results/bsz_sweep_7.2b_w4gptq_3090_cliffmap_fine.json` (c=66/72/76).
 
+**Update (2026-07-13, task#52): the cliff is fixed at the kernel level.** A new tensor-core
+GEMM (`gemm_w4a8_tc`, packed int4 weights × per-token int8 activations on the proven w8a8
+s8-wmma pipeline) fills the M>64 hole that used to fall back to dequant→HBM→cuBLAS. Measured on
+the 3090, same shape as the cliff map above (7.2B GPTQ, 64-in/256-out):
+
+| concurrency | before (dequant→cuBLAS) | after (w4a8 tensor-core) | Δ |
+|---|---|---|---|
+| 48 | 1,303.0 | 1,323.0 | +1.5% |
+| 64 | **1,407.0** (old peak) | 1,360.5 | −3.3% |
+| 66 | 622.8 (cliff floor) | 931.4 | **+49.5%** |
+| 72 | 653.5 | 996.4 | +52.5% |
+| 80 | 713.4 | 1,077.8 | +51.1% |
+| 96 | 817.8 | 1,225.5 | +49.9% |
+| 112 | 912.0 | 1,346.8 | +47.7% |
+| 128 | 998.4 | **1,468.5** (new peak) | +47.1% |
+
+The old curve never recovers its c=64 peak by c=128; the new curve is monotonic through the old
+cliff and sets a peak 4.4% above the old one at 2× the concurrency. The semantics change from
+w4a16 (activations stay fp16) to w4a8 (activations quantized to int8 per token) above M=64, so
+the kernel ships env-gated `RWKV_W4_TC_LARGE_M=1`, **default OFF**. Accuracy certification found
+the per-token-int8 tax itself w8a8-class (compression +0.0042 bpb pooled, lambada −0.35pt, both
+essentially noise) but the *unrestricted* dispatch — which also routed prefill (M up to ~4096)
+through the same path — RED on MATH500 avg@64 (57.66% vs 61.075% baseline, −3.42pt, a genuine
+truncation/rambling collapse, not noise). A same-day follow-up (`RWKV_W4_TC_MAX_M=512`) caps the
+dispatch to the decode/cliff range the table above measures and leaves prefill on the unchanged
+w4a16 fallback; a capped re-gate is in flight. Full writeup, every number's raw citation, and
+the root-cause analysis: `docs/findings/0055-w4a8-large-m-tc.md`. Raw:
+`bench/results/bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_{base,w4a8}.json`.
+
 **1.5B** (all three configs measured the same day on matched launch flags):
 
 | config | c=1 | c=32 | c=128 | greedy gate |
@@ -526,6 +555,37 @@ rows (`*_v2` / `*_c128` / `*_full` / `*_retry` / `*rtn2` = follow-up runs after 
 attempt hit a time budget or stopped at a partial sweep; the partial first attempts are
 kept for the record).
 
+### `RWKV_STATE_FP16` — a recommended throughput switch (2026-07-13, F0056)
+
+Orthogonal to the three weight-quantization modes in §4: this flag halves the **temporal WKV
+recurrent state**'s storage from fp32 to fp16 (token-shift/conv state and the in-register fp32
+accumulation are unaffected — this is a storage-only change, the WKV kernel's arithmetic does
+not move). Same treatment as the quantization tiers above: a named opt-in, disclosed accuracy
+cost next to the speed number, default left OFF so the bitwise-oracle tier (§1) stays reachable
+with zero flags.
+
+**Capacity effect** (independently confirmed via reported free memory at matched batch size,
+not only computed from byte-widths): per-request state **7.2B 33→17 MB, 1.5B 12.98→6.68 MB** —
+at a 512-slot pool this is **1.5B 6.01→3.01 GB**, i.e. the same memory budget fits roughly twice
+the concurrent state.
+
+**Gate ladder, all green** (full derivation, every raw cited:
+`docs/findings/0056-w1prime-serving-fixes.md`):
+
+| ruler | OFF | ON | Δ |
+|---|---|---|---|
+| lambada (1.5B, n=5153) | 0.67126 | 0.67145 | +0.02pt |
+| compression (1.5B, N=300 pooled bpb) | 0.5892803 | 0.5892813 | ~+1e-6 |
+| **MATH500 avg@64 (7.2B, the decisive ruler)** | **64.18%** | **63.86%** | **−0.32pt** (well inside the ±0.6pt-at-2σ noise band this protocol carries — see F0055 §5 for the derivation) |
+
+**Serving win** (RTX 5090, 7.2B fp16, shape A 128-in/1,280-out, on top of the byte-exact glue
+fusions that are now default — see `docs/findings/0056-w1prime-serving-fixes.md` for the full
+per-fusion ledger): c=320 **7,603.5 → 9,406.1 tok/s (+23.7%)**; full final sweep c=64 **4,999.1**,
+c=128 **7,755.6**; internal step-time profiling put the same decode step at 39.27ms → 31.31ms.
+1.5B single-stream (64-in/256-out): **421.2 → 447.3 (+6.2%)**. Raw:
+`bench/results/w1prime_leg{A_anchor,B_state,Final_A,G1_vres,E0,Ef}_*_5090.json` (full leg-by-leg
+ledger, including the individually-isolated glue fusions, in the finding doc above).
+
 ## 5. Serving throughput (RWKV-7 1.5B, wall-clock, 64-in/256-out, concurrency sweep)
 
 RWKV-7 1.5B, sglang main. "single request" = bsz1; "peak" = best over the concurrency sweep.
@@ -537,13 +597,28 @@ RWKV-7 1.5B, sglang main. "single request" = bsz1; "peak" = best over the concur
 | full kernel stack, single request | 230.7 | 397.3 |
 | full kernel stack, peak | 7,257.7 @ 384 | **22,175.3 @ 512** |
 | int8 w8a8 + fused glue, peak | **9,850.9 @ 256** | 20,991 @ 512 (own s8-wmma kernel V2; 0.9466× fp16 — GEMM >fp16, e2e just under) |
+| full kernel stack + `RWKV_STATE_FP16` (opt-in, F0056), single request | not measured this session | **447.3** |
 
 v0.5.10 reference points: 3090 plain peak was 6,885, w8a8+glue 9,686 — the main migration
-alone made the 3090 faster. Raw: `bench/results/bsz_sweep_*_{3090main,5090}.json`.
+alone made the 3090 faster. Raw: `bench/results/bsz_sweep_*_{3090main,5090}.json`; the
+`RWKV_STATE_FP16` row is `bench/results/w1prime_legEf_1.5b_5090.json` (baseline for that row,
+same config minus the flag: `bench/results/w1prime_legE0_1.5b_5090.json`, 421.2 — +6.2%).
 
 Known pitfall reproduced on main: sglang defaults `cuda_graph_max_bs` to 24 for this model
 family, silently falling back to eager above it — always set `--cuda-graph-max-bs` explicitly
 (serve.sh does).
+
+**Same protocol, 7.2B, RTX 5090** (2026-07-13, W1' final config — `RWKV_STATE_FP16` + all five
+byte-exact glue fusions; full ledger and every isolated fusion's contribution:
+`docs/findings/0056-w1prime-serving-fixes.md`):
+
+| concurrency | tok/s |
+|---|---|
+| 1 (single request) | 133.4 |
+| 32 | 2,636.4 |
+| 128 | 7,087.3 |
+
+Raw: `bench/results/w1prime_legFinal_B_7.2b_5090.json`.
 
 ## 6. The 10-GPU fleet (same code, same recipe, every card)
 
