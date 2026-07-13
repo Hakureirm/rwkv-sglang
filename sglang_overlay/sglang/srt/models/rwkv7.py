@@ -264,6 +264,17 @@ _W4 = os.environ.get("RWKV_W4", "0") == "1"
 # reference is gated by bench/verify_w4a8.py. Requires sm80+ (self-gates).
 _W4_TC_LARGE_M = os.environ.get("RWKV_W4_TC_LARGE_M", "0") == "1"
 
+# Stage-3 MATH500 gate (F0055, 2026-07-13): unrestricted M>64 dispatch also routes
+# prefill (M up to ~4096) through w4a8, where the kernel is BOTH slower than the
+# dequant+cuBLAS fallback it replaces (+23% wall, measured on the compression
+# workload) AND taxes accuracy via a8 activation quantization over the whole
+# prompt before generation starts. RED: avg@64 57.66% vs 61.08% baseline
+# (-3.42pt), truncated 36.7% vs 14.0%. Cap the dispatch to the decode/cliff range
+# where the kernel actually wins; M above the cap falls back to the unchanged
+# w4a16 dequant+cuBLAS path (so prefill, typically M in the thousands, is
+# untouched). Env-tunable in case the sweet spot needs retuning per-model/GPU.
+_W4_TC_MAX_M = int(os.environ.get("RWKV_W4_TC_MAX_M", "512"))
+
 # M8: weight-only int8 (w8a16) — same hand-written kernel family as w4 but 8-bit:
 # near-lossless (per-group int8 RTN), faster than fp16 at small M (1/2 the weight
 # bytes), and — unlike the cutlass w8a8 path (sm80–90 only) — JIT-builds and runs on
@@ -387,10 +398,14 @@ class W4Linear(nn.Module):
             # large-M (RWKV_W4_TC_LARGE_M, opt-in): w4a8 — per-token s8 activations
             # x int4 weights on the s8 wmma pipeline. Kills the M=64 cliff of the
             # dequant fallback below (~36 bits/element weight traffic). Semantics
-            # are w4a8 here (not w4a16) — Stage-3 certifies accuracy e2e. The
-            # kernel wants the scale transposed ([K/64, N]: coalesced per-group
-            # reads); cache it per layer, like the w8a8 K-pad weight cache.
-            if M > 64 and _W4_TC_LARGE_M and w4_linear.tc_s8_supported():
+            # are w4a8 here (not w4a16) — Stage-3 certifies accuracy e2e. Capped to
+            # M<=_W4_TC_MAX_M (default 512, the decode/cliff range): above the cap
+            # (prefill) this kernel is both slower than the dequant fallback and
+            # carries the a8 accuracy tax over the whole prompt, so it stays on
+            # w4a16 dequant+cuBLAS instead (see F0055 RED gate). The kernel wants
+            # the scale transposed ([K/64, N]: coalesced per-group reads); cache
+            # it per layer, like the w8a8 K-pad weight cache.
+            if 64 < M <= _W4_TC_MAX_M and _W4_TC_LARGE_M and w4_linear.tc_s8_supported():
                 scale_t = getattr(self, "_scale_t", None)
                 if scale_t is None:
                     scale_t = self.scale.t().contiguous()
