@@ -61,6 +61,15 @@ import triton.language as tl
 # and is re-gated by greedy + the lossy rulers with the override applied.
 _FP16_CFG = os.environ.get("RWKV_WKV_FP16_CFG", "")
 
+# Task #54: hand-CUDA decode kernel (rwkv7_wkv.cu), default OFF. Serving-hot
+# path only (T==1 indexed decode, fp16 activations, fp16/fp32 state pool);
+# bit-exact vs this Triton kernel per state dtype - zero differing bytes on o
+# and the pool, pad rows included (bench/test_wkv_cuda.py) - so flipping the
+# env changes speed, never logits. Ineligible shapes/dtypes and the varlen
+# recurrent-prefill path fall through to the Triton kernel below.
+_WKV_CUDA = os.environ.get("RWKV_WKV_CUDA", "0") == "1"
+_WKV_CUDA_ARMED = False  # one-time stderr line when the path first fires
+
 
 @triton.jit(do_not_specialize=["T"])
 def _wkv_recurrent_kernel(
@@ -224,6 +233,51 @@ def wkv_recurrent(
     N = B if cu_seqlens is None else (cu_seqlens.numel() - 1)
     if scale is None:
         scale = K ** -0.5
+
+    # Task #54 hand-CUDA decode path (env-gated, default OFF; bit-exact vs the
+    # Triton path below per state dtype). Only the serving decode shape: T==1,
+    # in-place indexed pool, K==V==64, fp16 activations, int32 indices.
+    if (
+        _WKV_CUDA
+        and cu_seqlens is None
+        and state_pool is not None
+        and cache_indices is not None
+        and T == 1
+        and K == 64
+        and V == 64
+        and r.dtype == torch.float16
+        and v.dtype == torch.float16
+        and state_pool.dtype in (torch.float16, torch.float32)
+        and cache_indices.dtype == torch.int32
+        and _bv is None
+        and _nw is None
+    ):
+        from sglang.srt.layers.attention.rwkv7_kernels import wkv_cuda
+
+        if wkv_cuda.available():
+            global _WKV_CUDA_ARMED
+            if not _WKV_CUDA_ARMED:
+                _WKV_CUDA_ARMED = True
+                import sys
+
+                print(
+                    "[rwkv7_wkv] hand-CUDA WKV decode ACTIVE "
+                    f"(state={str(state_pool.dtype).split('.')[-1]}, H={H})",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            o = wkv_cuda.wkv_decode(
+                r.contiguous(),
+                w.contiguous(),
+                k.contiguous(),
+                v.contiguous(),
+                kk.contiguous(),
+                a.contiguous(),
+                state_pool,
+                cache_indices.contiguous(),
+                float(scale),
+            )
+            return o, None
 
     BK = triton.next_power_of_2(K)
     NV = triton.next_power_of_2(V)
