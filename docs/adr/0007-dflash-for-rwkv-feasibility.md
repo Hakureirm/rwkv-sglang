@@ -18,7 +18,7 @@ loop (0.1B RWKV-7 draft → larger RWKV-7 target), measured viable at **α ≈ 0
 research-only spike on a **second, independent** sglang-upstream algorithm — **DFlash**
 (`--speculative-algorithm DFLASH`) — asking whether it is *also* worth adapting to RWKV-7.
 
-Source: read-only over `/Users/hakureirm/codespace/Study/sglang-upstream` (local fork,
+Source: read-only over a local `sglang-upstream` checkout (local fork,
 HEAD `4405d9fbf`, 2026-07-06). Primary files read in full: `python/sglang/srt/speculative/
 dflash_worker_v2.py` (1706 lines), `dflash_info.py`, `dflash_info_v2.py`, `dflash_utils.py`
 (794 lines), `python/sglang/srt/models/dflash.py` (579 lines), `python/sglang/srt/speculative/

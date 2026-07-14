@@ -435,6 +435,11 @@ fp16 比 GPTQ 快 27%)——这台机器在两个尺寸上都撑不住 16 req/s(
 `bench/results/sharegpt_{0.1b,1.5b,7.2b}_{fp16,w4gptq}_5090_{rinf,r16}.log`;fp16 7.2B 对照线
 `bench/results/qwen35/rwkv7_7.2b_fp16_fullstack_resweep_5090_v3.json`。
 
+**交互版仪表盘(悬停/缩放/开关精度档):
+[hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)** ——
+下面的 F1/F2/F3/F4/F5 图表是静态 SVG;仪表盘用同一批落地原始数据渲染,支持悬停提示、
+拖拽缩放(dataZoom)、点击图例开关精度档,以及 F1/F2 的绝对值/相对 fp16 视图切换。
+
 **图——按尺寸分面的并发曲线,RTX 5090。** 每条线都直接取自上面引用的原始扫描文件
 (没有手填数字——manifest 见 `bench/plots/make_benchmark_plots.py`)。fp16 +
 `RWKV_STATE_FP16`(W1')那条是 §4b/§5 报告的稀疏抽测点(1.5B 只有 1 个点、7.2B 有 3

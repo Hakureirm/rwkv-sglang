@@ -11,6 +11,9 @@ Every number below has its raw log committed in [`bench/results/`](bench/results
 axis in readable tables (correctness gates, accuracy rulers, per-GPU speeds, the Albatross
 comparison, quantization trade-offs, latency under load), each linked to its raw log.
 
+Interactive dashboard (hover / zoom / toggle tiers):
+[hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)
+
 **Runs on sglang `main` and on v0.5.10** — one code base, the version difference is detected
 at runtime. The model-support core is submitted upstream:
 [sglang PR #30115](https://github.com/sgl-project/sglang/pull/30115).

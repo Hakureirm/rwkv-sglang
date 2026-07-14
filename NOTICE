@@ -37,6 +37,14 @@ This product includes software from, or derived from, the following projects.
    baseline and as the source of these two re-attributed kernels; the deliverable
    does NOT depend on flash-linear-attention (see docs/adr/0004).
 
+4. Apache ECharts  (https://github.com/apache/echarts)
+   Copyright Apache Software Foundation
+   Licensed under the Apache License, Version 2.0.
+   bench/plots/vendor/echarts.min.js is the unmodified v6.1.0 UMD build,
+   fetched via `npm pack echarts` and vendored so the interactive dashboard
+   (docs/interactive/index.html, built by bench/plots/make_interactive.py)
+   is fully self-contained -- no CDN dependency, works offline/from a clone.
+
 ================================================================================
 Trademarks: RWKV is a project by Bo Peng (BlinkDL). This is an independent
 integration and is not an official RWKV or sglang release.

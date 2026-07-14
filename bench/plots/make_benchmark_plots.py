@@ -144,6 +144,7 @@ LABELS = {
     "peak": {"en": "peak", "zh": "峰值"},
     "faster_hint": {"en": "faster →", "zh": "更快 →"},
     "accurate_hint": {"en": "↑ more accurate", "zh": "↑ 更准确"},
+    "ratio_vs_fp16": {"en": "× vs fp16", "zh": "相对 fp16 倍数"},
 
     # F1
     "f1_suptitle": {
@@ -400,9 +401,10 @@ CONCURRENCY_TICKS = [1, 32, 64, 128, 256, 384, 512]  # the actual measured point
                                                        # not a generic power-of-2 comb
 
 
-def _style_ax(ax, title, lang, logx=True, ylabel_key="tok_s"):
+def _style_ax(ax, title, lang, logx=True, ylabel_key="tok_s", show_xlabel=True):
     ax.set_title(title, fontsize=13, color=INK, pad=9, loc="left")
-    ax.set_xlabel(T("concurrency", lang), fontsize=11.5, color=INK_SECONDARY)
+    if show_xlabel:
+        ax.set_xlabel(T("concurrency", lang), fontsize=11.5, color=INK_SECONDARY)
     ax.set_ylabel(T(ylabel_key, lang), fontsize=11.5, color=INK_SECONDARY)
     if logx:
         ax.set_xscale("log", base=2)
@@ -452,14 +454,24 @@ def _source_note(fig):
               va="bottom", fontsize=6.5, color=INK_MUTED, style="italic")
 
 
-def _dedupe_legend(handles_labels_list, ax, ncol=3, loc="upper center", bbox=(0.5, -0.02)):
+def _dedupe_legend(handles_labels_list, ax, ncol=3, loc="upper center", bbox=(0.5, -0.02),
+                    bbox_transform=None):
     seen = {}
     for ax_ in handles_labels_list:
         h, l = ax_.get_legend_handles_labels()
         for hh, ll in zip(h, l):
             seen.setdefault(ll, hh)
-    ax.legend(list(seen.values()), list(seen.keys()), loc=loc, bbox_to_anchor=bbox, ncol=ncol,
-               frameon=False, fontsize=10, handlelength=2.2)
+    kwargs = dict(loc=loc, bbox_to_anchor=bbox, ncol=ncol, frameon=False, fontsize=10,
+                  handlelength=2.2)
+    if bbox_transform is not None:
+        # figure-fraction anchor (rather than the default axes-fraction) -- once F1/F2
+        # panels carry a second, much-shorter ratio sub-panel below them, an
+        # axes-fraction offset means something different depending which axes (tall
+        # absolute panel vs. narrow ratio panel) it's relative to. Figure-fraction is
+        # invariant to that, so the legend Y position is exact regardless of the
+        # height_ratios split above it.
+        kwargs["bbox_transform"] = bbox_transform
+    ax.legend(list(seen.values()), list(seen.keys()), **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -535,6 +547,58 @@ def _extend_xlim_for_labels(ax, factor=1.06):
     ax.set_xlim(lo, hi * factor)
 
 
+def _ratio_rows(rows, base_rows):
+    """`rows` divided by `base_rows` (a panel's fp16 series), point by point --
+    ONLY at concurrencies present in both (Phase 2a spec: no interpolation, skip
+    non-shared x). `base_rows` and `rows` are both the same sorted [(c, v), ...]
+    shape load_rows/merge_rows already return, so this composes directly with
+    either without any conversion at the call site.
+    """
+    base_by_c = dict(base_rows)
+    return [(c, v / base_by_c[c]) for c, v in rows if c in base_by_c]
+
+
+def _style_ratio_ax(ax, lang, ratio_values, show_xlabel=True):
+    """Narrow companion sub-panel under an F1/F2 absolute panel: fp16 = 1.0 dashed
+    reference; every other tier's ratio curve is plotted by the caller (via
+    _plot_series, same role color/marker/linestyle it used in the absolute panel
+    above, so a tier's ratio line always reads as a scaled-down twin of its own
+    curve up top). `ratio_values` is the flat list of every ratio y-value this
+    panel actually plotted -- used only so the y=1.0 reference line is
+    guaranteed to stay within the visible range even if a panel's tiers happen
+    to sit entirely above or entirely below fp16.
+    """
+    if show_xlabel:
+        ax.set_xlabel(T("concurrency", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.set_ylabel(T("ratio_vs_fp16", lang), fontsize=9.6, color=INK_SECONDARY)
+    ax.set_xscale("log", base=2)
+    ax.xaxis.set_major_locator(FixedLocator(CONCURRENCY_TICKS))
+    ax.xaxis.set_major_formatter(_INT_FMT)
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.xaxis.set_minor_formatter(NullFormatter())
+    for lbl in ax.get_xticklabels():
+        lbl.set_rotation(30)
+        lbl.set_ha("right")
+        lbl.set_rotation_mode("anchor")
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{x:.2g}×"))
+    ax.grid(True, which="major", axis="both", color=GRID, linewidth=0.8, zorder=0)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_color(AXIS)
+    ax.spines["bottom"].set_color(AXIS)
+    ax.tick_params(labelsize=9.2)
+    ax.set_facecolor(SURFACE)
+    # the fp16 reference itself -- dashed, fp16's own hue, at exactly 1.0 (never a
+    # plotted data series: fp16/fp16 is 1.0 at every one of its own points by
+    # construction, so a flat reference line says the same thing without the
+    # redundant marker noise a real series would add).
+    ax.axhline(1.0, color=ROLE_COLOR["fp16"], linestyle="--", linewidth=1.3, alpha=0.8, zorder=2)
+    vals = list(ratio_values) + [1.0]
+    lo, hi = min(vals), max(vals)
+    pad = max((hi - lo) * 0.18, 0.03)
+    ax.set_ylim(lo - pad, hi + pad)
+
+
 def _cliff_callout(ax, c1, v1, c2, v2, lang):
     """Arrowed callout at a sharp concurrency-cliff edge -- computed straight from
     the two measured points passed in (never a copied/hand-entered number)."""
@@ -552,8 +616,65 @@ def _cliff_callout(ax, c1, v1, c2, v2, lang):
 # ---------------------------------------------------------------------------
 # F1 -- per-size concurrency curves, RTX 5090
 # ---------------------------------------------------------------------------
+def f1_panels():
+    """Ordered data for F1's three per-size panels -- the exact role/file
+    composition BOTH fig_f1_concurrency_5090 (static SVG) and
+    make_interactive.py (dashboard) plot, so the two can never quietly drift
+    apart on what "the 1.5B panel" contains. Each panel's `series` is an
+    explicit ordered list of (rows, role, connect) with fp16 always listed
+    first -- both consumers rely on that position as the ratio-panel/ratio-
+    view divisor, so it's asserted, not just assumed, at the one call site
+    below that reads it.
+    """
+    gptq_72b = merge_rows(["bsz_sweep_7.2b_w4gptq_5090.json", "bsz_sweep_7.2b_w4gptq_5090_ext.json"])
+    w8a8_72b = merge_rows(["72b/sweep_72b_w8a8_ceil.json", "72b/sweep_72b_w8a8_max.json", "72b/sweep_72b_w8a8.json"])
+    panels = [
+        {
+            "title": "0.1B",  # not translated -- a model-size token, like fp16/w8a8 elsewhere
+            "xlim_factor": 1.06,
+            "series": [
+                (load_rows("bsz_sweep_0.1b_fp16_5090.json"), "fp16", True),
+                (load_rows("bsz_sweep_0.1b_w4gptq_5090.json"), "int4_gptq", True),
+                (load_rows("bsz_sweep_0.1b_w4rtn_5090.json"), "int4_rtn", True),
+            ],
+        },
+        {
+            "title": "1.5B",
+            "xlim_factor": 1.06,
+            "series": [
+                (load_rows("bsz_sweep_fullstack_5090.json"), "fp16", True),
+                (load_rows("w1prime_legEf_1.5b_5090.json"), "fp16_state_fp16", False),
+                (load_rows("bsz_sweep_1.5b_w4gptq_5090.json"), "int4_gptq", True),
+                (load_rows("bsz_sweep_1.5b_w4rtn_5090.json"), "int4_rtn", True),
+                (load_rows("bsz_sweep_w8a8v2_5090main.json"), "w8a8", True),
+            ],
+        },
+        {
+            "title": "7.2B",
+            "xlim_factor": 1.08,
+            "series": [
+                (load_rows("72b/sweep_72b_fp16_v3_5090.json"), "fp16", True),
+                (load_rows("w1prime_legFinal_B_7.2b_5090.json"), "fp16_state_fp16", False),
+                (gptq_72b, "int4_gptq", True),
+                (load_rows("bsz_sweep_7.2b_w4rtn_5090.json"), "int4_rtn", True),
+                (w8a8_72b, "w8a8", True),
+            ],
+        },
+    ]
+    for p in panels:
+        assert p["series"][0][1] == "fp16", f"{p['title']}: fp16 must be series[0] (ratio divisor)"
+    return panels
+
+
 def fig_f1_concurrency_5090(out_path, lang):
-    fig, axes = plt.subplots(1, 3, figsize=(16.4, 5.8), dpi=DPI)
+    # 2 rows per column: row 0 is the existing absolute tok/s panel, row 1 is its
+    # new (Phase 2a) narrow ratio-vs-fp16 companion, sharing that column's x-axis
+    # (view limits) via sharex="col" -- confirmed empirically (see task notes) that
+    # this does NOT trigger matplotlib's "not compatible with tight_layout" warning
+    # as long as gridspec_kw carries only height_ratios (no explicit hspace/wspace);
+    # tight_layout is then free to compute spacing itself, same as the pre-2a figure.
+    fig, axes = plt.subplots(2, 3, figsize=(16.4, 7.9), dpi=DPI,
+                              gridspec_kw={"height_ratios": [3.0, 1.15]}, sharex="col")
 
     def tag(role, val):
         return f"{short_label(role, lang)} {val:,.0f}"
@@ -569,72 +690,45 @@ def fig_f1_concurrency_5090(out_path, lang):
     # render time, so labels for close-valued lines ended up overlapping.
     panel_end_entries = []  # [(ax, [(x,y,color,text), ...]), ...]
 
-    # -- 0.1B: fp16 / GPTQ / RTN, full 8-point sweeps --
-    ax = axes[0]
-    series = [
-        (load_rows("bsz_sweep_0.1b_fp16_5090.json"), "fp16"),
-        (load_rows("bsz_sweep_0.1b_w4gptq_5090.json"), "int4_gptq"),
-        (load_rows("bsz_sweep_0.1b_w4rtn_5090.json"), "int4_rtn"),
-    ]
-    end_entries = []
-    for rows, role in series:
-        _plot_series(ax, rows, role, lang)
-        _mark_peak(ax, rows, ROLE_COLOR[role], lambda v: f"{v:,.0f}")
-        if rows:
-            x, y = rows[-1]
-            end_entries.append((x, y, ROLE_COLOR[role], tag(role, y)))
-    # style_ax MUST run before extend_xlim: it sets the log-2 x-scale, and
-    # extending/reading xlim while the axis is still linear (the matplotlib
-    # default before set_xscale runs) computes nonsense once log scale applies.
-    _style_ax(ax, "0.1B", lang)
-    _extend_xlim_for_labels(ax)
-    panel_end_entries.append((ax, end_entries))
+    for col, panel in enumerate(f1_panels()):
+        series = panel["series"]
+        fp16_rows = series[0][0]
 
-    # -- 1.5B: fp16 full-stack (8pt) + STATE_FP16 W1' bsz1-only point + int4 (3pt) + w8a8 (8pt) --
-    ax = axes[1]
-    series = [
-        (load_rows("bsz_sweep_fullstack_5090.json"), "fp16", True),
-        (load_rows("w1prime_legEf_1.5b_5090.json"), "fp16_state_fp16", False),
-        (load_rows("bsz_sweep_1.5b_w4gptq_5090.json"), "int4_gptq", True),
-        (load_rows("bsz_sweep_1.5b_w4rtn_5090.json"), "int4_rtn", True),
-        (load_rows("bsz_sweep_w8a8v2_5090main.json"), "w8a8", True),
-    ]
-    end_entries = []
-    for rows, role, connect in series:
-        _plot_series(ax, rows, role, lang, connect=connect)
-        if connect:
-            _mark_peak(ax, rows, ROLE_COLOR[role], lambda v: f"{v:,.0f}")
-        if rows:
-            x, y = rows[-1]
-            end_entries.append((x, y, ROLE_COLOR[role], tag(role, y)))
-    _style_ax(ax, "1.5B", lang)
-    _extend_xlim_for_labels(ax)
-    panel_end_entries.append((ax, end_entries))
+        ax = axes[0, col]
+        end_entries = []
+        for rows, role, connect in series:
+            _plot_series(ax, rows, role, lang, connect=connect)
+            if connect:
+                _mark_peak(ax, rows, ROLE_COLOR[role], lambda v: f"{v:,.0f}")
+            if rows:
+                x, y = rows[-1]
+                end_entries.append((x, y, ROLE_COLOR[role], tag(role, y)))
+        # style_ax MUST run before extend_xlim: it sets the log-2 x-scale, and
+        # extending/reading xlim while the axis is still linear (the matplotlib
+        # default before set_xscale runs) computes nonsense once log scale applies.
+        # show_xlabel=False + labelbottom=False: the ratio sub-panel below now owns
+        # the "concurrency" axis label and tick labels (same pattern F5 already uses
+        # for its ax/axd pair) -- showing them twice would be redundant clutter.
+        _style_ax(ax, panel["title"], lang, show_xlabel=False)
+        ax.tick_params(labelbottom=False)
+        _extend_xlim_for_labels(ax, factor=panel["xlim_factor"])
+        panel_end_entries.append((ax, end_entries))
 
-    # -- 7.2B: fp16 (F0047-corrected, 11pt) + STATE_FP16 W1' (3pt) + int4 (merged) + w8a8 (merged) --
-    ax = axes[2]
-    gptq_72b = merge_rows(["bsz_sweep_7.2b_w4gptq_5090.json", "bsz_sweep_7.2b_w4gptq_5090_ext.json"])
-    w8a8_72b = merge_rows(["72b/sweep_72b_w8a8_ceil.json", "72b/sweep_72b_w8a8_max.json", "72b/sweep_72b_w8a8.json"])
-    series = [
-        (load_rows("72b/sweep_72b_fp16_v3_5090.json"), "fp16", True),
-        (load_rows("w1prime_legFinal_B_7.2b_5090.json"), "fp16_state_fp16", False),
-        (gptq_72b, "int4_gptq", True),
-        (load_rows("bsz_sweep_7.2b_w4rtn_5090.json"), "int4_rtn", True),
-        (w8a8_72b, "w8a8", True),
-    ]
-    end_entries = []
-    for rows, role, connect in series:
-        _plot_series(ax, rows, role, lang, connect=connect)
-        if connect:
-            _mark_peak(ax, rows, ROLE_COLOR[role], lambda v: f"{v:,.0f}")
-        if rows:
-            x, y = rows[-1]
-            end_entries.append((x, y, ROLE_COLOR[role], tag(role, y)))
-    _style_ax(ax, "7.2B", lang)
-    _extend_xlim_for_labels(ax, factor=1.08)
-    panel_end_entries.append((ax, end_entries))
+        rax = axes[1, col]
+        ratio_vals = []
+        for rows, role, connect in series[1:]:  # skip fp16 -- it's the dashed y=1 reference
+            rr = _ratio_rows(rows, fp16_rows)
+            _plot_series(rax, rr, role, lang, connect=connect)
+            ratio_vals.extend(v for _, v in rr)
+        _style_ratio_ax(rax, lang, ratio_vals)
 
-    _dedupe_legend(axes, axes[1], ncol=5, loc="upper center", bbox=(0.5, -0.18))
+    # legend handles come from the top row only (the ratio row reuses identical
+    # role colors/labels, so _dedupe_legend's by-label dedup would collapse them
+    # anyway -- reading only axes[0, :] just skips that redundant work). Anchored
+    # in FIGURE fraction (not axes-fraction) so its position doesn't depend on
+    # which row's axes it's nominally attached to.
+    _dedupe_legend(axes[0, :], axes[1, 1], ncol=5, loc="upper center", bbox=(0.5, 0.045),
+                    bbox_transform=fig.transFigure)
     fig.suptitle(T("f1_suptitle", lang), fontsize=14.5, color=INK, x=0.01, ha="left", y=0.995)
     # right=0.91 (not 1.0): the rightmost panel's end-labels are drawn past its own
     # axes at a fixed axes-fraction x (see _end_labels) with annotation_clip=False,
@@ -643,7 +737,10 @@ def fig_f1_concurrency_5090(out_path, lang):
     # exactly the last panel (the only one with no neighboring panel's white space to
     # bleed into). Confirmed empirically: longest end-label ("+STATE_FP16 7,087")
     # needed ~6.8% of the figure width beyond the last axes; 9% leaves headroom.
-    fig.tight_layout(rect=(0, 0.09, 0.91, 0.90))
+    # bottom=0.12 (was 0.09 pre-2a): the ratio row's own rotated tick labels + xlabel
+    # now live inside this margin too (the absolute row's copy was removed above),
+    # plus the legend anchored at fig-fraction y=0.045 below that.
+    fig.tight_layout(rect=(0, 0.12, 0.91, 0.90))
     fig.canvas.draw()  # finalize axes transforms before any pixel-space label math
 
     for ax_, entries in panel_end_entries:
@@ -657,37 +754,26 @@ def fig_f1_concurrency_5090(out_path, lang):
 # ---------------------------------------------------------------------------
 # F2 -- per-size concurrency curves, RTX 3090 (incl. the w4 cliff)
 # ---------------------------------------------------------------------------
-def fig_f2_concurrency_3090(out_path, lang):
-    fig, axes = plt.subplots(1, 2, figsize=(12.6, 6.0), dpi=DPI)
+def f2_panels():
+    """Ordered data for F2's two per-size panels -- see f1_panels()'s docstring
+    for why this is factored out (single source of truth for the static SVG
+    and make_interactive.py). Each series tuple is (rows, role, connect,
+    hollow, linestyle, label_key); panel 1 (7.2B) is where the non-default
+    fields actually get used (the cliff-map GPTQ relabel, the hollow/dashed
+    w4a8-tc experimental point). `label_key` is a LABELS key (not a resolved
+    string) -- this function is lang-independent, so resolving it to en/zh
+    text is left to whichever caller has a `lang` in scope.
+    """
+    fp16_15b = load_rows("bsz_sweep_1.5b_fp16_3090.json")
+    panel0 = {
+        "title": "1.5B",
+        "series": [
+            (fp16_15b, "fp16", True, False, "-", None),
+            (load_rows("bsz_sweep_1.5b_w4gptq_3090.json"), "int4_gptq", True, False, "-", None),
+            (load_rows("bsz_sweep_1.5b_w4rtn_3090.json"), "int4_rtn", True, False, "-", None),
+        ],
+    }
 
-    def tag(role, val, short=None):
-        return f"{short or short_label(role, lang)} {val:,.0f}"
-
-    # Two passes -- see the matching comment in fig_f1_concurrency_5090: end-label
-    # declutter math needs the FINAL (post-tight_layout) transform, so it's
-    # deferred to a second pass after the whole figure's layout is locked in.
-    panel_end_entries = []
-
-    # -- 1.5B: fp16 / GPTQ / RTN, matched §4b matrix session, 6pt each --
-    ax = axes[0]
-    series = [
-        (load_rows("bsz_sweep_1.5b_fp16_3090.json"), "fp16"),
-        (load_rows("bsz_sweep_1.5b_w4gptq_3090.json"), "int4_gptq"),
-        (load_rows("bsz_sweep_1.5b_w4rtn_3090.json"), "int4_rtn"),
-    ]
-    end_entries = []
-    for rows, role in series:
-        _plot_series(ax, rows, role, lang)
-        _mark_peak(ax, rows, ROLE_COLOR[role], lambda v: f"{v:,.0f}")
-        if rows:
-            x, y = rows[-1]
-            end_entries.append((x, y, ROLE_COLOR[role], tag(role, y)))
-    _style_ax(ax, "1.5B", lang)
-    _extend_xlim_for_labels(ax)
-    panel_end_entries.append((ax, end_entries))
-
-    # -- 7.2B: fp16 / RTN (3pt matrix) + int4-GPTQ cliff composite + w4a8-tc experimental --
-    ax = axes[1]
     fp16_rows = load_rows("bsz_sweep_7.2b_fp16_3090.json")
     rtn_rows = load_rows("bsz_sweep_7.2b_w4rtn_3090.json")
     gptq_cliff = merge_rows([
@@ -696,6 +782,72 @@ def fig_f2_concurrency_3090(out_path, lang):
         "bsz_sweep_7.2b_w4gptq_3090_cliffmap_fine.json",  # c=66,72,76
     ])
     w4a8_exp = load_rows("bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_w4a8.json")
+    panel1 = {
+        "title_key": "f2_panel2_title",  # unlike panel0's plain "1.5B", this title IS translated
+        "series": [
+            (fp16_rows, "fp16", True, False, "-", None),
+            (rtn_rows, "int4_rtn", True, False, "-", None),
+            (gptq_cliff, "int4_gptq", True, False, "-", "gptq_cliff_map_label"),
+            (w4a8_exp, "w4a8_experimental", True, True, "--", None),
+        ],
+        # the cliff edge -- the actual measured c=64 -> c=66 pair (F0055's headline
+        # number), read straight off the landed raw, never hand-copied.
+        "cliff": {"c1": 64, "v1": dict(gptq_cliff)[64], "c2": 66, "v2": dict(gptq_cliff)[66]},
+    }
+    for p in (panel0, panel1):
+        assert p["series"][0][1] == "fp16", "fp16 must be series[0] (ratio divisor)"
+    return [panel0, panel1]
+
+
+def fig_f2_concurrency_3090(out_path, lang):
+    # See fig_f1_concurrency_5090's opening comment for why sharex="col" + a plain
+    # height_ratios gridspec_kw (no explicit hspace) coexists safely with the
+    # existing tight_layout(rect=...) margin trick used below.
+    fig, axes = plt.subplots(2, 2, figsize=(12.6, 8.3), dpi=DPI,
+                              gridspec_kw={"height_ratios": [3.0, 1.15]}, sharex="col")
+
+    def tag(role, val, short=None):
+        return f"{short or short_label(role, lang)} {val:,.0f}"
+
+    # Two passes -- see the matching comment in fig_f1_concurrency_5090: end-label
+    # declutter math needs the FINAL (post-tight_layout) transform, so it's
+    # deferred to a second pass after the whole figure's layout is locked in.
+    panel_end_entries = []
+    panels = f2_panels()
+
+    # -- 1.5B: fp16 / GPTQ / RTN, matched §4b matrix session, 6pt each --
+    ax = axes[0, 0]
+    series0 = panels[0]["series"]
+    fp16_15b = series0[0][0]
+    end_entries = []
+    for rows, role, connect, hollow, linestyle, label_key in series0:
+        _plot_series(ax, rows, role, lang, connect=connect, hollow=hollow, linestyle=linestyle)
+        _mark_peak(ax, rows, ROLE_COLOR[role], lambda v: f"{v:,.0f}")
+        if rows:
+            x, y = rows[-1]
+            end_entries.append((x, y, ROLE_COLOR[role], tag(role, y)))
+    _style_ax(ax, panels[0]["title"], lang, show_xlabel=False)
+    ax.tick_params(labelbottom=False)
+    _extend_xlim_for_labels(ax)
+    panel_end_entries.append((ax, end_entries))
+
+    rax = axes[1, 0]
+    ratio_vals = []
+    for rows, role, connect, hollow, linestyle, label_key in series0[1:]:
+        rr = _ratio_rows(rows, fp16_15b)
+        _plot_series(rax, rr, role, lang, connect=connect, hollow=hollow, linestyle=linestyle)
+        ratio_vals.extend(v for _, v in rr)
+    _style_ratio_ax(rax, lang, ratio_vals)
+
+    # -- 7.2B: fp16 / RTN (3pt matrix) + int4-GPTQ cliff composite + w4a8-tc experimental --
+    ax = axes[0, 1]
+    panel1 = panels[1]
+    by_role = {role: (rows, hollow, linestyle, label_key)
+               for rows, role, connect, hollow, linestyle, label_key in panel1["series"]}
+    fp16_rows = by_role["fp16"][0]
+    rtn_rows = by_role["int4_rtn"][0]
+    gptq_cliff = by_role["int4_gptq"][0]
+    w4a8_exp = by_role["w4a8_experimental"][0]
 
     _plot_series(ax, fp16_rows, "fp16", lang)
     _plot_series(ax, rtn_rows, "int4_rtn", lang)
@@ -708,7 +860,8 @@ def fig_f2_concurrency_3090(out_path, lang):
     # panel, called out explicitly below rather than with a generic peak dot.
     _mark_peak(ax, w4a8_exp, ROLE_COLOR["w4a8_experimental"], lambda v: f"{v:,.0f}")
 
-    _style_ax(ax, T("f2_panel2_title", lang), lang)
+    _style_ax(ax, T(panel1["title_key"], lang), lang, show_xlabel=False)
+    ax.tick_params(labelbottom=False)
 
     end_entries = []
     for rows, role in ((fp16_rows, "fp16"), (rtn_rows, "int4_rtn")):
@@ -721,20 +874,37 @@ def fig_f2_concurrency_3090(out_path, lang):
     _extend_xlim_for_labels(ax, factor=1.1)
     panel_end_entries.append((ax, end_entries))
 
-    # the cliff edge -- the actual measured c=64 -> c=66 pair (F0055's headline number).
-    # Expressed entirely in "data" xy/xytext coords (not "offset points"), so unlike
-    # the end-label declutter math it is immune to the pre/post-tight_layout timing
-    # issue: data coordinates don't depend on the pixel transform at all.
-    c1, v1 = 64, dict(gptq_cliff)[64]
-    c2, v2 = 66, dict(gptq_cliff)[66]
-    _cliff_callout(ax, c1, v1, c2, v2, lang)
+    _cliff_callout(ax, panel1["cliff"]["c1"], panel1["cliff"]["v1"],
+                    panel1["cliff"]["c2"], panel1["cliff"]["v2"], lang)
 
-    _dedupe_legend(axes, axes[1], ncol=2, loc="upper center", bbox=(0.5, -0.20))
+    rax = axes[1, 1]
+    ratio_vals = []
+    for rows, role, connect, hollow, linestyle, label_key in panel1["series"][1:]:
+        rr = _ratio_rows(rows, fp16_rows)
+        label_override = T(label_key, lang) if label_key else None
+        _plot_series(rax, rr, role, lang, linestyle=linestyle, hollow=hollow,
+                     label_override=label_override)
+        ratio_vals.extend(v for _, v in rr)
+    _style_ratio_ax(rax, lang, ratio_vals)
+
+    # y=0.105 (not F1's 0.045): this legend is 3 rows tall (5 unique labels at
+    # ncol=2, incl. the cliff-map-relabeled GPTQ entry) vs. F1's single row --
+    # confirmed by measuring get_window_extent() post-render (see task notes) that
+    # 0.045 put its top edge at ~30px of a 68px-tall legend, clipping ~38px off
+    # the bottom of the saved figure; 0.105 gives it full clearance plus margin.
+    _dedupe_legend(axes[0, :], axes[1, 1], ncol=2, loc="upper center", bbox=(0.5, 0.105),
+                    bbox_transform=fig.transFigure)
     fig.suptitle(T("f2_suptitle", lang), fontsize=14.5, color=INK, x=0.01, ha="left", y=0.995)
-    # right=0.89 -- see the matching comment in fig_f1_concurrency_5090: reserves
-    # figure-level margin for the rightmost panel's end-labels (annotation_clip=False
-    # means they're bounded by the canvas, not the axes box).
-    fig.tight_layout(rect=(0, 0.11, 0.89, 0.90))
+    # right=0.885 (was 0.89 pre-2a) -- see the matching comment in
+    # fig_f1_concurrency_5090: reserves figure-level margin for the rightmost
+    # panel's end-labels (annotation_clip=False means they're bounded by the
+    # canvas, not the axes box). Nudged 0.5pt tighter than the pre-2a value:
+    # confirmed via get_tightbbox() that the taller (2a) figure pushed the
+    # longest end-label ("w4a8-tc 1,468") ~2px past the right canvas edge at
+    # 0.89; 0.885 was verified clear with margin to spare. bottom=0.15 (was 0.11
+    # pre-2a): the ratio row's ticks/xlabel + the ncol=2 (3-row) legend both now
+    # live in this margin, in place of the single absolute row's own copies.
+    fig.tight_layout(rect=(0, 0.15, 0.885, 0.90))
     fig.canvas.draw()  # finalize axes transforms before any pixel-space label math
 
     for ax_, entries in panel_end_entries:
@@ -748,27 +918,46 @@ def fig_f2_concurrency_3090(out_path, lang):
 # ---------------------------------------------------------------------------
 # F3 -- accuracy-vs-speed frontier, 7.2B
 # ---------------------------------------------------------------------------
-def fig_f3_accuracy_speed_frontier(out_path, lang):
-    fig, ax = plt.subplots(figsize=(9.6, 8.6), dpi=DPI)
-
-    points = []  # (x, y, role, label, hollow)
+def f3_points():
+    """Ordered points for F3 -- see f1_panels()'s docstring for why this is
+    factored out (single source of truth for the static SVG and
+    make_interactive.py). Dicts (not the plotting function's own tuple shape)
+    so both consumers can read fields by name; `label_key`/`note_key` are
+    LABELS keys (lang-independent), resolved via T(key, lang) by whichever
+    caller has a `lang` in scope.
+    """
+    points = []
 
     x = sweep_value_at("72b/sweep_72b_fp16_v3_5090.json", 1)
     y, c, n = math500_pct("math500_avg64_7.2b_fp16.json")
-    points.append((x, y, "fp16", T("f3_pt_fp16", lang), False))
+    points.append({"x": x, "y": y, "role": "fp16", "label_key": "f3_pt_fp16", "hollow": False,
+                    "note_key": "f3_note_fp16_state", "correct": c, "total": n})
 
     x = sweep_value_at("w1prime_legFinal_B_7.2b_5090.json", 1)
     y, c, n = math500_pct("math500_avg64_7.2b_fp16_stateon.json")
-    points.append((x, y, "fp16_state_fp16", T("f3_pt_state", lang), False))
+    points.append({"x": x, "y": y, "role": "fp16_state_fp16", "label_key": "f3_pt_state", "hollow": False,
+                    "note_key": "f3_note_fp16_state", "correct": c, "total": n})
 
     x = sweep_value_at("bsz_sweep_7.2b_w4gptq_5090.json", 1)
     y, c, n = math500_pct("math500_avg64_7.2b_sym.json")
-    points.append((x, y, "int4_gptq", T("f3_pt_gptq", lang), False))
+    points.append({"x": x, "y": y, "role": "int4_gptq", "label_key": "f3_pt_gptq", "hollow": False,
+                    "note_key": "f3_note_gptq", "correct": c, "total": n})
 
     gptq_cliff_w4a8 = load_rows("bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_w4a8.json")
     x = sweep_peak(gptq_cliff_w4a8)[1]
     y, c, n = math500_pct("math500_avg64_7.2b_w4gptq_w4a8capped_3090.json")
-    points.append((x, y, "w4a8_experimental", T("f3_pt_w4a8", lang), True))
+    points.append({"x": x, "y": y, "role": "w4a8_experimental", "label_key": "f3_pt_w4a8", "hollow": True,
+                    "note_key": "f3_note_w4a8", "correct": c, "total": n, "red_gate": True})
+    return points
+
+
+def fig_f3_accuracy_speed_frontier(out_path, lang):
+    fig, ax = plt.subplots(figsize=(9.6, 8.6), dpi=DPI)
+
+    # (x, y, role, label, hollow) -- same shape the rest of this function has
+    # always plotted; only the source (f3_points(), shared with the interactive
+    # dashboard) and the label resolution (T(...) here, now) are new.
+    points = [(p["x"], p["y"], p["role"], T(p["label_key"], lang), p["hollow"]) for p in f3_points()]
 
     # dashed lineage connector: the experimental w4a8-tc point is int4 GPTQ (symmetric)
     # plus an activation-quant kernel bolted on -- same dashed/hollow convention F2
@@ -864,15 +1053,19 @@ def fig_f3_accuracy_speed_frontier(out_path, lang):
 # ---------------------------------------------------------------------------
 # F4 -- MATH500 accuracy ladder, precision x size (grouped bars)
 # ---------------------------------------------------------------------------
-def fig_f4_math500_ladder(out_path, lang):
-    fig, ax = plt.subplots(figsize=(10.6, 7.0), dpi=DPI)
-
+def f4_data():
+    """Slots + per-size accuracy dicts for F4 -- see f1_panels()'s docstring
+    for why this is factored out (single source of truth for the static SVG
+    and make_interactive.py). `slot_label` values are technical tokens
+    (fp16/w8a8/int4-sym/...) shared verbatim between languages like
+    everywhere else in this module, so unlike f1_panels/f2_panels/f3_points
+    nothing here needs a separate lang-resolved counterpart.
+    """
     slots = ["fp16", "fp16_state_fp16", "w8a8", "int4_gptq", "int4_gptq_asym", "hybrid"]
     slot_label = {
         "fp16": "fp16", "fp16_state_fp16": "+STATE_FP16", "w8a8": "w8a8",
         "int4_gptq": "int4-sym", "int4_gptq_asym": "int4-asym", "hybrid": "hybrid",
     }
-
     onepfive = {
         "fp16": math500_pct("math500_avg64_5090main.json"),
         "w8a8": math500_pct("math500_avg64_w8a8_5090main.json"),
@@ -888,6 +1081,14 @@ def fig_f4_math500_ladder(out_path, lang):
         "int4_gptq_asym": math500_pct("math500_avg64_7.2b_asym.json"),
         "hybrid": math500_pct("math500_avg64_7.2b_hybrid_ffnvk.json"),
     }
+    return {"slots": slots, "slot_label": slot_label, "onepfive": onepfive, "seven2b": seven2b}
+
+
+def fig_f4_math500_ladder(out_path, lang):
+    fig, ax = plt.subplots(figsize=(10.6, 7.0), dpi=DPI)
+
+    _d = f4_data()
+    slots, slot_label, onepfive, seven2b = _d["slots"], _d["slot_label"], _d["onepfive"], _d["seven2b"]
     missing_1_5b = set()  # 1.5B int4 raws landed 2026-07-14
 
     n = len(slots)
@@ -971,6 +1172,57 @@ def _bucket_mid(name):
     return float(body.rstrip("+"))
 
 
+def f5_curve_data():
+    """fp32-state vs fp16-state positional curve + delta for F5 -- see
+    f1_panels()'s docstring for why this is factored out (single source of
+    truth for the static SVG and make_interactive.py). Returns None if the
+    two raws haven't landed yet (mirrors fig_f5's own not-yet-landed guard,
+    which is why this function -- unlike f1_panels/f2_panels/f3_points/
+    f4_data -- can't unconditionally return a value).
+    """
+    needed = MANIFEST["f5_positional_compression_state_precision"]
+    if not all(exists(p) for p in needed):
+        return None
+
+    def curve(relpath):
+        with open(_path(relpath)) as f:
+            return json.load(f)
+
+    off = curve(needed[0])  # fp32 state (leg A)
+    on = curve(needed[1])   # fp16 state (leg B)
+
+    rows_by_role = {}
+    bucket_ticks = None
+    for d, role in ((off, "fp16"), (on, "fp16_state_fp16")):
+        buckets = d["position_curve"]
+        xs = [_bucket_mid(b["bucket"]) for b in buckets]
+        ys = [b["mean_neg_log2_p"] for b in buckets]
+        rows_by_role[role] = [(x, y) for x, y in zip(xs, ys) if y == y]  # drop the NaN [3584+) tail bucket
+        if bucket_ticks is None:
+            bucket_ticks = [x for x, y in zip(xs, ys) if y == y]  # the real bucket midpoints
+
+    # delta: Δ = fp16-state − fp32-state, per bucket, real sample mass only
+    on_by_bucket = {b["bucket"]: b for b in on["position_curve"]}
+    dxs, dys = [], []
+    for b in off["position_curve"]:
+        name = b["bucket"]
+        a_val = b["mean_neg_log2_p"]
+        b_val = on_by_bucket[name]["mean_neg_log2_p"]
+        if a_val == a_val and b_val == b_val and b["tokens"] > 0:  # skip the empty NaN tail bucket
+            dxs.append(_bucket_mid(name))
+            dys.append(b_val - a_val)
+
+    return {
+        "bucket_ticks": bucket_ticks,
+        "rows_by_role": rows_by_role,  # {"fp16": [(x,y),...], "fp16_state_fp16": [(x,y),...]}
+        "delta": {"x": dxs, "y": dys},
+        # bits/bucket -- the same-flag rerun band this project measured (F0057 §2:
+        # ao3_english reran twice on an unchanged leg, |Δ| <= 6.6e-6, most ~1e-6;
+        # ~1e-5 is F0057's own stated conservative headline band).
+        "noise": 1e-5,
+    }
+
+
 def fig_f5_positional_compression_state_precision(out_path, lang):
     """7.2B uncheatable position curve, RWKV_STATE_FP16 off (fp32 state) vs on (fp16 state).
 
@@ -986,17 +1238,11 @@ def fig_f5_positional_compression_state_precision(out_path, lang):
     just asserted: a small-multiples-style secondary axis sharing the x scale,
     computed directly from the two landed raws (never copied from the prose).
     """
-    needed = MANIFEST["f5_positional_compression_state_precision"]
-    if not all(exists(p) for p in needed):
+    curve_data = f5_curve_data()
+    if curve_data is None:
         return False
-
-    def curve(relpath):
-        with open(_path(relpath)) as f:
-            d = json.load(f)
-        return d
-
-    off = curve(needed[0])  # fp32 state (leg A)
-    on = curve(needed[1])   # fp16 state (leg B)
+    bucket_ticks = curve_data["bucket_ticks"]
+    rows_by_role = curve_data["rows_by_role"]
 
     # constrained_layout (not tight_layout) -- this figure stacks two axes via
     # gridspec_kw, and tight_layout's post-hoc rect math is not compatible with a
@@ -1009,15 +1255,8 @@ def fig_f5_positional_compression_state_precision(out_path, lang):
     )
     fig.set_constrained_layout_pads(w_pad=0.06, h_pad=0.04, hspace=0.02, wspace=0.0)
 
-    bucket_ticks = None
-    for d, role, label_key in ((off, "fp16", "f5_pt_off"), (on, "fp16_state_fp16", "f5_pt_on")):
-        buckets = d["position_curve"]
-        xs = [_bucket_mid(b["bucket"]) for b in buckets]
-        ys = [b["mean_neg_log2_p"] for b in buckets]
-        rows = [(x, y) for x, y in zip(xs, ys) if y == y]  # drop the NaN [3584+) tail bucket
-        if bucket_ticks is None:
-            bucket_ticks = [x for x, y in zip(xs, ys) if y == y]  # the real bucket midpoints
-        _plot_series(ax, rows, role, lang, label_override=T(label_key, lang))
+    for role, label_key in (("fp16", "f5_pt_off"), ("fp16_state_fp16", "f5_pt_on")):
+        _plot_series(ax, rows_by_role[role], role, lang, label_override=T(label_key, lang))
     ax.set_xscale("log", base=2)
     # Without an explicit locator/formatter, matplotlib's default log-2 locator
     # produces crowded/overlapping tick labels at these bucket-midpoint spacings
@@ -1039,20 +1278,8 @@ def fig_f5_positional_compression_state_precision(out_path, lang):
     ax.legend(frameon=False, fontsize=10.5, loc="lower left")
 
     # -- delta sub-panel: Δ = fp16-state − fp32-state, per bucket, real sample mass only --
-    off_by_bucket = {b["bucket"]: b for b in off["position_curve"]}
-    on_by_bucket = {b["bucket"]: b for b in on["position_curve"]}
-    dxs, dys = [], []
-    for b in off["position_curve"]:
-        name = b["bucket"]
-        a_val = b["mean_neg_log2_p"]
-        b_val = on_by_bucket[name]["mean_neg_log2_p"]
-        if a_val == a_val and b_val == b_val and b["tokens"] > 0:  # skip the empty NaN tail bucket
-            dxs.append(_bucket_mid(name))
-            dys.append(b_val - a_val)
-
-    noise = 1e-5  # bits/bucket -- the same-flag rerun band this project measured (F0057 §2:
-                  # ao3_english reran twice on an unchanged leg, |Δ| <= 6.6e-6, most ~1e-6;
-                  # ~1e-5 is F0057's own stated conservative headline band).
+    dxs, dys = curve_data["delta"]["x"], curve_data["delta"]["y"]
+    noise = curve_data["noise"]
     axd.axhspan(-noise, noise, color=NOISE_BAND, alpha=0.6, zorder=0)
     axd.axhline(0, color=AXIS, linewidth=1.0, zorder=1)
     axd.plot(dxs, dys, linestyle="-", linewidth=1.4, color=INK, zorder=3, marker="o",

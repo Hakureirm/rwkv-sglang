@@ -495,6 +495,12 @@ Raw (5090): `bench/results/bsz_sweep_7.2b_w4gptq_5090.json` (c=1/32/128) +
 `bench/results/sharegpt_{0.1b,1.5b,7.2b}_{fp16,w4gptq}_5090_{rinf,r16}.log`; fp16 7.2B comparison line
 `bench/results/qwen35/rwkv7_7.2b_fp16_fullstack_resweep_5090_v3.json`.
 
+**Interactive dashboard (hover / zoom / toggle tiers):
+[hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)** —
+the F1/F2/F3/F4/F5 figures below are static SVGs; the dashboard renders the same landed raws
+with hover tooltips, dataZoom, legend-click tier toggling, and an absolute/ratio-vs-fp16 view
+switch for F1/F2.
+
 **Figure — per-size concurrency curves, RTX 5090.** Every line is drawn straight from the
 raw sweeps cited above (nothing hand-entered — see the manifest in
 `bench/plots/make_benchmark_plots.py`). The fp16 + `RWKV_STATE_FP16` (W1') series is the

@@ -11,6 +11,9 @@
 指标轴,可读的表格形式(正确性验证、精度指标、逐卡速度、与 Albatross 的对比、量化
 取舍、真实负载延迟),每张表链接到原始日志。
 
+交互版仪表盘(悬停/缩放/开关精度档):
+[hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)
+
 **同时支持 sglang `main` 和 v0.5.10**——同一份代码,版本差异在运行时自动识别。
 模型支持的核心部分已提交上游:[sglang PR #30115](https://github.com/sgl-project/sglang/pull/30115)。
 
