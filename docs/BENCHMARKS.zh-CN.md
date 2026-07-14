@@ -570,15 +570,20 @@ c=320 **7,603.5 → 9,406.1 tok/s(+23.7%)**;完整终版扫描 c=64 **4,999.1**,
 `bench/results/w1prime_leg{A_anchor,B_state,Final_A,G1_vres,E0,Ef}_*_5090.json`
 (完整逐 leg 台账,含每个胶水融合的独立贡献,见上方 finding 文档)。
 
-**TODO——位置维度压缩曲线,fp32 状态对 fp16 状态。** §2 的位置曲线(证明循环状态持续
-吸收上下文的证据)还没有在开启 `RWKV_STATE_FP16` 的条件下重新测过:3090 上的一次跑分
-正在落地这份数据,文件名将是
-`bench/results/uncheatable_positional_7.2b_fp16_state{32,16}_3090.json`。绘图函数
-(`bench/plots/make_benchmark_plots.py` 里的 `fig_f5_positional_compression_state_precision`)
-已经写好并接入了 manifest——它会检查这两个文件,缺一个就直接跳过不报错,所以这两个
-文件一旦落地,下次跑 `python bench/plots/make_benchmark_plots.py` 就会自动生成
-`docs/assets/plots/f5_positional_compression_state_precision.svg`,不需要再改代码。
-这张图和这里的嵌入是推迟,不是放弃。
+**位置维度压缩曲线——长上下文门(第四道门,PASS)。** 已在开关两种状态下重测 §2 的位置
+曲线(7.2B fp16,全量 UncheatableEval 语料 7,500 篇,RTX 3090,F0057):pooled bpb
+**0.5413279 对 0.5413279(Δ = −5.4e-8)**;所有有实际样本量的位置段上,逐段 Δ 全部落在
+同开关复跑噪声带(~1e-5 bits)内,符号交替、**无位置斜率**——误差不随序列位置累积。
+诚实边界:语料最长文档约 3.3k tokens(checkpoint 为 ctx8192 训练,全部评测位置都在
+训练分布内);再往后仪器没有数据。对照:w4a8 激活量化在同一把尺上的逐段税(F0055)
+比这大约 1,700 倍。
+
+![位置维度压缩曲线:fp32 对 fp16 循环状态](assets/plots/f5_positional_compression_state_precision.svg)
+
+*两种状态精度在每个位置段上画出同一条曲线——两条线重合到线宽以内。7.2B fp16,
+UncheatableEval 2026-04(15 语料,7,500 篇),位置至约 3.3k tokens。原始件:
+`bench/results/uncheatable_positional_7.2b_fp16_state{32,16}_3090.json`(另有两次同开关
+噪声复跑 `..._noiserep{1,2}.json`)。重新生成:`python bench/plots/make_benchmark_plots.py`。*
 
 ## 5. 服务吞吐(RWKV-7 1.5B,全程计时,64 进/256 出,并发扫描)
 

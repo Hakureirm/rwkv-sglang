@@ -1,0 +1,85 @@
+{
+  "model": "rwkv7-7.2b-fla",
+  "ctx_len": 4000,
+  "max_docs": 0,
+  "reset_token_id": 0,
+  "datasets": {
+    "ao3_english": {
+      "neg_log_prob_sum": 4927.107145434841,
+      "avg tokens": 2185.918,
+      "avg character count": 9041.522,
+      "avg bytes": 9213.662,
+      "sample_count": 500,
+      "total_nll_nats": 2463553.5727174208,
+      "total_bytes": 4606831,
+      "bpc": 0.786185450264615,
+      "bpb": 0.7714970491263324,
+      "compression_rate": 9.643713114079155
+    }
+  },
+  "overall": {
+    "mean_compression_rate": 9.643713114079155,
+    "pooled_compression_rate": 9.643713114079155,
+    "pooled_bpb": 0.7714970491263324,
+    "total_docs": 500,
+    "wall_time_s": 347.7750928401947
+  },
+  "position_curve": [
+    {
+      "bucket": "[0-64)",
+      "tokens": 32000,
+      "mean_neg_log2_p": 4.740827778680888
+    },
+    {
+      "bucket": "[64-128)",
+      "tokens": 32000,
+      "mean_neg_log2_p": 3.723210886218071
+    },
+    {
+      "bucket": "[128-256)",
+      "tokens": 63991,
+      "mean_neg_log2_p": 3.5009509312917806
+    },
+    {
+      "bucket": "[256-512)",
+      "tokens": 125158,
+      "mean_neg_log2_p": 3.3538894376562367
+    },
+    {
+      "bucket": "[512-1024)",
+      "tokens": 226960,
+      "mean_neg_log2_p": 3.2276418865914636
+    },
+    {
+      "bucket": "[1024-1536)",
+      "tokens": 194739,
+      "mean_neg_log2_p": 3.159934272888174
+    },
+    {
+      "bucket": "[1536-2048)",
+      "tokens": 167051,
+      "mean_neg_log2_p": 3.1135636964174447
+    },
+    {
+      "bucket": "[2048-2560)",
+      "tokens": 144219,
+      "mean_neg_log2_p": 3.056974046415012
+    },
+    {
+      "bucket": "[2560-3072)",
+      "tokens": 105472,
+      "mean_neg_log2_p": 3.094623331850059
+    },
+    {
+      "bucket": "[3072-3584)",
+      "tokens": 1369,
+      "mean_neg_log2_p": 3.0752488741338233
+    },
+    {
+      "bucket": "[3584+)",
+      "tokens": 0,
+      "mean_neg_log2_p": NaN
+    }
+  ],
+  "methodology": "uncheatable_eval (Jellyfish042) via sglang /generate input_token_logprobs"
+}

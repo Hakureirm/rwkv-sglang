@@ -125,6 +125,7 @@ MANIFEST = {
     ],
     "f4_math500_ladder": [
         "math500_avg64_5090main.json", "math500_avg64_w8a8_5090main.json",
+        "math500_avg64_1.5b_sym.json", "math500_avg64_1.5b_asym.json",
         "math500_avg64_7.2b_fp16.json", "math500_avg64_7.2b_fp16_stateon.json",
         "math500_avg64_7.2b_sym.json", "math500_avg64_7.2b_asym.json", "math500_avg64_7.2b_hybrid_ffnvk.json",
     ],
@@ -425,10 +426,10 @@ def fig_f4_math500_ladder(out_path):
     onepfive = {
         "fp16": math500_pct("math500_avg64_5090main.json"),
         "w8a8": math500_pct("math500_avg64_w8a8_5090main.json"),
-        # int4_gptq / int4_gptq_asym: documented in BENCHMARKS.md §2/§4 (F0043) as 14.98% / 21.99%
-        # but no raw JSON for those two 1.5B MATH500 avg@64 runs is landed under bench/results/
-        # (checked: not present, no add-then-delete git history either) -- omitted rather than
-        # hand-entered, flagged in-figure instead of silently dropped.
+        # 1.5B int4 raws recovered from the desktop box 2026-07-14 (F0043-era runs; values
+        # match BENCHMARKS.md §2/§4 exactly: 4794/32000 and 7036/32000).
+        "int4_gptq": math500_pct("math500_avg64_1.5b_sym.json"),
+        "int4_gptq_asym": math500_pct("math500_avg64_1.5b_asym.json"),
     }
     seven2b = {
         "fp16": math500_pct("math500_avg64_7.2b_fp16.json"),
@@ -437,7 +438,7 @@ def fig_f4_math500_ladder(out_path):
         "int4_gptq_asym": math500_pct("math500_avg64_7.2b_asym.json"),
         "hybrid": math500_pct("math500_avg64_7.2b_hybrid_ffnvk.json"),
     }
-    missing_1_5b = {"int4_gptq", "int4_gptq_asym"}
+    missing_1_5b = set()  # 1.5B int4 raws landed 2026-07-14
 
     n = len(slots)
     bar_w = 0.34
@@ -526,14 +527,22 @@ def fig_f5_positional_compression_state_precision(out_path):
     on = curve(needed[1])
 
     fig, ax = plt.subplots(figsize=(7.0, 5.0), dpi=DPI)
+    def _bucket_mid(name):
+        # "[lo-hi)" -> midpoint; trailing "+" bucket -> its lower edge
+        body = name.strip("[)")
+        if "-" in body:
+            lo, hi = body.rstrip("+").split("-")
+            return (int(lo) + int(hi)) / 2
+        return float(body.rstrip("+"))
+
     for d, role, label in ((off, "fp16", "fp32 state (default)"), (on, "fp16_state_fp16", "fp16 state (RWKV_STATE_FP16)")):
-        buckets = d["buckets"]
-        xs = [b["position"] for b in buckets]
-        ys = [b["bits_per_byte"] for b in buckets]
+        buckets = d["position_curve"]
+        xs = [_bucket_mid(b["bucket"]) for b in buckets]
+        ys = [b["mean_neg_log2_p"] for b in buckets]
         _plot_series(ax, list(zip(xs, ys)), role, label_override=label)
     ax.set_xscale("log", base=2)
-    ax.set_xlabel("token position", fontsize=9.5, color=INK_SECONDARY)
-    ax.set_ylabel("mean −log₂ p (bits/byte)", fontsize=9.5, color=INK_SECONDARY)
+    ax.set_xlabel("token position (bucket midpoint)", fontsize=9.5, color=INK_SECONDARY)
+    ax.set_ylabel("mean −log₂ p (bits/token)", fontsize=9.5, color=INK_SECONDARY)
     ax.set_title("Positional compression — 7.2B, fp32 vs fp16 recurrent state", fontsize=12, color=INK,
                  loc="left", pad=10)
     ax.grid(True, color=GRID, linewidth=0.8, zorder=0)

@@ -70,7 +70,19 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 # Position buckets for the compression-vs-position curve: [lo, hi)
-POS_BUCKETS = [(0, 64), (64, 128), (128, 256), (256, 512), (512, 1024), (1024, float("inf"))]
+# Buckets beyond 1024 subdivide the original single [1024,inf) catch-all into 512-token bins up
+# to 3584: this project's uncheatable corpus (Jellyfish042/UncheatableEval-2026-04, 15 categories)
+# tops out at ~3.1-3.4k tokens/doc (measured directly against both the 300-doc sample and the
+# full 7500-doc corpus -- see finding F0057), so continuing log-doubling past 1024
+# (1024-2048-4096-...) would dump roughly half of all scored tokens into one enormous,
+# low-resolution bin -- exactly the range a long-context state-error gate most needs to resolve.
+# The first five boundaries are unchanged from the original scheme, so old bench/results/*_curve
+# baselines remain bucket-for-bucket comparable on [0, 1024).
+POS_BUCKETS = [
+    (0, 64), (64, 128), (128, 256), (256, 512), (512, 1024),
+    (1024, 1536), (1536, 2048), (2048, 2560), (2560, 3072), (3072, 3584),
+    (3584, float("inf")),
+]
 
 
 def bucket_label(lo, hi):

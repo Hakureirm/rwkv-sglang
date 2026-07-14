@@ -645,16 +645,24 @@ c=128 **7,755.6**; internal step-time profiling put the same decode step at 39.2
 `bench/results/w1prime_leg{A_anchor,B_state,Final_A,G1_vres,E0,Ef}_*_5090.json` (full leg-by-leg
 ledger, including the individually-isolated glue fusions, in the finding doc above).
 
-**TODO — positional compression curve, fp32-state vs fp16-state.** §2's position curve
-(proof the recurrent state keeps absorbing context) has not yet been re-measured with
-`RWKV_STATE_FP16` on: a 3090 run is landing this data as
-`bench/results/uncheatable_positional_7.2b_fp16_state{32,16}_3090.json`. The plotting
-function (`fig_f5_positional_compression_state_precision` in
-`bench/plots/make_benchmark_plots.py`) is already written and wired into the manifest —
-it checks for both files and no-ops if either is missing, so it will start producing
-`docs/assets/plots/f5_positional_compression_state_precision.svg` the next time
-`python bench/plots/make_benchmark_plots.py` runs after they land, with no code changes
-needed. This figure and its embed here are deferred, not dropped.
+**Positional compression curve — the long-context gate (fourth gate, PASS).** Re-measured
+§2's position curve with the flag on vs off (7.2B fp16, full UncheatableEval corpus, 7,500
+docs, RTX 3090, F0057): pooled bpb **0.5413279 vs 0.5413279 (Δ = −5.4e-8)**; per-bucket
+Δ stays inside the same-flag rerun noise band (~1e-5 bits) at every bucket with real sample
+mass, with alternating sign and **no positional slope** — no measurable error accumulation
+over sequence position. Honest scope: the corpus's longest document is ~3.3k tokens (the
+checkpoint is ctx8192-trained, so all evaluated positions are in-distribution); beyond that
+the instrument has no data. For contrast, the w4a8 activation-quant tax measured on this
+same ruler (F0055) is ~1,700× larger per bucket.
+
+![Positional compression: fp32 vs fp16 recurrent state](assets/plots/f5_positional_compression_state_precision.svg)
+
+*Both state precisions trace the same curve at every position bucket — the two lines
+overlap to within line width. 7.2B fp16, UncheatableEval 2026-04 (15 corpora, 7,500 docs),
+positions to ~3.3k tokens. Raw:
+`bench/results/uncheatable_positional_7.2b_fp16_state{32,16}_3090.json` (+ two same-flag
+noise-replication runs, `..._noiserep{1,2}.json`). Regenerate:
+`python bench/plots/make_benchmark_plots.py`.*
 
 ## 5. Serving throughput (RWKV-7 1.5B, wall-clock, 64-in/256-out, concurrency sweep)
 
