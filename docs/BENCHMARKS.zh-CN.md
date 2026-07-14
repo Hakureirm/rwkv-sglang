@@ -248,9 +248,9 @@ int4-GPTQ 的速度(5090,§4b)和精度(3090,F0055 §0)就是一例。int8 w8a8/
 21.99%——都在上面正文和 F0043 里引用过)没有落地的原始 JSON,所以这两根柱子留空,标
 "no raw landed",不用正文数字回填。
 
-![精度-速度前沿,RWKV-7 7.2B](assets/plots/f3_accuracy_speed_frontier.svg)
+![精度-速度前沿,RWKV-7 7.2B](assets/plots/f3_accuracy_speed_frontier_zh.svg)
 
-![MATH500 avg@64,按精度与模型尺寸](assets/plots/f4_math500_ladder.svg)
+![MATH500 avg@64,按精度与模型尺寸](assets/plots/f4_math500_ladder_zh.svg)
 
 *协议:MATH500 avg@64(500 题 × 64 采样),速度轴为单流全程计时,另有说明的除外。
 原始件:`math500_avg64_{5090main,w8a8_5090main}.json`(1.5B)、
@@ -440,7 +440,7 @@ fp16 比 GPTQ 快 27%)——这台机器在两个尺寸上都撑不住 16 req/s(
 `RWKV_STATE_FP16`(W1')那条是 §4b/§5 报告的稀疏抽测点(1.5B 只有 1 个点、7.2B 有 3
 个点),不是完整扫描,所以画成不连线的独立标记,不暗示实际没测过的覆盖范围。
 
-![按尺寸分面的并发扫描(按精度),RTX 5090](assets/plots/f1_concurrency_5090.svg)
+![按尺寸分面的并发扫描(按精度),RTX 5090](assets/plots/f1_concurrency_5090_zh.svg)
 
 *协议:64 进/256 出,全程计时,cuda-graph 开。原始件:`bsz_sweep_{0.1b,1.5b,7.2b}_{fp16,w4gptq,w4rtn}_5090*.json`
 一族 + `bsz_sweep_fullstack_5090.json` + `bsz_sweep_w8a8v2_5090main.json`(§4b/§5)+
@@ -536,7 +536,7 @@ opt-in(§4b),不是推荐路径的数字。`bsz_sweep_7.2b_w4gptq_3090_cliff_sta
 已画出的断崖地图曲线复现在约 1.6% 以内(1,407.0 对 1,429.5 tok/s @c=64),再画一条
 几乎重复的线只会添乱。
 
-![按尺寸分面的并发扫描(按精度),RTX 3090,含 w4 断崖及其内核级修复](assets/plots/f2_concurrency_3090.svg)
+![按尺寸分面的并发扫描(按精度),RTX 3090,含 w4 断崖及其内核级修复](assets/plots/f2_concurrency_3090_zh.svg)
 
 *协议:64 进/256 出,全程计时,cuda-graph 开。原始件:`bsz_sweep_{1.5b,7.2b}_{fp16,w4gptq,w4rtn}_3090.json`
 + `bsz_sweep_7.2b_w4gptq_3090_cliffmap{,_fine}.json` + `..._cliff_stage1_w4a8.json`(F0055)。
@@ -578,7 +578,7 @@ c=320 **7,603.5 → 9,406.1 tok/s(+23.7%)**;完整终版扫描 c=64 **4,999.1**,
 训练分布内);再往后仪器没有数据。对照:w4a8 激活量化在同一把尺上的逐段税(F0055)
 比这大约 1,700 倍。
 
-![位置维度压缩曲线:fp32 对 fp16 循环状态](assets/plots/f5_positional_compression_state_precision.svg)
+![位置维度压缩曲线:fp32 对 fp16 循环状态](assets/plots/f5_positional_compression_state_precision_zh.svg)
 
 *两种状态精度在每个位置段上画出同一条曲线——两条线重合到线宽以内。7.2B fp16,
 UncheatableEval 2026-04(15 语料,7,500 篇),位置至约 3.3k tokens。原始件:

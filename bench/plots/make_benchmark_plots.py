@@ -9,12 +9,22 @@ drawn as its own series (documented at the call site, not silently dropped).
 If a raw a figure would need does not exist yet, the figure (or that one series)
 is skipped and printed as SKIPPED — never interpolated, never fabricated.
 
+Bilingual: every figure is emitted twice, once per LANGS entry. English keeps the
+historical filenames (f1_...svg); the zh-CN variant is written alongside it with a
+"_zh" suffix (f1_..._zh.svg). All human-visible strings (titles, axis labels,
+legend labels, annotations) are looked up from LABELS/ROLE_LABEL/SHORT_LABEL by an
+explicit lang key -- technical tokens (model names, fp16/w8a8/GPTQ, "c=64", units)
+are shared verbatim between languages. Geometry (figsize/dpi/subplot layout) is
+identical between languages; only text content differs.
+
 Usage:
   python bench/plots/make_benchmark_plots.py
 
 Determinism: fixed figsize/dpi, fixed matplotlib svg.hashsalt, no embedded dates,
 svg.fonttype=none (text stays text, no embedded font outlines). Run twice and
-diff the output directory to confirm byte-identical SVGs.
+diff the output directory to confirm byte-identical SVGs. All lookups below are
+keyed by explicit strings/lists (never by iterating a dict/set), so the en/zh
+parametrization cannot introduce dict-order nondeterminism.
 """
 import json
 import os
@@ -29,10 +39,10 @@ matplotlib.use("Agg")
 matplotlib.rcParams["svg.hashsalt"] = "rwkv-sglang-benchmark-plots"
 matplotlib.rcParams["svg.fonttype"] = "none"  # keep <text>, don't embed font outlines
 matplotlib.rcParams["font.family"] = "sans-serif"
-matplotlib.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial", "Helvetica", "sans-serif"]
 
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter, ScalarFormatter
+from matplotlib.ticker import FixedLocator, FuncFormatter, NullFormatter, NullLocator
+from matplotlib.transforms import blended_transform_factory
 
 SVG_METADATA = {"Date": None, "Creator": "rwkv-sglang bench/plots/make_benchmark_plots.py"}
 DPI = 100
@@ -41,6 +51,49 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 RESULTS = os.path.join(REPO_ROOT, "bench", "results")
 OUT_DIR = os.path.join(REPO_ROOT, "docs", "assets", "plots")
+
+# ---------------------------------------------------------------------------
+# Languages + fonts
+# ---------------------------------------------------------------------------
+# Explicit, ordered list (not a set) -- this drives every loop that touches
+# output naming, so iteration order is fixed regardless of dict/hash order.
+LANGS = ["en", "zh"]
+
+# CJK font handling: svg.fonttype="none" keeps <text> as literal characters, so
+# the *browser* picks the rendering font from this CSS font-family list -- it is
+# NOT limited to whatever matplotlib resolved locally at generation time. But
+# matplotlib DOES need to resolve a real local font to compute correct glyph
+# metrics (bbox/kerning) for layout math (legend sizing, tight_layout, text
+# anchoring); if it silently fell back to DejaVu Sans (no CJK glyphs) those
+# metrics would be wrong even though the SVG text itself renders fine elsewhere.
+#
+# Tested on this box (fm.findfont, see task notes) rather than assumed: PingFang
+# SC is NOT resolvable by matplotlib's font manager here -- it lives in a private
+# CoreText-only framework path, not the standard font directories a filesystem
+# scan sees -- even though real browsers on this same Mac CAN render it (they use
+# CoreText, not a directory scan). Confirmed locally resolvable instead: Hiragino
+# Sans GB and Heiti SC (both real system CJK sans fonts). So the stack below
+# lists the common cross-platform names FIRST (for browsers on Windows/Linux/other
+# Macs that do have them registered as regular fonts), then the two confirmed-
+# local fonts (so *this* machine's matplotlib falls through to a real CJK font
+# for its own measurements instead of DejaVu Sans), then DejaVu Sans as the last
+# resort so Latin/digits/punctuation always render even if every CJK name fails.
+FONT_STACK = {
+    "en": ["DejaVu Sans", "Arial", "Helvetica", "sans-serif"],
+    "zh": [
+        "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei",
+        "Hiragino Sans GB", "Heiti SC", "DejaVu Sans", "sans-serif",
+    ],
+}
+
+
+def _set_lang_fonts(lang):
+    matplotlib.rcParams["font.sans-serif"] = FONT_STACK[lang]
+
+
+def _suffix(lang):
+    return "" if lang == "en" else f"_{lang}"
+
 
 # ---------------------------------------------------------------------------
 # Palette — the dataviz skill's validated categorical instance (fixed hue
@@ -63,6 +116,10 @@ INK_MUTED = "#898781"
 GRID = "#e1e0d9"
 AXIS = "#c3c2b7"
 SURFACE = "#fcfcfb"
+ALERT = "#b3261e"  # distinct from HUE["red"] (=int4_gptq_asym's tier color) --
+                    # used only for alert/callout ink (the w4 cliff arrow), never
+                    # for a data series, so it can't be mistaken for a legend hue.
+NOISE_BAND = "#d8d6cc"  # neutral gray fill for the F5 delta-panel rerun-noise band
 
 ROLE_COLOR = {
     "fp16": HUE["blue"],
@@ -74,16 +131,166 @@ ROLE_COLOR = {
     "hybrid": HUE["magenta"],
     "w4a8_experimental": HUE["orange"],
 }
-ROLE_LABEL = {
-    "fp16": "fp16",
-    "fp16_state_fp16": "fp16 + RWKV_STATE_FP16 (W1')",
-    "int4_rtn": "int4 RTN",
-    "w8a8": "int8 w8a8",
-    "int4_gptq": "int4 GPTQ",
-    "int4_gptq_asym": "int4 GPTQ (asymmetric)",
-    "hybrid": "int4 GPTQ (hybrid ffn.v/ffn.k)",
-    "w4a8_experimental": "int4 GPTQ + w4a8-tc (experimental, opt-in)",
+
+# ---------------------------------------------------------------------------
+# LABELS — every human-visible string, keyed by an explicit id then by lang.
+# Technical tokens (model names, fp16/w8a8/GPTQ, "c=64", tok/s, F-numbers) are
+# NOT translated -- both entries hold the same literal string on purpose, so
+# there is exactly one place ("LABELS[key]") that owns each piece of copy.
+# ---------------------------------------------------------------------------
+LABELS = {
+    "concurrency": {"en": "concurrency", "zh": "并发数"},
+    "tok_s": {"en": "output tok/s", "zh": "输出 tok/s"},
+    "peak": {"en": "peak", "zh": "峰值"},
+    "faster_hint": {"en": "faster →", "zh": "更快 →"},
+    "accurate_hint": {"en": "↑ more accurate", "zh": "↑ 更准确"},
+
+    # F1
+    "f1_suptitle": {
+        "en": "Serving concurrency sweep by precision — RTX 5090 (64-in/256-out, wall-clock)",
+        "zh": "按精度分面的服务并发扫描 — RTX 5090(64 进/256 出,全程计时)",
+    },
+
+    # F2
+    "f2_suptitle": {
+        "en": "Serving concurrency sweep by precision — RTX 3090 (64-in/256-out, wall-clock)",
+        "zh": "按精度分面的服务并发扫描 — RTX 3090(64 进/256 出,全程计时)",
+    },
+    "f2_panel2_title": {
+        "en": "7.2B — the w4 M=64 cliff, and its kernel-level fix (F0055)",
+        "zh": "7.2B — w4 M=64 断崖及其内核级修复(F0055)",
+    },
+    "gptq_cliff_map_label": {
+        "en": "int4 GPTQ (w4a16, cliff map)",
+        "zh": "int4 GPTQ(w4a16,断崖地图)",
+    },
+    "cliff_callout": {
+        "en": "cliff: c={c1}→{c2}, {v1:,.0f}→{v2:,.0f} tok/s (-{pct:.0f}%)",
+        "zh": "断崖:c={c1}→{c2},{v1:,.0f}→{v2:,.0f} tok/s(-{pct:.0f}%)",
+    },
+
+    # F3
+    "f3_title": {
+        "en": "Accuracy vs. speed frontier — RWKV-7 7.2B",
+        "zh": "精度-速度前沿 — RWKV-7 7.2B",
+    },
+    "f3_xlabel": {
+        "en": "single-stream output tok/s (bsz1, unless noted)",
+        "zh": "单流输出 tok/s(bsz1,另有说明的除外)",
+    },
+    "math500_ylabel": {"en": "MATH500 avg@64 (%)", "zh": "MATH500 avg@64(%)"},
+    "f3_pt_fp16": {"en": "fp16", "zh": "fp16"},
+    "f3_pt_state": {"en": "fp16 + STATE_FP16 (W1')", "zh": "fp16 + STATE_FP16(W1')"},
+    "f3_pt_gptq": {"en": "int4 GPTQ (symmetric)", "zh": "int4 GPTQ(对称)"},
+    "f3_pt_w4a8": {
+        "en": "int4 GPTQ + w4a8-tc, capped (experimental)",
+        "zh": "int4 GPTQ + w4a8-tc,封顶(实验性)",
+    },
+    "f3_red_gate": {"en": "RED gate, opt-in only", "zh": "RED 门,仅 opt-in"},
+    # Caveat BODY only (the card-provenance disclosure) -- the tier name + measured
+    # values are prepended in code from the actual plotted point, so each point gets
+    # exactly ONE consolidated annotation (name + values + caveat) instead of two
+    # separately-positioned text blocks that can collide with each other.
+    "f3_note_fp16_state": {
+        "en": "speed: 5090 both · accuracy: fp16 from the 2026-07-09 3090 batch\n"
+              "(F0055 §0); state_fp16 is 5090 (F0056) — cards differ for fp16 only",
+        "zh": "速度:两者皆 5090 · 精度:fp16 来自 2026-07-09 的 3090 批次\n"
+              "(F0055 §0);state_fp16 为 5090(F0056)— 仅 fp16 一项跨卡",
+    },
+    "f3_note_gptq": {
+        "en": "speed: 5090 (§4b) · accuracy: 3090 (F0055 §0) — cards differ, shown explicitly",
+        "zh": "速度:5090(§4b)· 精度:3090(F0055 §0)— 跨卡,明确标出",
+    },
+    "f3_note_w4a8": {
+        "en": "NOT single-stream: 3090 peak-concurrency (c=128) · F0055 §6",
+        "zh": "不是单流:3090 峰值并发(c=128)· F0055 §6",
+    },
+    "f3_footnote": {
+        "en": "int8 w8a8/w8g64 omitted: no MATH500 avg@64 raw exists for 7.2B at this tier\n"
+              "(only compression-rate evidence, §2: +0.0041 bpb pooled). See F4 for the 1.5B w8a8 bar.",
+        "zh": "略过 int8 w8a8/w8g64:7.2B 在这一档没有落地的 MATH500 avg@64 原始件\n"
+              "(只有 §2 的压缩率证据:pooled +0.0041 bpb)。1.5B 的 w8a8 柱见 F4。",
+    },
+
+    # F4
+    "f4_title": {
+        "en": "MATH500 avg@64 by precision and model size",
+        "zh": "MATH500 avg@64,按精度与模型尺寸",
+    },
+    "no_raw_landed": {"en": "no raw\nlanded", "zh": "原始件\n未落地"},
+    "fp16_baseline": {"en": "fp16 baseline", "zh": "fp16 基线"},
+    "f4_footnote": {
+        "en": "1.5B int4-sym/asym (documented as 14.98%/21.99% in §2/F0043) have no landed raw — "
+              "omitted, not fabricated.\nMATH500 avg@64 bars mix RTX 5090 and RTX 3090 runs; this project's "
+              "own §2 cross-check found the ruler\nagrees within ±0.27pt across cards at matched "
+              "config, i.e. card-invariant within this protocol's noise.",
+        "zh": "1.5B int4-sym/asym(§2/F0043 中记录为 14.98%/21.99%)没有落地的原始件 — "
+              "留空,不回填。\nMATH500 avg@64 的柱子混合了 RTX 5090 与 RTX 3090 的跑数;本项目 §2 "
+              "自己的交叉核对发现\n这把尺在匹配配置下跨卡差异在 ±0.27pt 以内,即在这套协议的噪声"
+              "范围内卡间不变。",
+    },
+
+    # F5
+    "f5_title": {
+        "en": "Positional compression — 7.2B, fp32 vs fp16 recurrent state",
+        "zh": "位置维度压缩曲线 — 7.2B,fp32 对 fp16 循环状态",
+    },
+    "f5_pt_off": {"en": "fp32 state (default)", "zh": "fp32 状态(默认)"},
+    "f5_pt_on": {"en": "fp16 state (RWKV_STATE_FP16)", "zh": "fp16 状态(RWKV_STATE_FP16)"},
+    "f5_xlabel": {"en": "token position (bucket midpoint)", "zh": "token 位置(分桶中点)"},
+    # plain ASCII "-log2" rather than U+2212/U+2082 -- some CJK sans fonts (e.g. Hiragino
+    # Sans GB, verified via fontTools on this box) lack MINUS SIGN/SUBSCRIPT TWO glyphs;
+    # ASCII "-"/"2" render identically in meaning and are universally covered.
+    "f5_ylabel": {"en": "mean -log2 p (bits/token)", "zh": "平均 -log2 p(bits/token)"},
+    "f5_delta_title": {
+        "en": "per-bucket Δ (fp16 state - fp32 state)",
+        "zh": "逐段 Δ(fp16 状态 - fp32 状态)",
+    },
+    "f5_delta_ylabel": {"en": "Δ (B-A), bits/token", "zh": "Δ(B-A),bits/token"},
+    "f5_noise_band": {"en": "same-flag rerun noise", "zh": "同开关复跑噪声"},
 }
+
+
+def T(key, lang):
+    return LABELS[key][lang]
+
+
+# Full legend labels, per role.
+ROLE_LABEL = {
+    "fp16": {"en": "fp16", "zh": "fp16"},
+    "fp16_state_fp16": {
+        "en": "fp16 + RWKV_STATE_FP16 (W1')", "zh": "fp16 + RWKV_STATE_FP16 (W1')",
+    },
+    "int4_rtn": {"en": "int4 RTN", "zh": "int4 RTN"},
+    "w8a8": {"en": "int8 w8a8", "zh": "int8 w8a8"},
+    "int4_gptq": {"en": "int4 GPTQ", "zh": "int4 GPTQ"},
+    "int4_gptq_asym": {"en": "int4 GPTQ (asymmetric)", "zh": "int4 GPTQ(非对称)"},
+    "hybrid": {"en": "int4 GPTQ (hybrid ffn.v/ffn.k)", "zh": "int4 GPTQ(混合 ffn.v/ffn.k)"},
+    "w4a8_experimental": {
+        "en": "int4 GPTQ + w4a8-tc (experimental, opt-in)",
+        "zh": "int4 GPTQ + w4a8-tc(实验性,opt-in)",
+    },
+}
+
+# Compact end-of-line tags (Part 2.2 direct labels) -- short by design so they
+# fit past the right edge of a 3-panel figure without adding a second legend.
+SHORT_LABEL = {
+    "fp16": {"en": "fp16", "zh": "fp16"},
+    "fp16_state_fp16": {"en": "+STATE_FP16", "zh": "+STATE_FP16"},
+    "int4_rtn": {"en": "RTN", "zh": "RTN"},
+    "w8a8": {"en": "w8a8", "zh": "w8a8"},
+    "int4_gptq": {"en": "GPTQ", "zh": "GPTQ"},
+    "w4a8_experimental": {"en": "w4a8-tc", "zh": "w4a8-tc"},
+}
+
+
+def role_label(role, lang):
+    return ROLE_LABEL[role][lang]
+
+
+def short_label(role, lang):
+    return SHORT_LABEL[role][lang]
+
 
 plt.rcParams["axes.edgecolor"] = AXIS
 plt.rcParams["axes.linewidth"] = 1.0
@@ -189,35 +396,44 @@ def sweep_peak(rows):
 # Shared chart chrome
 # ---------------------------------------------------------------------------
 _INT_FMT = FuncFormatter(lambda x, pos: f"{x:,.0f}")
+CONCURRENCY_TICKS = [1, 32, 64, 128, 256, 384, 512]  # the actual measured points,
+                                                       # not a generic power-of-2 comb
 
 
-def _style_ax(ax, title, ylabel, logx=True):
-    ax.set_title(title, fontsize=11, color=INK, pad=8, loc="left")
-    ax.set_xlabel("concurrency", fontsize=9.5, color=INK_SECONDARY)
-    ax.set_ylabel(ylabel, fontsize=9.5, color=INK_SECONDARY)
+def _style_ax(ax, title, lang, logx=True, ylabel_key="tok_s"):
+    ax.set_title(title, fontsize=13, color=INK, pad=9, loc="left")
+    ax.set_xlabel(T("concurrency", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.set_ylabel(T(ylabel_key, lang), fontsize=11.5, color=INK_SECONDARY)
     if logx:
         ax.set_xscale("log", base=2)
-        ax.xaxis.set_major_locator(LogLocator(base=2))
+        ax.xaxis.set_major_locator(FixedLocator(CONCURRENCY_TICKS))
         ax.xaxis.set_major_formatter(_INT_FMT)  # plain "64" not "64.0"/"6×10^1"
+        ax.xaxis.set_minor_locator(NullLocator())
         ax.xaxis.set_minor_formatter(NullFormatter())
+        # 256/384/512 sit close together on a log2 scale; a small rotation keeps
+        # all 7 curated ticks legible without crowding into each other.
+        for lbl in ax.get_xticklabels():
+            lbl.set_rotation(30)
+            lbl.set_ha("right")
+            lbl.set_rotation_mode("anchor")
     ax.yaxis.set_major_formatter(_INT_FMT)
     ax.grid(True, which="major", axis="both", color=GRID, linewidth=0.8, zorder=0)
     for spine in ("top", "right"):
         ax.spines[spine].set_visible(False)
     ax.spines["left"].set_color(AXIS)
     ax.spines["bottom"].set_color(AXIS)
-    ax.tick_params(labelsize=8.5)
+    ax.tick_params(labelsize=10.5)
     ax.set_facecolor(SURFACE)
 
 
-def _plot_series(ax, rows, role, linestyle="-", hollow=False, zorder=3, label_override=None,
+def _plot_series(ax, rows, role, lang, linestyle="-", hollow=False, zorder=3, label_override=None,
                   connect=True):
     if not rows:
         return
     xs = [r[0] for r in rows]
     ys = [r[1] for r in rows]
     color = ROLE_COLOR[role]
-    label = label_override or ROLE_LABEL[role]
+    label = label_override or role_label(role, lang)
     if hollow:
         ax.plot(xs, ys, linestyle=linestyle, linewidth=2, color=color, zorder=zorder,
                  marker="D", markersize=6.5, markerfacecolor=SURFACE, markeredgecolor=color,
@@ -243,46 +459,196 @@ def _dedupe_legend(handles_labels_list, ax, ncol=3, loc="upper center", bbox=(0.
         for hh, ll in zip(h, l):
             seen.setdefault(ll, hh)
     ax.legend(list(seen.values()), list(seen.keys()), loc=loc, bbox_to_anchor=bbox, ncol=ncol,
-               frameon=False, fontsize=8.5, handlelength=2.2)
+               frameon=False, fontsize=10, handlelength=2.2)
+
+
+# ---------------------------------------------------------------------------
+# NEW: direct end-labels + peak markers (Part 2.2) and a cliff callout (2.3)
+# ---------------------------------------------------------------------------
+def _declutter(values, min_gap):
+    """Nudge a list of scalar positions apart so sorted neighbors are >= min_gap
+    apart, re-centered on the group's original mean. Deterministic: iterates an
+    explicit index range and sorts on numeric value only (stable, no ties on
+    real float data), so the result is a pure function of `values`.
+    """
+    n = len(values)
+    if n <= 1:
+        return list(values)
+    order = sorted(range(n), key=lambda i: values[i])
+    sorted_vals = [values[i] for i in order]
+    for i in range(1, n):
+        if sorted_vals[i] - sorted_vals[i - 1] < min_gap:
+            sorted_vals[i] = sorted_vals[i - 1] + min_gap
+    shift = (sum(values) - sum(sorted_vals)) / n
+    sorted_vals = [v + shift for v in sorted_vals]
+    out = [0.0] * n
+    for rank, i in enumerate(order):
+        out[i] = sorted_vals[rank]
+    return out
+
+
+def _end_labels(ax, entries, fontsize=8.8, x_axes=1.018):
+    """entries: explicit ordered list of (x, y, color, text) where (x, y) is each
+    line's own last data point. Labels are anchored at a FIXED axes-fraction x
+    just past the right spine (independent of the data's xlim) via a blended
+    transform, so they never depend on how far the data happens to extend --
+    only their y position (from the real data value) is decluttered, in points,
+    so close-valued lines get readable tags instead of overlapping.
+    """
+    if not entries:
+        return
+    fig = ax.figure
+    px_per_pt = fig.dpi / 72.0
+    trans = blended_transform_factory(ax.transAxes, ax.transData)
+    y_pt = [ax.transData.transform((0, y))[1] / px_per_pt for _, y, _, _ in entries]
+    min_gap_pt = fontsize * 1.7
+    y_pt_adj = _declutter(y_pt, min_gap_pt)
+    for (x, y, color, text), y0_pt, y1_pt in zip(entries, y_pt, y_pt_adj):
+        ax.annotate(text, xy=(x_axes, y), xycoords=trans, xytext=(3, y1_pt - y0_pt),
+                    textcoords="offset points", fontsize=fontsize, color=color, va="center",
+                    ha="left", zorder=6, annotation_clip=False, fontweight="bold")
+
+
+def _mark_peak(ax, rows, color, fmt_val):
+    """Small ringed dot + value at a curve's peak -- only when the peak is NOT
+    the last point (a peak at the endpoint is already covered by the merged
+    end-label+value tag, so a second marker there would just be visual noise).
+    """
+    if not rows:
+        return
+    peak = sweep_peak(rows)
+    if peak == rows[-1]:
+        return
+    px, py = peak
+    ax.scatter([px], [py], s=50, facecolors=color, edgecolors=SURFACE, linewidths=1.2, zorder=7)
+    ax.annotate(fmt_val(py), (px, py), xytext=(0, 9), textcoords="offset points", fontsize=8.4,
+                color=color, ha="center", va="bottom", zorder=7, fontweight="bold")
+
+
+def _extend_xlim_for_labels(ax, factor=1.06):
+    """Small log-scale right-margin so the last marker isn't flush against the
+    spine. End-labels themselves no longer need this margin (they anchor at a
+    fixed axes-fraction x via _end_labels' blended transform), so this is just
+    breathing room for the marker/line, not label text -- hence the small factor.
+    """
+    lo, hi = ax.get_xlim()
+    ax.set_xlim(lo, hi * factor)
+
+
+def _cliff_callout(ax, c1, v1, c2, v2, lang):
+    """Arrowed callout at a sharp concurrency-cliff edge -- computed straight from
+    the two measured points passed in (never a copied/hand-entered number)."""
+    pct = (v1 - v2) / v1 * 100.0
+    text = T("cliff_callout", lang).format(c1=c1, c2=c2, v1=v1, v2=v2, pct=pct)
+    mid_x = (c1 * c2) ** 0.5  # geometric mean -- visually centered on a log-x axis
+    mid_y = v1 - (v1 - v2) * 0.28
+    ax.annotate(text, xy=(c2, v2), xycoords="data", xytext=(mid_x * 0.62, mid_y * 1.34),
+                textcoords="data", fontsize=9, color=ALERT, fontweight="bold", ha="center",
+                zorder=9, arrowprops=dict(arrowstyle="-|>", color=ALERT, lw=1.7,
+                                           connectionstyle="arc3,rad=-0.18",
+                                           shrinkA=2, shrinkB=4))
 
 
 # ---------------------------------------------------------------------------
 # F1 -- per-size concurrency curves, RTX 5090
 # ---------------------------------------------------------------------------
-def fig_f1_concurrency_5090(out_path):
-    fig, axes = plt.subplots(1, 3, figsize=(15.2, 5.3), dpi=DPI)
+def fig_f1_concurrency_5090(out_path, lang):
+    fig, axes = plt.subplots(1, 3, figsize=(16.4, 5.8), dpi=DPI)
+
+    def tag(role, val):
+        return f"{short_label(role, lang)} {val:,.0f}"
+
+    # Two passes. Pass 1 plots data and locks in axis scale/limits/titles for
+    # every panel, then the figure gets its suptitle+legend and fig.tight_layout
+    # runs ONCE for the whole figure. Only THEN (pass 2) do we compute the
+    # end-label declutter math: it reads ax.transData.transform(...) to turn
+    # data points into pixel positions, and that transform is only final AFTER
+    # tight_layout has resized/repositioned the axes. Doing this in one pass
+    # (declutter math right after each panel's own plotting) silently used the
+    # PRE-tight_layout transform -- self-consistent at the time, but wrong by
+    # render time, so labels for close-valued lines ended up overlapping.
+    panel_end_entries = []  # [(ax, [(x,y,color,text), ...]), ...]
 
     # -- 0.1B: fp16 / GPTQ / RTN, full 8-point sweeps --
     ax = axes[0]
-    _plot_series(ax, load_rows("bsz_sweep_0.1b_fp16_5090.json"), "fp16")
-    _plot_series(ax, load_rows("bsz_sweep_0.1b_w4gptq_5090.json"), "int4_gptq")
-    _plot_series(ax, load_rows("bsz_sweep_0.1b_w4rtn_5090.json"), "int4_rtn")
-    _style_ax(ax, "0.1B", "output tok/s")
+    series = [
+        (load_rows("bsz_sweep_0.1b_fp16_5090.json"), "fp16"),
+        (load_rows("bsz_sweep_0.1b_w4gptq_5090.json"), "int4_gptq"),
+        (load_rows("bsz_sweep_0.1b_w4rtn_5090.json"), "int4_rtn"),
+    ]
+    end_entries = []
+    for rows, role in series:
+        _plot_series(ax, rows, role, lang)
+        _mark_peak(ax, rows, ROLE_COLOR[role], lambda v: f"{v:,.0f}")
+        if rows:
+            x, y = rows[-1]
+            end_entries.append((x, y, ROLE_COLOR[role], tag(role, y)))
+    # style_ax MUST run before extend_xlim: it sets the log-2 x-scale, and
+    # extending/reading xlim while the axis is still linear (the matplotlib
+    # default before set_xscale runs) computes nonsense once log scale applies.
+    _style_ax(ax, "0.1B", lang)
+    _extend_xlim_for_labels(ax)
+    panel_end_entries.append((ax, end_entries))
 
     # -- 1.5B: fp16 full-stack (8pt) + STATE_FP16 W1' bsz1-only point + int4 (3pt) + w8a8 (8pt) --
     ax = axes[1]
-    _plot_series(ax, load_rows("bsz_sweep_fullstack_5090.json"), "fp16")
-    _plot_series(ax, load_rows("w1prime_legEf_1.5b_5090.json"), "fp16_state_fp16", connect=False)
-    _plot_series(ax, load_rows("bsz_sweep_1.5b_w4gptq_5090.json"), "int4_gptq")
-    _plot_series(ax, load_rows("bsz_sweep_1.5b_w4rtn_5090.json"), "int4_rtn")
-    _plot_series(ax, load_rows("bsz_sweep_w8a8v2_5090main.json"), "w8a8")
-    _style_ax(ax, "1.5B", "output tok/s")
+    series = [
+        (load_rows("bsz_sweep_fullstack_5090.json"), "fp16", True),
+        (load_rows("w1prime_legEf_1.5b_5090.json"), "fp16_state_fp16", False),
+        (load_rows("bsz_sweep_1.5b_w4gptq_5090.json"), "int4_gptq", True),
+        (load_rows("bsz_sweep_1.5b_w4rtn_5090.json"), "int4_rtn", True),
+        (load_rows("bsz_sweep_w8a8v2_5090main.json"), "w8a8", True),
+    ]
+    end_entries = []
+    for rows, role, connect in series:
+        _plot_series(ax, rows, role, lang, connect=connect)
+        if connect:
+            _mark_peak(ax, rows, ROLE_COLOR[role], lambda v: f"{v:,.0f}")
+        if rows:
+            x, y = rows[-1]
+            end_entries.append((x, y, ROLE_COLOR[role], tag(role, y)))
+    _style_ax(ax, "1.5B", lang)
+    _extend_xlim_for_labels(ax)
+    panel_end_entries.append((ax, end_entries))
 
     # -- 7.2B: fp16 (F0047-corrected, 11pt) + STATE_FP16 W1' (3pt) + int4 (merged) + w8a8 (merged) --
     ax = axes[2]
-    _plot_series(ax, load_rows("72b/sweep_72b_fp16_v3_5090.json"), "fp16")
-    _plot_series(ax, load_rows("w1prime_legFinal_B_7.2b_5090.json"), "fp16_state_fp16", connect=False)
     gptq_72b = merge_rows(["bsz_sweep_7.2b_w4gptq_5090.json", "bsz_sweep_7.2b_w4gptq_5090_ext.json"])
-    _plot_series(ax, gptq_72b, "int4_gptq")
-    _plot_series(ax, load_rows("bsz_sweep_7.2b_w4rtn_5090.json"), "int4_rtn")
     w8a8_72b = merge_rows(["72b/sweep_72b_w8a8_ceil.json", "72b/sweep_72b_w8a8_max.json", "72b/sweep_72b_w8a8.json"])
-    _plot_series(ax, w8a8_72b, "w8a8")
-    _style_ax(ax, "7.2B", "output tok/s")
+    series = [
+        (load_rows("72b/sweep_72b_fp16_v3_5090.json"), "fp16", True),
+        (load_rows("w1prime_legFinal_B_7.2b_5090.json"), "fp16_state_fp16", False),
+        (gptq_72b, "int4_gptq", True),
+        (load_rows("bsz_sweep_7.2b_w4rtn_5090.json"), "int4_rtn", True),
+        (w8a8_72b, "w8a8", True),
+    ]
+    end_entries = []
+    for rows, role, connect in series:
+        _plot_series(ax, rows, role, lang, connect=connect)
+        if connect:
+            _mark_peak(ax, rows, ROLE_COLOR[role], lambda v: f"{v:,.0f}")
+        if rows:
+            x, y = rows[-1]
+            end_entries.append((x, y, ROLE_COLOR[role], tag(role, y)))
+    _style_ax(ax, "7.2B", lang)
+    _extend_xlim_for_labels(ax, factor=1.08)
+    panel_end_entries.append((ax, end_entries))
 
-    _dedupe_legend(axes, axes[1], ncol=5, loc="upper center", bbox=(0.5, -0.16))
-    fig.suptitle("Serving concurrency sweep by precision — RTX 5090 (64-in/256-out, wall-clock)",
-                 fontsize=12.5, color=INK, x=0.02, ha="left", y=0.99)
-    fig.tight_layout(rect=(0, 0.08, 1, 0.90))
+    _dedupe_legend(axes, axes[1], ncol=5, loc="upper center", bbox=(0.5, -0.18))
+    fig.suptitle(T("f1_suptitle", lang), fontsize=14.5, color=INK, x=0.01, ha="left", y=0.995)
+    # right=0.91 (not 1.0): the rightmost panel's end-labels are drawn past its own
+    # axes at a fixed axes-fraction x (see _end_labels) with annotation_clip=False,
+    # so they are NOT constrained to the axes box -- only to the figure canvas. With
+    # no reserved right margin here they got silently cut off by the SVG viewBox for
+    # exactly the last panel (the only one with no neighboring panel's white space to
+    # bleed into). Confirmed empirically: longest end-label ("+STATE_FP16 7,087")
+    # needed ~6.8% of the figure width beyond the last axes; 9% leaves headroom.
+    fig.tight_layout(rect=(0, 0.09, 0.91, 0.90))
+    fig.canvas.draw()  # finalize axes transforms before any pixel-space label math
+
+    for ax_, entries in panel_end_entries:
+        _end_labels(ax_, entries)
+
     _source_note(fig)
     fig.savefig(out_path, metadata=SVG_METADATA)
     plt.close(fig)
@@ -291,34 +657,89 @@ def fig_f1_concurrency_5090(out_path):
 # ---------------------------------------------------------------------------
 # F2 -- per-size concurrency curves, RTX 3090 (incl. the w4 cliff)
 # ---------------------------------------------------------------------------
-def fig_f2_concurrency_3090(out_path):
-    fig, axes = plt.subplots(1, 2, figsize=(11.4, 5.5), dpi=DPI)
+def fig_f2_concurrency_3090(out_path, lang):
+    fig, axes = plt.subplots(1, 2, figsize=(12.6, 6.0), dpi=DPI)
+
+    def tag(role, val, short=None):
+        return f"{short or short_label(role, lang)} {val:,.0f}"
+
+    # Two passes -- see the matching comment in fig_f1_concurrency_5090: end-label
+    # declutter math needs the FINAL (post-tight_layout) transform, so it's
+    # deferred to a second pass after the whole figure's layout is locked in.
+    panel_end_entries = []
 
     # -- 1.5B: fp16 / GPTQ / RTN, matched §4b matrix session, 6pt each --
     ax = axes[0]
-    _plot_series(ax, load_rows("bsz_sweep_1.5b_fp16_3090.json"), "fp16")
-    _plot_series(ax, load_rows("bsz_sweep_1.5b_w4gptq_3090.json"), "int4_gptq")
-    _plot_series(ax, load_rows("bsz_sweep_1.5b_w4rtn_3090.json"), "int4_rtn")
-    _style_ax(ax, "1.5B", "output tok/s")
+    series = [
+        (load_rows("bsz_sweep_1.5b_fp16_3090.json"), "fp16"),
+        (load_rows("bsz_sweep_1.5b_w4gptq_3090.json"), "int4_gptq"),
+        (load_rows("bsz_sweep_1.5b_w4rtn_3090.json"), "int4_rtn"),
+    ]
+    end_entries = []
+    for rows, role in series:
+        _plot_series(ax, rows, role, lang)
+        _mark_peak(ax, rows, ROLE_COLOR[role], lambda v: f"{v:,.0f}")
+        if rows:
+            x, y = rows[-1]
+            end_entries.append((x, y, ROLE_COLOR[role], tag(role, y)))
+    _style_ax(ax, "1.5B", lang)
+    _extend_xlim_for_labels(ax)
+    panel_end_entries.append((ax, end_entries))
 
     # -- 7.2B: fp16 / RTN (3pt matrix) + int4-GPTQ cliff composite + w4a8-tc experimental --
     ax = axes[1]
-    _plot_series(ax, load_rows("bsz_sweep_7.2b_fp16_3090.json"), "fp16")
-    _plot_series(ax, load_rows("bsz_sweep_7.2b_w4rtn_3090.json"), "int4_rtn")
+    fp16_rows = load_rows("bsz_sweep_7.2b_fp16_3090.json")
+    rtn_rows = load_rows("bsz_sweep_7.2b_w4rtn_3090.json")
     gptq_cliff = merge_rows([
         "bsz_sweep_7.2b_w4gptq_3090.json",           # c=1,32 (+128, superseded by cliffmap below)
         "bsz_sweep_7.2b_w4gptq_3090_cliffmap.json",  # c=48,64,80,96,112,128
         "bsz_sweep_7.2b_w4gptq_3090_cliffmap_fine.json",  # c=66,72,76
     ])
-    _plot_series(ax, gptq_cliff, "int4_gptq", label_override="int4 GPTQ (w4a16, cliff map)")
     w4a8_exp = load_rows("bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_w4a8.json")
-    _plot_series(ax, w4a8_exp, "w4a8_experimental", linestyle="--", hollow=True)
-    _style_ax(ax, "7.2B — the w4 M=64 cliff, and its kernel-level fix (F0055)", "output tok/s")
 
-    _dedupe_legend(axes, axes[1], ncol=3, loc="upper center", bbox=(0.5, -0.16))
-    fig.suptitle("Serving concurrency sweep by precision — RTX 3090 (64-in/256-out, wall-clock)",
-                 fontsize=12.5, color=INK, x=0.02, ha="left", y=0.99)
-    fig.tight_layout(rect=(0, 0.09, 1, 0.90))
+    _plot_series(ax, fp16_rows, "fp16", lang)
+    _plot_series(ax, rtn_rows, "int4_rtn", lang)
+    _plot_series(ax, gptq_cliff, "int4_gptq", lang, label_override=T("gptq_cliff_map_label", lang))
+    _plot_series(ax, w4a8_exp, "w4a8_experimental", lang, linestyle="--", hollow=True)
+
+    _mark_peak(ax, fp16_rows, ROLE_COLOR["fp16"], lambda v: f"{v:,.0f}")
+    _mark_peak(ax, rtn_rows, ROLE_COLOR["int4_rtn"], lambda v: f"{v:,.0f}")
+    # gptq_cliff's peak IS the pre-cliff point (c=64) -- that's the headline of this
+    # panel, called out explicitly below rather than with a generic peak dot.
+    _mark_peak(ax, w4a8_exp, ROLE_COLOR["w4a8_experimental"], lambda v: f"{v:,.0f}")
+
+    _style_ax(ax, T("f2_panel2_title", lang), lang)
+
+    end_entries = []
+    for rows, role in ((fp16_rows, "fp16"), (rtn_rows, "int4_rtn")):
+        x, y = rows[-1]
+        end_entries.append((x, y, ROLE_COLOR[role], tag(role, y)))
+    gx, gy = gptq_cliff[-1]
+    end_entries.append((gx, gy, ROLE_COLOR["int4_gptq"], tag("int4_gptq", gy, short="GPTQ")))
+    wx, wy = w4a8_exp[-1]
+    end_entries.append((wx, wy, ROLE_COLOR["w4a8_experimental"], tag("w4a8_experimental", wy)))
+    _extend_xlim_for_labels(ax, factor=1.1)
+    panel_end_entries.append((ax, end_entries))
+
+    # the cliff edge -- the actual measured c=64 -> c=66 pair (F0055's headline number).
+    # Expressed entirely in "data" xy/xytext coords (not "offset points"), so unlike
+    # the end-label declutter math it is immune to the pre/post-tight_layout timing
+    # issue: data coordinates don't depend on the pixel transform at all.
+    c1, v1 = 64, dict(gptq_cliff)[64]
+    c2, v2 = 66, dict(gptq_cliff)[66]
+    _cliff_callout(ax, c1, v1, c2, v2, lang)
+
+    _dedupe_legend(axes, axes[1], ncol=2, loc="upper center", bbox=(0.5, -0.20))
+    fig.suptitle(T("f2_suptitle", lang), fontsize=14.5, color=INK, x=0.01, ha="left", y=0.995)
+    # right=0.89 -- see the matching comment in fig_f1_concurrency_5090: reserves
+    # figure-level margin for the rightmost panel's end-labels (annotation_clip=False
+    # means they're bounded by the canvas, not the axes box).
+    fig.tight_layout(rect=(0, 0.11, 0.89, 0.90))
+    fig.canvas.draw()  # finalize axes transforms before any pixel-space label math
+
+    for ax_, entries in panel_end_entries:
+        _end_labels(ax_, entries)
+
     _source_note(fig)
     fig.savefig(out_path, metadata=SVG_METADATA)
     plt.close(fig)
@@ -327,85 +748,114 @@ def fig_f2_concurrency_3090(out_path):
 # ---------------------------------------------------------------------------
 # F3 -- accuracy-vs-speed frontier, 7.2B
 # ---------------------------------------------------------------------------
-def fig_f3_accuracy_speed_frontier(out_path):
-    fig, ax = plt.subplots(figsize=(7.6, 6.6), dpi=DPI)
+def fig_f3_accuracy_speed_frontier(out_path, lang):
+    fig, ax = plt.subplots(figsize=(9.6, 8.6), dpi=DPI)
 
     points = []  # (x, y, role, label, hollow)
 
     x = sweep_value_at("72b/sweep_72b_fp16_v3_5090.json", 1)
     y, c, n = math500_pct("math500_avg64_7.2b_fp16.json")
-    points.append((x, y, "fp16", "fp16", False))
+    points.append((x, y, "fp16", T("f3_pt_fp16", lang), False))
 
     x = sweep_value_at("w1prime_legFinal_B_7.2b_5090.json", 1)
     y, c, n = math500_pct("math500_avg64_7.2b_fp16_stateon.json")
-    points.append((x, y, "fp16_state_fp16", "fp16 + STATE_FP16 (W1')", False))
+    points.append((x, y, "fp16_state_fp16", T("f3_pt_state", lang), False))
 
     x = sweep_value_at("bsz_sweep_7.2b_w4gptq_5090.json", 1)
     y, c, n = math500_pct("math500_avg64_7.2b_sym.json")
-    points.append((x, y, "int4_gptq", "int4 GPTQ (symmetric)", False))
+    points.append((x, y, "int4_gptq", T("f3_pt_gptq", lang), False))
 
     gptq_cliff_w4a8 = load_rows("bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_w4a8.json")
     x = sweep_peak(gptq_cliff_w4a8)[1]
     y, c, n = math500_pct("math500_avg64_7.2b_w4gptq_w4a8capped_3090.json")
-    points.append((x, y, "w4a8_experimental", "int4 GPTQ + w4a8-tc, capped (experimental)", True))
+    points.append((x, y, "w4a8_experimental", T("f3_pt_w4a8", lang), True))
+
+    # dashed lineage connector: the experimental w4a8-tc point is int4 GPTQ (symmetric)
+    # plus an activation-quant kernel bolted on -- same dashed/hollow convention F2
+    # already uses for this role, making the lineage visible instead of implied.
+    gptq_pt, w4a8_pt_xy = points[2], points[3]
+    ax.plot([gptq_pt[0], w4a8_pt_xy[0]], [gptq_pt[1], w4a8_pt_xy[1]], linestyle="--",
+            linewidth=1.3, color=ROLE_COLOR["w4a8_experimental"], alpha=0.55, zorder=2)
 
     for x, y, role, label, hollow in points:
         color = ROLE_COLOR[role]
         if hollow:
-            ax.scatter([x], [y], s=170, facecolors=SURFACE, edgecolors=color, linewidths=2.2,
-                       marker="D", zorder=4, label=label)
+            ax.scatter([x], [y], s=190, facecolors=SURFACE, edgecolors=color, linewidths=2.4,
+                       marker="D", zorder=5, label=label)
         else:
-            ax.scatter([x], [y], s=150, facecolors=color, edgecolors=SURFACE, linewidths=1.2,
-                       marker="o", zorder=4, label=label)
+            ax.scatter([x], [y], s=160, facecolors=color, edgecolors=SURFACE, linewidths=1.3,
+                       marker="o", zorder=5, label=label)
 
     xmax = max(p[0] for p in points)
-    ax.set_xlim(-40, xmax * 1.12)
+    ax.set_xlim(-40, xmax * 1.16)
     ymin = min(p[1] for p in points)
     ymax = max(p[1] for p in points)
-    pad = (ymax - ymin) * 0.45 + 2
-    ax.set_ylim(ymin - pad, ymax + pad)
+    # Asymmetric padding: extra room ABOVE (the fp16/+STATE_FP16 cluster is the
+    # topmost point AND carries the longest consolidated label -- name + values +
+    # a 2-line card-provenance caveat -- so it needs real clearance from the title).
+    span = ymax - ymin
+    ax.set_ylim(ymin - (span * 0.55 + 2), ymax + (span * 0.95 + 3))
 
-    # fp16 and +STATE_FP16 sit almost on top of each other at this scale -- a single
-    # shared leader note beats two overlapping per-point callouts (dataviz: don't stack
-    # colliding end-labels).
-    fp16_pt, state_pt = points[0], points[1]
-    mid_x = (fp16_pt[0] + state_pt[0]) / 2
-    mid_y = (fp16_pt[1] + state_pt[1]) / 2
-    ax.annotate("fp16 / +STATE_FP16\nspeed: 5090 both. accuracy: fp16 from the\n2026-07-09 3090 batch (F0055 §0); state_fp16\nis 5090 (F0056) — cards differ for fp16 only",
-                (mid_x, mid_y), textcoords="offset points", xytext=(14, 26), fontsize=7.2,
-                color=INK_MUTED, zorder=5, linespacing=1.4,
+    fp16_pt, state_pt, gptq_pt, w4a8_pt = points
+
+    # -- one consolidated annotation per point/cluster: tier name + the two
+    # measured values (Part 2.4) + the card-provenance caveat, as ONE text block
+    # instead of two independently-positioned ones (which collided with each
+    # other and with the title in an earlier version of this figure).
+    fp16_state_label = (
+        f"{T('f3_pt_fp16', lang)} / +STATE_FP16\n"
+        f"{fp16_pt[0]:,.0f} tok/s · {fp16_pt[1]:.2f}% / {state_pt[1]:.2f}%\n"
+        f"{T('f3_note_fp16_state', lang)}"
+    )
+    ax.annotate(fp16_state_label, (fp16_pt[0], fp16_pt[1]), textcoords="offset points",
+                xytext=(20, 34), fontsize=8.2, color=INK, zorder=6, ha="left", linespacing=1.5,
                 arrowprops=dict(arrowstyle="-", color=INK_MUTED, lw=0.7))
 
-    int4_pt = points[2]
-    ax.annotate("int4 GPTQ (symmetric)\nspeed: 5090 (§4b) · accuracy: 3090 (F0055 §0)\ncards differ — shown explicitly",
-                (int4_pt[0], int4_pt[1]), textcoords="offset points", xytext=(14, -34), fontsize=7.2,
-                color=INK_MUTED, zorder=5, linespacing=1.4,
+    gptq_label = (
+        f"{T('f3_pt_gptq', lang)}\n{gptq_pt[0]:,.0f} tok/s · {gptq_pt[1]:.2f}%\n"
+        f"{T('f3_note_gptq', lang)}"
+    )
+    ax.annotate(gptq_label, (gptq_pt[0], gptq_pt[1]), textcoords="offset points", xytext=(18, -40),
+                fontsize=8.2, color=INK, zorder=6, ha="left", linespacing=1.5,
                 arrowprops=dict(arrowstyle="-", color=INK_MUTED, lw=0.7))
 
-    w4a8_pt = points[3]
-    ax.annotate("int4 GPTQ + w4a8-tc, capped (experimental)\nNOT single-stream: 3090 peak-concurrency (c=128).\nF0055 §6: RED, default-OFF opt-in only",
-                (w4a8_pt[0], w4a8_pt[1]), textcoords="offset points", xytext=(-14, -34), fontsize=7.2,
-                color=INK_MUTED, zorder=5, linespacing=1.4, ha="right",
+    w4a8_label = (
+        f"{T('f3_pt_w4a8', lang)}\n{w4a8_pt[0]:,.0f} tok/s (peak-c) · {w4a8_pt[1]:.2f}%\n"
+        f"{T('f3_note_w4a8', lang)}"
+    )
+    ax.annotate(w4a8_label, (w4a8_pt[0], w4a8_pt[1]), textcoords="offset points", xytext=(-18, -46),
+                fontsize=8.2, color=INK, zorder=6, ha="right", linespacing=1.5,
                 arrowprops=dict(arrowstyle="-", color=INK_MUTED, lw=0.7))
+    # the RED-gate flag stands alone in ALERT ink, right against the hollow marker --
+    # short enough that it doesn't need line-precise stacking under the main label.
+    ax.annotate(T("f3_red_gate", lang), (w4a8_pt[0], w4a8_pt[1]), textcoords="offset points",
+                xytext=(-18, 14), fontsize=8.6, color=ALERT, zorder=7, ha="right", fontweight="bold")
 
-    ax.set_xlabel("single-stream output tok/s (bsz1, unless noted)", fontsize=9.5, color=INK_SECONDARY)
-    ax.set_ylabel("MATH500 avg@64 (%)", fontsize=9.5, color=INK_SECONDARY)
-    ax.set_title("Accuracy vs. speed frontier — RWKV-7 7.2B", fontsize=12.5, color=INK, loc="left", pad=10)
+    ax.set_xlabel(T("f3_xlabel", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.set_ylabel(T("math500_ylabel", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.set_title(T("f3_title", lang), fontsize=13.5, color=INK, loc="left", pad=14)
     ax.grid(True, color=GRID, linewidth=0.8, zorder=0)
     for spine in ("top", "right"):
         ax.spines[spine].set_visible(False)
     ax.spines["left"].set_color(AXIS)
     ax.spines["bottom"].set_color(AXIS)
+    ax.tick_params(labelsize=10.5)
     ax.set_facecolor(SURFACE)
 
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=2, frameon=False, fontsize=8.3,
+    # faint quadrant guidance, in the margin
+    ax.text(0.995, -0.072, T("faster_hint", lang), transform=ax.transAxes, fontsize=9,
+            color=INK_MUTED, ha="right", va="top", style="italic")
+    ax.text(-0.065, 0.995, T("accurate_hint", lang), transform=ax.transAxes, fontsize=9,
+            color=INK_MUTED, ha="left", va="bottom", rotation=90, style="italic")
+
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncol=2, frameon=False, fontsize=10,
               handletextpad=0.5)
 
-    ax.text(0.01, -0.30,
-            "int8 w8a8/w8g64 omitted: no MATH500 avg@64 raw exists for 7.2B at this tier\n"
-            "(only compression-rate evidence, §2: +0.0041 bpb pooled). See F4 for the 1.5B w8a8 bar.",
-            transform=ax.transAxes, fontsize=7, color=INK_MUTED, va="top", ha="left", style="italic")
-    fig.tight_layout(rect=(0, 0.14, 1, 0.96))
+    # the legend is 2 rows tall (4 entries, ncol=2) below the axes -- push the
+    # footnote well clear of it rather than guessing a tight gap.
+    ax.text(0.01, -0.34, T("f3_footnote", lang), transform=ax.transAxes, fontsize=7.4,
+            color=INK_MUTED, va="top", ha="left", style="italic")
+    fig.tight_layout(rect=(0, 0.17, 1, 0.96))
     _source_note(fig)
     fig.savefig(out_path, metadata=SVG_METADATA)
     plt.close(fig)
@@ -414,8 +864,8 @@ def fig_f3_accuracy_speed_frontier(out_path):
 # ---------------------------------------------------------------------------
 # F4 -- MATH500 accuracy ladder, precision x size (grouped bars)
 # ---------------------------------------------------------------------------
-def fig_f4_math500_ladder(out_path):
-    fig, ax = plt.subplots(figsize=(9.6, 6.3), dpi=DPI)
+def fig_f4_math500_ladder(out_path, lang):
+    fig, ax = plt.subplots(figsize=(10.6, 7.0), dpi=DPI)
 
     slots = ["fp16", "fp16_state_fp16", "w8a8", "int4_gptq", "int4_gptq_asym", "hybrid"]
     slot_label = {
@@ -446,34 +896,44 @@ def fig_f4_math500_ladder(out_path):
     x_1_5b = [i * group_gap for i in range(n)]
     x_7_2b = [i * group_gap + n * group_gap + 1.0 for i in range(n)]
 
+    # fp16 baseline reference line per group (Part 2.5) -- drawn first so bars sit on top
+    if "fp16" in onepfive:
+        base15, _, _ = onepfive["fp16"]
+        ax.hlines(base15, x_1_5b[0] - bar_w * 0.9, x_1_5b[-1] + bar_w * 0.9, color=ROLE_COLOR["fp16"],
+                  linestyle="--", linewidth=1.4, alpha=0.4, zorder=2)
+    if "fp16" in seven2b:
+        base72, _, _ = seven2b["fp16"]
+        ax.hlines(base72, x_7_2b[0] - bar_w * 0.9, x_7_2b[-1] + bar_w * 0.9, color=ROLE_COLOR["fp16"],
+                  linestyle="--", linewidth=1.4, alpha=0.4, zorder=2)
+
     for i, slot in enumerate(slots):
         color = ROLE_COLOR[slot]
         if slot in onepfive:
             val, c, tot = onepfive[slot]
             ax.bar(x_1_5b[i], val, width=bar_w, color=color, zorder=3,
                    edgecolor=SURFACE, linewidth=2)
-            ax.text(x_1_5b[i], val + 1.0, f"{val:.1f}", ha="center", va="bottom", fontsize=8, color=INK)
+            ax.text(x_1_5b[i], val + 1.3, f"{val:.1f}", ha="center", va="bottom", fontsize=9, color=INK)
         elif slot in missing_1_5b:
-            ax.text(x_1_5b[i], 2.0, "no raw\nlanded", ha="center", va="bottom", fontsize=6.6,
+            ax.text(x_1_5b[i], 2.0, T("no_raw_landed", lang), ha="center", va="bottom", fontsize=7.2,
                     color=INK_MUTED, style="italic", rotation=0, linespacing=1.2)
 
         if slot in seven2b:
             val, c, tot = seven2b[slot]
             ax.bar(x_7_2b[i], val, width=bar_w, color=color, zorder=3,
                    edgecolor=SURFACE, linewidth=2)
-            ax.text(x_7_2b[i], val + 1.0, f"{val:.1f}", ha="center", va="bottom", fontsize=8, color=INK)
+            ax.text(x_7_2b[i], val + 1.3, f"{val:.1f}", ha="center", va="bottom", fontsize=9, color=INK)
 
     ax.set_xticks([sum(x_1_5b) / n, sum(x_7_2b) / n])
-    ax.set_xticklabels(["1.5B", "7.2B"], fontsize=11.5, color=INK)
-    ax.tick_params(axis="x", length=0, pad=48)
+    ax.set_xticklabels(["1.5B", "7.2B"], fontsize=13, color=INK)
+    ax.tick_params(axis="x", length=0, pad=52)
     for i, slot in enumerate(slots):
-        ax.text(x_1_5b[i], -3.0, slot_label[slot], ha="right", va="top", fontsize=7.3,
+        ax.text(x_1_5b[i], -3.0, slot_label[slot], ha="right", va="top", fontsize=8.2,
                 color=INK_MUTED, rotation=35, rotation_mode="anchor")
-        ax.text(x_7_2b[i], -3.0, slot_label[slot], ha="right", va="top", fontsize=7.3,
+        ax.text(x_7_2b[i], -3.0, slot_label[slot], ha="right", va="top", fontsize=8.2,
                 color=INK_MUTED, rotation=35, rotation_mode="anchor")
 
-    ax.set_ylabel("MATH500 avg@64 (%)", fontsize=9.5, color=INK_SECONDARY)
-    ax.set_title("MATH500 avg@64 by precision and model size", fontsize=12.5, color=INK, loc="left", pad=14)
+    ax.set_ylabel(T("math500_ylabel", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.set_title(T("f4_title", lang), fontsize=13.5, color=INK, loc="left", pad=15)
     ax.set_ylim(0, 75)
     ax.set_xlim(-0.7, x_7_2b[-1] + 0.7)
     ax.grid(True, axis="y", color=GRID, linewidth=0.8, zorder=0)
@@ -481,20 +941,19 @@ def fig_f4_math500_ladder(out_path):
     for spine in ("top", "right", "bottom"):
         ax.spines[spine].set_visible(False)
     ax.spines["left"].set_color(AXIS)
+    ax.tick_params(labelsize=10.5)
     ax.set_facecolor(SURFACE)
 
     handles = [plt.Rectangle((0, 0), 1, 1, color=ROLE_COLOR[s]) for s in slots]
-    ax.legend(handles, [ROLE_LABEL[s] for s in slots], loc="upper center", bbox_to_anchor=(0.5, -0.30),
-              ncol=3, frameon=False, fontsize=8.2)
+    handles.append(plt.Line2D([0], [0], color=ROLE_COLOR["fp16"], linestyle="--", linewidth=1.4, alpha=0.6))
+    legend_labels = [role_label(s, lang) for s in slots] + [T("fp16_baseline", lang)]
+    ax.legend(handles, legend_labels, loc="upper center", bbox_to_anchor=(0.5, -0.32),
+              ncol=3, frameon=False, fontsize=9.6)
 
-    fig.text(0.01, 0.995,
-            "1.5B int4-sym/asym (documented as 14.98%/21.99% in §2/F0043) have no landed raw — "
-            "omitted, not fabricated.\nMATH500 avg@64 bars mix RTX 5090 and RTX 3090 runs; this project's own §2 "
-            "cross-check found the ruler\nagrees within ±0.27pt across cards at matched config, i.e. "
-            "card-invariant within this protocol's noise.",
-            fontsize=7, color=INK_MUTED, va="top", ha="left", style="italic")
+    fig.text(0.01, 0.995, T("f4_footnote", lang), fontsize=7.4, color=INK_MUTED, va="top", ha="left",
+              style="italic")
 
-    fig.tight_layout(rect=(0, 0.02, 1, 0.85))
+    fig.tight_layout(rect=(0, 0.02, 1, 0.84))
     _source_note(fig)
     fig.savefig(out_path, metadata=SVG_METADATA)
     plt.close(fig)
@@ -503,7 +962,16 @@ def fig_f4_math500_ladder(out_path):
 # ---------------------------------------------------------------------------
 # F5 (conditional) -- positional compression curve, fp32-state vs fp16-state
 # ---------------------------------------------------------------------------
-def fig_f5_positional_compression_state_precision(out_path):
+def _bucket_mid(name):
+    # "[lo-hi)" -> midpoint; trailing "+" bucket -> its lower edge
+    body = name.strip("[)")
+    if "-" in body:
+        lo, hi = body.rstrip("+").split("-")
+        return (int(lo) + int(hi)) / 2
+    return float(body.rstrip("+"))
+
+
+def fig_f5_positional_compression_state_precision(out_path, lang):
     """7.2B uncheatable position curve, RWKV_STATE_FP16 off (fp32 state) vs on (fp16 state).
 
     Not yet landed as of this writing -- see MANIFEST key
@@ -511,6 +979,12 @@ def fig_f5_positional_compression_state_precision(out_path):
     function is intentionally left runnable-but-a-no-op until they land: it checks
     for the raws and returns without writing a file if either is missing, so the
     rest of the batch is never blocked on this one figure.
+
+    Below the main overlapping curves (the "they're identical" claim, by design --
+    the two lines are meant to sit on top of each other) a second panel plots the
+    per-bucket delta (fp16 state minus fp32 state) so that claim is visible, not
+    just asserted: a small-multiples-style secondary axis sharing the x scale,
+    computed directly from the two landed raws (never copied from the prose).
     """
     needed = MANIFEST["f5_positional_compression_state_precision"]
     if not all(exists(p) for p in needed):
@@ -519,38 +993,107 @@ def fig_f5_positional_compression_state_precision(out_path):
     def curve(relpath):
         with open(_path(relpath)) as f:
             d = json.load(f)
-        # position-bucket curve: list of {bucket, mean_neg_log2_p} or equivalent --
-        # shape intentionally not hard-coded further until the real file lands.
         return d
 
-    off = curve(needed[0])
-    on = curve(needed[1])
+    off = curve(needed[0])  # fp32 state (leg A)
+    on = curve(needed[1])   # fp16 state (leg B)
 
-    fig, ax = plt.subplots(figsize=(7.0, 5.0), dpi=DPI)
-    def _bucket_mid(name):
-        # "[lo-hi)" -> midpoint; trailing "+" bucket -> its lower edge
-        body = name.strip("[)")
-        if "-" in body:
-            lo, hi = body.rstrip("+").split("-")
-            return (int(lo) + int(hi)) / 2
-        return float(body.rstrip("+"))
+    # constrained_layout (not tight_layout) -- this figure stacks two axes via
+    # gridspec_kw, and tight_layout's post-hoc rect math is not compatible with a
+    # pre-specified gridspec (matplotlib warns and the result can be wrong);
+    # constrained_layout is the modern replacement built for exactly this case.
+    fig, (ax, axd) = plt.subplots(
+        2, 1, figsize=(8.4, 7.6), dpi=DPI, sharex=True,
+        gridspec_kw={"height_ratios": [3.0, 1.35]},
+        constrained_layout=True,
+    )
+    fig.set_constrained_layout_pads(w_pad=0.06, h_pad=0.04, hspace=0.02, wspace=0.0)
 
-    for d, role, label in ((off, "fp16", "fp32 state (default)"), (on, "fp16_state_fp16", "fp16 state (RWKV_STATE_FP16)")):
+    bucket_ticks = None
+    for d, role, label_key in ((off, "fp16", "f5_pt_off"), (on, "fp16_state_fp16", "f5_pt_on")):
         buckets = d["position_curve"]
         xs = [_bucket_mid(b["bucket"]) for b in buckets]
         ys = [b["mean_neg_log2_p"] for b in buckets]
-        _plot_series(ax, list(zip(xs, ys)), role, label_override=label)
+        rows = [(x, y) for x, y in zip(xs, ys) if y == y]  # drop the NaN [3584+) tail bucket
+        if bucket_ticks is None:
+            bucket_ticks = [x for x, y in zip(xs, ys) if y == y]  # the real bucket midpoints
+        _plot_series(ax, rows, role, lang, label_override=T(label_key, lang))
     ax.set_xscale("log", base=2)
-    ax.set_xlabel("token position (bucket midpoint)", fontsize=9.5, color=INK_SECONDARY)
-    ax.set_ylabel("mean −log₂ p (bits/token)", fontsize=9.5, color=INK_SECONDARY)
-    ax.set_title("Positional compression — 7.2B, fp32 vs fp16 recurrent state", fontsize=12, color=INK,
-                 loc="left", pad=10)
+    # Without an explicit locator/formatter, matplotlib's default log-2 locator
+    # produces crowded/overlapping tick labels at these bucket-midpoint spacings
+    # (same class of issue as F1/F2's concurrency axis) -- pin ticks to the actual
+    # bucket midpoints instead, same pattern as CONCURRENCY_TICKS.
+    ax.xaxis.set_major_locator(FixedLocator(bucket_ticks))
+    ax.xaxis.set_major_formatter(_INT_FMT)
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.xaxis.set_minor_formatter(NullFormatter())
+    ax.set_ylabel(T("f5_ylabel", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.set_title(T("f5_title", lang), fontsize=13.5, color=INK, loc="left", pad=11)
     ax.grid(True, color=GRID, linewidth=0.8, zorder=0)
     for spine in ("top", "right"):
         ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_color(AXIS)
+    ax.spines["bottom"].set_color(AXIS)
+    ax.tick_params(labelsize=10.5, labelbottom=False)
     ax.set_facecolor(SURFACE)
-    ax.legend(frameon=False, fontsize=9)
-    fig.tight_layout()
+    ax.legend(frameon=False, fontsize=10.5, loc="lower left")
+
+    # -- delta sub-panel: Δ = fp16-state − fp32-state, per bucket, real sample mass only --
+    off_by_bucket = {b["bucket"]: b for b in off["position_curve"]}
+    on_by_bucket = {b["bucket"]: b for b in on["position_curve"]}
+    dxs, dys = [], []
+    for b in off["position_curve"]:
+        name = b["bucket"]
+        a_val = b["mean_neg_log2_p"]
+        b_val = on_by_bucket[name]["mean_neg_log2_p"]
+        if a_val == a_val and b_val == b_val and b["tokens"] > 0:  # skip the empty NaN tail bucket
+            dxs.append(_bucket_mid(name))
+            dys.append(b_val - a_val)
+
+    noise = 1e-5  # bits/bucket -- the same-flag rerun band this project measured (F0057 §2:
+                  # ao3_english reran twice on an unchanged leg, |Δ| <= 6.6e-6, most ~1e-6;
+                  # ~1e-5 is F0057's own stated conservative headline band).
+    axd.axhspan(-noise, noise, color=NOISE_BAND, alpha=0.6, zorder=0)
+    axd.axhline(0, color=AXIS, linewidth=1.0, zorder=1)
+    axd.plot(dxs, dys, linestyle="-", linewidth=1.4, color=INK, zorder=3, marker="o",
+             markersize=5.5, markerfacecolor=INK, markeredgecolor=SURFACE, markeredgewidth=0.7)
+
+    axd.text(dxs[0], noise, f"  {T('f5_noise_band', lang)}", fontsize=7.6, color=INK_SECONDARY,
+              va="bottom", ha="left", style="italic")
+
+    delta_ticks = [-1e-4, -5e-5, 0.0, 5e-5, 1e-4]
+
+    def _delta_fmt(x, pos):
+        if x == 0:
+            return "0"
+        s = f"{x:.0e}"
+        return s.replace("e-0", "e-").replace("e+0", "e")
+
+    axd.set_ylim(-1e-4, 1e-4)
+    axd.yaxis.set_major_locator(FixedLocator(delta_ticks))
+    axd.yaxis.set_major_formatter(FuncFormatter(_delta_fmt))
+    # sharex=True syncs the view limits with the top panel but NOT the tick
+    # locator/formatter -- axd is the panel that actually draws x labels
+    # (labelbottom=False on the top one), so it needs its own explicit pin too.
+    axd.xaxis.set_major_locator(FixedLocator(bucket_ticks))
+    axd.xaxis.set_major_formatter(_INT_FMT)
+    axd.xaxis.set_minor_locator(NullLocator())
+    axd.xaxis.set_minor_formatter(NullFormatter())
+    for lbl in axd.get_xticklabels():
+        lbl.set_rotation(30)
+        lbl.set_ha("right")
+        lbl.set_rotation_mode("anchor")
+    axd.set_xlabel(T("f5_xlabel", lang), fontsize=11.5, color=INK_SECONDARY)
+    axd.set_ylabel(T("f5_delta_ylabel", lang), fontsize=9.6, color=INK_SECONDARY)
+    axd.set_title(T("f5_delta_title", lang), fontsize=9.8, color=INK_SECONDARY, loc="left", pad=6)
+    axd.grid(True, axis="y", color=GRID, linewidth=0.8, zorder=0)
+    for spine in ("top", "right"):
+        axd.spines[spine].set_visible(False)
+    axd.spines["left"].set_color(AXIS)
+    axd.spines["bottom"].set_color(AXIS)
+    axd.tick_params(labelsize=9.5)
+    axd.set_facecolor(SURFACE)
+
     _source_note(fig)
     fig.savefig(out_path, metadata=SVG_METADATA)
     plt.close(fig)
@@ -558,10 +1101,10 @@ def fig_f5_positional_compression_state_precision(out_path):
 
 
 FIGURES = [
-    ("f1_concurrency_5090.svg", fig_f1_concurrency_5090),
-    ("f2_concurrency_3090.svg", fig_f2_concurrency_3090),
-    ("f3_accuracy_speed_frontier.svg", fig_f3_accuracy_speed_frontier),
-    ("f4_math500_ladder.svg", fig_f4_math500_ladder),
+    ("f1_concurrency_5090", fig_f1_concurrency_5090),
+    ("f2_concurrency_3090", fig_f2_concurrency_3090),
+    ("f3_accuracy_speed_frontier", fig_f3_accuracy_speed_frontier),
+    ("f4_math500_ladder", fig_f4_math500_ladder),
 ]
 
 
@@ -574,17 +1117,21 @@ def main():
         status = "OK" if not missing else f"MISSING {missing}"
         print(f"  {fig_id}: {len(paths)} raw(s) -- {status}")
 
-    for filename, fn in FIGURES:
-        out_path = os.path.join(OUT_DIR, filename)
-        fn(out_path)
-        print(f"wrote {os.path.relpath(out_path, REPO_ROOT)}")
+    for lang in LANGS:
+        _set_lang_fonts(lang)
+        print(f"-- lang={lang} --")
 
-    f5_path = os.path.join(OUT_DIR, "f5_positional_compression_state_precision.svg")
-    if fig_f5_positional_compression_state_precision(f5_path):
-        print(f"wrote {os.path.relpath(f5_path, REPO_ROOT)}")
-    else:
-        print("SKIPPED f5_positional_compression_state_precision.svg -- raws not landed yet "
-              "(uncheatable_positional_7.2b_fp16_state{32,16}_3090.json); see MANIFEST.")
+        for base_name, fn in FIGURES:
+            out_path = os.path.join(OUT_DIR, f"{base_name}{_suffix(lang)}.svg")
+            fn(out_path, lang)
+            print(f"wrote {os.path.relpath(out_path, REPO_ROOT)}")
+
+        f5_path = os.path.join(OUT_DIR, f"f5_positional_compression_state_precision{_suffix(lang)}.svg")
+        if fig_f5_positional_compression_state_precision(f5_path, lang):
+            print(f"wrote {os.path.relpath(f5_path, REPO_ROOT)}")
+        else:
+            print("SKIPPED f5_positional_compression_state_precision{,_zh}.svg -- raws not landed yet "
+                  "(uncheatable_positional_7.2b_fp16_state{32,16}_3090.json); see MANIFEST.")
 
 
 if __name__ == "__main__":
