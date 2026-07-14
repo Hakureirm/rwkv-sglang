@@ -1254,8 +1254,9 @@ under both accountings. Raw, unnormalized numbers remain this section's primary 
 block is the size-fairness cross-check, not a replacement.
 
 Weights: same engine (sglang main, native `qwen3_5.py` support, no fork needed), same
-precision per row. This is also a strongest-available-config comparison, not a weak-baseline
-one: the shared engine, sglang, is one of the serving engines Qwen3.5's own model card
+precision per row unless a table says otherwise. This is also a strongest-available-config
+comparison, not a weak-baseline one: the shared engine, sglang, is one of the serving engines
+Qwen3.5's own model card
 "strongly recommend[s]" for production and high-throughput deployment — Qwen3.5 runs here on a
 first-class path its own vendor endorses, not on an engine foreign to it.
 **Qwen3.5 requires `--dtype bfloat16`** — `float16` crashes on a dtype
@@ -1268,18 +1269,37 @@ and why (RWKV's hand kernels are fp16-only; bf16 exercises RWKV's plain/stock pa
 
 ### 13.1 Cloud tier — RTX 5090
 
-Same-precision (bf16, both stock paths — RWKV's fp16 hand kernels don't fire) bsz1:
+**Deployment reading — each engine at its best available config, single-stream.** Precision
+differs here because the engines' capabilities differ, not because either side is
+handicapped: RWKV-7 runs its **fp16** hand-kernel full stack — `serve.sh`'s shipping default
+— with the recommended `RWKV_STATE_FP16` opt-in (F0056) on top; Qwen3.5 runs its **bf16**,
+the only precision that works on this engine (`float16` crashes on the dtype-branch bug noted
+above). Both are each side's fastest available config — the same "fastest config" standard,
+applied symmetrically:
+
+| tier | RWKV-7 (fp16, full stack) | Qwen3.5 (bf16, best available) | winner |
+|---|---:|---:|---|
+| 1.5B / 2B | **447.3** | 335.8–336.3 | RWKV-7 **+33.1%** |
+| 7.2B / 9B | **133.4** | 96.0 | RWKV-7 **+39.0%** |
+
+Raw: `bench/results/w1prime_legEf_1.5b_5090.json` (1.5B),
+`bench/results/w1prime_legFinal_B_7.2b_5090.json` (7.2B) — both the W1' final config,
+`RWKV_STATE_FP16` + all five byte-exact glue fusions (§4/§5, F0056); Qwen3.5's bf16 figures
+are the same runs cited at the end of this section.
+
+**Architecture reading — same precision (bf16), both stock paths.** RWKV's fp16 hand kernels
+don't fire in bf16 — this is the reading that isolates the two architectures at matched
+precision, bsz1:
 
 | tier | RWKV-7 (bf16) | Qwen3.5 (bf16) | winner |
 |---|---:|---:|---|
 | 1.5B / 2B | 256.6 | 335.8–336.3 | Qwen3.5 **+31.0%** |
 | 7.2B / 9B | 87.7 | 96.0 | Qwen3.5 **+9.4%** |
 
-RWKV-7 only overtakes bsz1 when its **fp16** hand-kernel stack is active — a different
-precision, not a fair same-precision reading: 1.5B fp16 full-stack 397.3–409.8 (+18–22% vs
-Qwen3.5), 7.2B fp16 full-stack 123.7 (+29%). **The bsz1 win at fp16 comes from kernel
-optimization work, not from the RWKV-7 architecture being inherently faster than Qwen3.5's at
-matched precision — keep these two claims distinct.**
+**The deployment win above comes from kernel optimization work, not from the RWKV-7
+architecture being inherently faster than Qwen3.5's at matched precision — this table is what
+isolates the architecture comparison, and on it, Qwen3.5 wins bsz1 at both tiers. Keep these
+two claims distinct.**
 
 Peak concurrency, same precision (bf16), full sweep, `--cuda-graph-max-bs` sized to each
 model's real ceiling:
