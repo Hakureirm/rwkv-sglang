@@ -272,6 +272,29 @@ at every size measured. Raw:
 `docs/findings/0043-w4-asym-gptq.md` (1.5B full picture); a follow-up finding doc for the 7.2B
 asymmetric collapse + hybrid investigation is pending.
 
+**Figure — accuracy vs. speed frontier (7.2B), and the full MATH500 ladder across both
+sizes.** The frontier plot puts single-stream speed and MATH500 avg@64 on one axis pair
+for the configurations most deployments actually choose between; where the speed point
+and the accuracy point weren't measured on the same card, the card is named right in the
+annotation instead of left implicit — int4-GPTQ's speed (5090, §4b) and accuracy (3090,
+F0055 §0) are a case in point. int8 w8a8/w8g64 has no landed MATH500 avg@64 raw at 7.2B
+(only the compression-rate number in §2), so it's omitted from the frontier rather than
+stood in for with a different metric. The ladder chart is the bar-form version of this
+whole section: two 1.5B cells (int4-sym 14.98%, int4-asym 21.99% — both quoted in prose
+above and in F0043) have no landed raw JSON, so those bars are left empty and marked "no
+raw landed" rather than back-filled from the prose numbers.
+
+![Accuracy vs. speed frontier, RWKV-7 7.2B](assets/plots/f3_accuracy_speed_frontier.svg)
+
+![MATH500 avg@64 by precision and model size](assets/plots/f4_math500_ladder.svg)
+
+*Protocol: MATH500 avg@64 (500 problems × 64 samples), speed = single-stream wall-clock
+unless the caption says otherwise. Raw: `math500_avg64_{5090main,w8a8_5090main}.json` (1.5B),
+`math500_avg64_7.2b_{fp16,fp16_stateon,sym,asym,hybrid_ffnvk,w4gptq_w4a8capped_3090}.json`
+(7.2B) + `72b/sweep_72b_fp16_v3_5090.json` + `w1prime_legFinal_B_7.2b_5090.json` +
+`bsz_sweep_7.2b_w4gptq_5090.json` + `bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_w4a8.json`
+(speed axis). Regenerate: `python bench/plots/make_benchmark_plots.py`.*
+
 **The sm120 w8a8 kernel (GEMM microbench).** Upstream cutlass `int8_scaled_mm` does not
 compile for sm120, so on Blackwell consumer cards our hand-written s8-wmma GEMM (register-
 blocked "V2", bit-exact vs a per-row reference, batch-invariant) is the only int8 path. It
@@ -472,6 +495,20 @@ Raw (5090): `bench/results/bsz_sweep_7.2b_w4gptq_5090.json` (c=1/32/128) +
 `bench/results/sharegpt_{0.1b,1.5b,7.2b}_{fp16,w4gptq}_5090_{rinf,r16}.log`; fp16 7.2B comparison line
 `bench/results/qwen35/rwkv7_7.2b_fp16_fullstack_resweep_5090_v3.json`.
 
+**Figure — per-size concurrency curves, RTX 5090.** Every line is drawn straight from the
+raw sweeps cited above (nothing hand-entered — see the manifest in
+`bench/plots/make_benchmark_plots.py`). The fp16 + `RWKV_STATE_FP16` (W1') series is the
+sparse spot-check §4b/§5 report (1 point at 1.5B, 3 at 7.2B), not a full sweep, so it's
+plotted as unconnected markers rather than a curve implying coverage that wasn't measured.
+
+![Per-size concurrency sweep by precision, RTX 5090](assets/plots/f1_concurrency_5090.svg)
+
+*Protocol: 64-in/256-out, wall-clock, cuda-graph ON. Raw: the `bsz_sweep_{0.1b,1.5b,7.2b}_{fp16,w4gptq,w4rtn}_5090*.json`
+family + `bsz_sweep_fullstack_5090.json` + `bsz_sweep_w8a8v2_5090main.json` (§4b/§5) +
+`w1prime_leg{Ef_1.5b,Final_B_7.2b}_5090.json` (F0056) +
+`72b/sweep_72b_{fp16_v3,w8a8,w8a8_ceil,w8a8_max}_5090.json` (F0047). Regenerate:
+`python bench/plots/make_benchmark_plots.py`.*
+
 ### The desktop 3090 + five more cards, same recipe (measured on the real cards)
 
 1.5B, output tok/s at c=1 / c=32 / c=128 (greedy gate in parens):
@@ -562,6 +599,21 @@ rows (`*_v2` / `*_c128` / `*_full` / `*_retry` / `*rtn2` = follow-up runs after 
 attempt hit a time budget or stopped at a partial sweep; the partial first attempts are
 kept for the record).
 
+**Figure — per-size concurrency curves, RTX 3090, including the w4 M=64 cliff.** The 7.2B
+panel overlays the base fp16/RTN matrix with the dense int4-GPTQ cliff map (the c=64→66
+edge from the fine map) and the w4a8-tc experimental fix (F0055) — drawn dashed with
+hollow markers because it is a default-OFF, accuracy-gated opt-in (§4b), not a
+recommended-path number. `bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_base.json` is consumed
+as the matched control for the w4a8 delta (F0055 §1) but not drawn as its own line — it
+reproduces the plotted cliff-map curve within ~1.6% at shared points (1,407.0 vs 1,429.5
+tok/s @c=64), and a near-duplicate line would only add clutter.
+
+![Per-size concurrency sweep by precision, RTX 3090, with the w4 cliff and its kernel-level fix](assets/plots/f2_concurrency_3090.svg)
+
+*Protocol: 64-in/256-out, wall-clock, cuda-graph ON. Raw: `bsz_sweep_{1.5b,7.2b}_{fp16,w4gptq,w4rtn}_3090.json`
++ `bsz_sweep_7.2b_w4gptq_3090_cliffmap{,_fine}.json` + `..._cliff_stage1_w4a8.json` (F0055).
+Regenerate: `python bench/plots/make_benchmark_plots.py`.*
+
 ### `RWKV_STATE_FP16` — a recommended throughput switch (2026-07-13, F0056)
 
 Orthogonal to the three weight-quantization modes in §4: this flag halves the **temporal WKV
@@ -592,6 +644,17 @@ c=128 **7,755.6**; internal step-time profiling put the same decode step at 39.2
 1.5B single-stream (64-in/256-out): **421.2 → 447.3 (+6.2%)**. Raw:
 `bench/results/w1prime_leg{A_anchor,B_state,Final_A,G1_vres,E0,Ef}_*_5090.json` (full leg-by-leg
 ledger, including the individually-isolated glue fusions, in the finding doc above).
+
+**TODO — positional compression curve, fp32-state vs fp16-state.** §2's position curve
+(proof the recurrent state keeps absorbing context) has not yet been re-measured with
+`RWKV_STATE_FP16` on: a 3090 run is landing this data as
+`bench/results/uncheatable_positional_7.2b_fp16_state{32,16}_3090.json`. The plotting
+function (`fig_f5_positional_compression_state_precision` in
+`bench/plots/make_benchmark_plots.py`) is already written and wired into the manifest —
+it checks for both files and no-ops if either is missing, so it will start producing
+`docs/assets/plots/f5_positional_compression_state_precision.svg` the next time
+`python bench/plots/make_benchmark_plots.py` runs after they land, with no code changes
+needed. This figure and its embed here are deferred, not dropped.
 
 ## 5. Serving throughput (RWKV-7 1.5B, wall-clock, 64-in/256-out, concurrency sweep)
 
