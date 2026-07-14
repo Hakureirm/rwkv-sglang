@@ -371,13 +371,20 @@ cliff and sets a peak 4.4% above the old one at 2× the concurrency. The semanti
 w4a16 (activations stay fp16) to w4a8 (activations quantized to int8 per token) above M=64, so
 the kernel ships env-gated `RWKV_W4_TC_LARGE_M=1`, **default OFF**. Accuracy certification found
 the per-token-int8 tax itself w8a8-class (compression +0.0042 bpb pooled, lambada −0.35pt, both
-essentially noise) but the *unrestricted* dispatch — which also routed prefill (M up to ~4096)
-through the same path — RED on MATH500 avg@64 (57.66% vs 61.075% baseline, −3.42pt, a genuine
-truncation/rambling collapse, not noise). A same-day follow-up (`RWKV_W4_TC_MAX_M=512`) caps the
-dispatch to the decode/cliff range the table above measures and leaves prefill on the unchanged
-w4a16 fallback; a capped re-gate is in flight. Full writeup, every number's raw citation, and
-the root-cause analysis: `docs/findings/0055-w4a8-large-m-tc.md`. Raw:
-`bench/results/bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_{base,w4a8}.json`.
+essentially noise) but MATH500 avg@64 RED in **both** dispatch configurations: unrestricted
+M>64 (prefill included) 57.66% vs 61.075% baseline (−3.42pt, truncation 36.7% vs 14.0%), and
+still RED after the same-day `RWKV_W4_TC_MAX_M=512` cap confined the kernel to the decode/cliff
+range the table above measures — 58.07% (−3.00pt, truncation 33.0%), i.e. removing prefill from
+the path recovered only +0.42pt while cutting wall time 8%. The damage is decode-side
+per-token-int8 in the generation loop itself, not dispatch scope. **Final positioning: the
+speed fix is real and stays available, but it is accuracy-gated** — the flag pair remains an
+experimental, default-OFF opt-in for throughput-tolerant workloads (bulk/draft generation);
+for accuracy-critical reasoning at high concurrency use the near-lossless w8 (g64 weight-only)
+tier instead, or run w4 at c≤64 where the unchanged w4a16 kernels serve everything. Full
+writeup, every number's raw citation, and the refuted-hypothesis analysis:
+`docs/findings/0055-w4a8-large-m-tc.md`. Raw:
+`bench/results/bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_{base,w4a8}.json`,
+`bench/results/math500_avg64_7.2b_w4gptq_w4a8{full,capped}_3090.json`.
 
 **1.5B** (all three configs measured the same day on matched launch flags):
 

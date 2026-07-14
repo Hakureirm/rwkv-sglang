@@ -1,0 +1,36 @@
+{
+  "num_tasks": 500,
+  "rollout": 64,
+  "total_generations": 32000,
+  "correct_generations": 18583,
+  "rollout_accuracy": 0.58071875,
+  "pass_at_rollout_accuracy": 0.854,
+  "ended_eod_rate": 0.66909375,
+  "ended_user_stop_rate": 0.00121875,
+  "truncated_rate": 0.3296875,
+  "mean_generated_tokens": 756.36975,
+  "generated_tokens_total": 24203832,
+  "gen_wall_time_s": 14056.047487258911,
+  "throughput_gen_tok_per_s": 1721.951496104402,
+  "sample_per_sec": 2.2766001629552237,
+  "config": {
+    "model": "/models/rwkv7-7.2b-w4gptq",
+    "data": "data/MATH500.jsonl",
+    "temperature": 1.0,
+    "top_p": 0.28,
+    "top_k": 32,
+    "max_new_tokens": 1500,
+    "ctx_limit": 8192,
+    "sampler_order": "temperature -> top_k -> top_p",
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "prompt_style": "fake_think",
+    "stop_token_ids": [
+      0
+    ],
+    "stop_strings": [
+      "\nUser:"
+    ],
+    "concurrency": 384
+  }
+}

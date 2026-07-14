@@ -1,12 +1,12 @@
 ---
 doc_kind: finding
 finding_id: F0055
-title: "w4a8 large-M tensor-core path (task#52): kills the w4 M=64 concurrency cliff (c66 622.8->931.4 tok/s, peak 1407->1468.5 moving c64->c128) at a per-token-int8 activation tax that is w8a8-class on compression/lambada (+0.0042 bpb pooled, −0.35pt, both inside/near noise) but RED on MATH500 avg@64 under unrestricted M>64 dispatch (57.66% vs 61.075% baseline, −3.42pt, truncation 36.7% vs 14.0%) — root-caused to prefill (M up to ~4096) sharing the same dispatch as decode; RWKV_W4_TC_MAX_M=512 cap lands (task#52 stage 3, commit 70336b6) confining the kernel to the decode/cliff range it was built for; flag stays default OFF pending the capped re-gate"
+title: "w4a8 large-M tensor-core path (task#52): kills the w4 M=64 concurrency cliff (c66 622.8->931.4 tok/s, peak 1407->1468.5 moving c64->c128) at a per-token-int8 activation tax that is w8a8-class on compression/lambada (+0.0042 bpb pooled, −0.35pt) but RED on MATH500 avg@64 TWICE — unrestricted M>64 dispatch 57.66% (−3.42pt, truncation 36.7% vs 14.0%) AND the RWKV_W4_TC_MAX_M=512 decode-only cap 58.07% (−3.00pt, truncation 33.0%): the cap recovered only +0.42pt, refuting the prefill-poisoning hypothesis — decode-side a8 inside the generation loop is the dominant tax; final positioning = experimental opt-in for throughput-tolerant workloads only, default OFF permanent, no third iteration without new evidence; cross-cert with F0056: activations, not state storage, are RWKV-7's precision-sensitive axis"
 last_verified_commit: "0fd63e8 (kernel, this repo's history); dispatch cap follow-up 70336b6"
-discovered_by: Fable 5 (agent, Stage 1 + Stage 3, 3090 box), 2026-07-13
+discovered_by: Fable 5 (agent, Stage 1 + Stage 3, 3090 box), 2026-07-13; capped re-gate landed 2026-07-13/14
 severity: info
-status: RED on unrestricted dispatch (root-caused); RWKV_W4_TC_MAX_M dispatch cap landed same day; capped re-gate pending; flag default OFF throughout
-related: [F0017, F0043, F0024]
+status: closed — RED twice (unrestricted −3.42pt; capped −3.00pt); prefill-scope hypothesis refuted; kernel = experimental opt-in for throughput-tolerant workloads, RWKV_W4_TC_LARGE_M default OFF permanent; no third iteration without new evidence (pre-registered)
+related: [F0017, F0043, F0024, F0056]
 ---
 
 # Finding F0055: w4a8 large-M tensor-core GEMM — cliff before/after + Stage-3 accuracy certification
@@ -154,79 +154,112 @@ OFF leg reproduces the published 7.2B GPTQ figure **exactly** (historical: bf16 
 not a re-derived baseline. Perplexity +0.071 (+2.0% relative) is the same small uniform logprob
 tax rung 1 measured.
 
-## 5. Rung 3 — MATH500 avg@64 (the decision ruler) — RED
+## 5. Rung 3 — MATH500 avg@64 (the decision ruler) — RED, twice
 
 Protocol: `math500_avg64.py` (faithful albatross-port; fake_think prompt, temp 1.0 / top_p 0.28 /
 top_k 32, max_new 1500, ctx 8192), 500×64, client concurrency 384 — the config of the published
 flag-OFF baseline `bench/results/math500_avg64_7.2b_sym.json` (**61.075%**, wall 26882s, this
-card class). Flag-ON run launched 2026-07-13 08:18 UTC, unrestricted `RWKV_W4_TC_LARGE_M=1`
-dispatch (every M>64, decode and prefill alike), completed same day.
+card class). Leg 1 launched 2026-07-13 08:18 UTC, unrestricted `RWKV_W4_TC_LARGE_M=1`
+dispatch (every M>64, decode and prefill alike). Leg 2 (capped re-gate) launched 13:16 UTC the
+same day on the `RWKV_W4_TC_MAX_M=512` build (commit `70336b6` deployed to the container as a
+scoped patch — deployed-file diff vs the pre-cert baseline shows exactly the cap hunks and
+nothing else, md5 `04674263…` recorded), identical server config and client invocation.
 
 | leg | avg@64 | pass@64 | truncated | mean generated tokens |
 |---|---|---|---|---|
 | flag OFF (published sym baseline) | **0.61075** (19544/32000) | 0.782 | 13.97% | 536.4 |
-| flag ON (unrestricted M>64 dispatch) | **0.57656** (18450/32000) | 0.876 | 36.74% | 796.5 |
-| **Δ** | **−3.42pt** | +9.4pt | **+22.8pt** | +260 |
+| flag ON, unrestricted M>64 dispatch | **0.57656** (18450/32000) | 0.876 | 36.74% | 796.5 |
+| flag ON, capped 64<M≤512 (decode-only) | **0.58072** (18583/32000) | 0.854 | 32.97% | 756.4 |
+| **Δ unrestricted vs OFF** | **−3.42pt** | +9.4pt | **+22.8pt** | +260 |
+| **Δ capped vs OFF** | **−3.00pt** | +7.2pt | **+19.0pt** | +220 |
 
-Raw: `bench/results/math500_avg64_7.2b_w4gptq_w4a8full_3090.json` (+ companion `.log`).
+Raw: `bench/results/math500_avg64_7.2b_w4gptq_w4a8full_3090.json` and
+`math500_avg64_7.2b_w4gptq_w4a8capped_3090.json` (+ companion `.log`s).
+
+**Leg-2 routing evidence** (the counter instrumentation was gone by then — §2's restore —
+so a fresh temporary marker session ran on a separate boot BEFORE the re-gate, then the
+deployed file was restored to the clean capped build, md5-verified, for the scoring run
+itself): CUDA-graph capture fires the w4a8 branch at M=384 (inside the cap; capture covers
+bs 72–384, all ≤512); a live 4096-token prompt probe routes to the w4a16 dequant+cuBLAS
+fallback (`fallback-branch fired M=4096`); a c=96 load decodes on `cuda graph: True` replays
+of the capped-dispatch graphs. `verify_w4a8.py` re-run on the deployed artifact: PASS.
+Corroboration from the scoring run itself: wall 15293.6s → 14056.0s (−8.1%) and client-side
+gen throughput 1666.6 → 1722.0 tok/s (+3.3%) vs leg 1 — prefill measurably moved back to the
+faster path, exactly as the cap intends.
 
 Against the pre-registered decision bands in the draft of this section (±0.6pt = noise;
-0.6–2pt = small real effect; >2pt = do not default-ON): **−3.42pt clears the "do not
-default-ON" threshold by a wide margin — this is not a close call.** The failure signature
-matches F0043's int4-collapse class exactly, not a generic accuracy wobble: truncation more
-than doubles (13.97% → 36.74%) and mean generated length grows 49% (536 → 796 tokens) — the
-model is losing the thread mid-derivation and rambling to the token cap, the same
-loses-thread-and-rambles pattern F0043 root-caused for 1.5B int4 and the asymmetric-7.2B
-collapse. `pass@64` actually rises slightly (0.782→0.876) — with 64 samples per problem, more
-truncated-but-not-wrong rollouts still contain at least one lucky pass; this is consistent
-with degraded-but-not-random generation, not a correctness bug in the kernel itself (rung 0's
-bit-exact gate stands unchanged).
+0.6–2pt = small real effect; >2pt = do not default-ON): **both legs clear the "do not
+default-ON" threshold — −3.42pt unrestricted, −3.00pt capped; neither is a close call.** The
+failure signature matches F0043's int4-collapse class exactly, not a generic accuracy wobble:
+truncation more than doubles (13.97% → 36.74% / 32.97%) and mean generated length grows
+41–49% (536 → 796 / 756 tokens) — the model is losing the thread mid-derivation and rambling
+to the token cap, the same loses-thread-and-rambles pattern F0043 root-caused for 1.5B int4
+and the asymmetric-7.2B collapse. `pass@64` actually rises slightly (0.782→0.876/0.854) —
+with 64 samples per problem, more truncated-but-not-wrong rollouts still contain at least one
+lucky pass; this is consistent with degraded-but-not-random generation, not a correctness bug
+in the kernel itself (rung 0's bit-exact gate stands unchanged).
 
-**Root cause, confirmed same-session (see §6):** `RWKV_W4_TC_LARGE_M=1` had no upper bound —
-every M>64 dispatched to w4a8, so the entire prompt prefill (M up to ~4096 on this protocol)
-ran through per-token int8 activation quantization before generation even started, on top of
-the kernel being measurably *slower* than the dequant fallback at those M (§1, +23% wall on
-the compression workload). Perplexity-family rulers (rungs 1–2) did not catch this because
-their scored traffic is dominated by logprob-scoring prefill at a different, much shorter
-mean shape — they registered the same per-token a8 tax as a flat, uniform, small cost (§3's
-position curve literally shows the tax *shrinking* with position) with nothing to reveal that
-a much longer, generation-critical prefill would compound differently. This is the same
-lesson F0043 already drew, reconfirmed on a new mechanism: perplexity-adjacent metrics cannot
-stand in for avg@64 on this project's decision axis.
+**Root-cause hypothesis (pre-registered after leg 1, REFUTED by leg 2):** the leg-1 reading
+was that the unrestricted dispatch was the problem — every M>64 dispatched to w4a8, so the
+entire prompt prefill (M up to ~4096 on this protocol) ran through per-token int8 activation
+quantization before generation even started, on top of the kernel being measurably *slower*
+than the dequant fallback at those M (§1, +23% wall on the compression workload). The
+`RWKV_W4_TC_MAX_M=512` cap removes prefill from the path entirely (leg-2 routing evidence
+above proves it), and the speed side of the hypothesis held (−8.1% wall). **The accuracy side
+did not: only +0.42pt of the −3.42pt came back.** Prefill-side a8 was a minor contributor;
+the dominant damage is decode-side a8 in the generation loop itself — at client concurrency
+384, every decode step above bs=64 quantizes every projection input to int8, and the error
+feeds back through the WKV state autoregressively across hundreds of generated tokens. This
+also squares rung 1's position curve with the RED: within a single forward pass the
+recurrence absorbs the tax (the curve shrinks with position), but generation re-injects it at
+every step — a feedback loop the logprob rulers structurally cannot see (their decode is 1
+token/request at client concurrency 32, i.e. decode bs≤32 never touches this kernel; under
+the cap the compression/lambada workloads now exercise w4a8 *nowhere at all*). The F0043
+lesson stands, sharpened: perplexity-adjacent metrics cannot stand in for avg@64, and for
+decode-batch kernels only a decode-batch generative ruler exercises the path being certified.
 
-## 6. Verdict — RED on unrestricted dispatch, cap fix landed, capped re-gate pending
+## 6. Verdict — RED twice; final positioning: experimental opt-in, default OFF permanent
 
 - The kernel does its job at the thing it was built for: the M=64 cliff is gone (+47–52%
   across c=66–128, peak +4.4% at 2× concurrency), bit-exactness gates all green on the
   deployed artifact, and rungs 1–2 confirm the pure per-token-a8 tax is real but small and
-  w8a8-class (+0.0042 bpb pooled, −0.35pt lambada).
-- **But the unrestricted dispatch is RED on the decision ruler: MATH500 avg@64 57.66% vs
-  61.075% baseline, −3.42pt, with a truncation/rambling failure signature.** The flag was
-  already default OFF; it stays OFF. This is exactly why rungs 1–2 alone were never sufficient
-  to clear it for default-ON (§5's pre-registered decision bands, written before this number
-  landed, called this correctly).
-- **Root cause is dispatch scope, not the kernel's arithmetic**: `RWKV_W4_TC_LARGE_M=1` routed
-  ALL of prefill (M up to ~4096) through w4a8, not just the decode-batch cliff zone (M ≤
-  max-running-requests) the kernel was built to fix. At prefill M the kernel is already slower
-  than the fallback it replaces (§1) *and* pays the a8 tax on every prompt token before
-  generation starts.
-- **Fix, landed same day (`70336b6`, task#52 stage 3 follow-up):** `RWKV_W4_TC_MAX_M`
-  (default 512) caps the dispatch to `64 < M ≤ RWKV_W4_TC_MAX_M` — the decode/cliff range
-  where the Stage-1 sweep (§1) showed the kernel actually winning (c=66–128). M above the cap
-  falls back unchanged to the w4a16 dequant+cuBLAS path, so prefill is untouched by
-  construction and the a8 tax is confined to decode-side batches only. With the cap,
-  compression/lambada's already-small deltas should collapse further (their scored traffic
-  stops touching w4a8 at all under normal prefill lengths), and the MATH500 penalty should
-  shrink to whatever the decode-only tax turns out to be — **a capped re-gate against the same
-  MATH500 protocol is in flight; this section will be updated with that number.** Until then,
-  treat the −3.42pt figure above as characterizing the unrestricted dispatch only, not the
-  capped one currently in the tree.
-- The flag (`RWKV_W4_TC_LARGE_M`) stays default OFF throughout — before, during, and after
-  this cert. Nothing in this finding changes that default.
+  w8a8-class (+0.0042 bpb pooled, −0.35pt lambada). The cap (`70336b6`) additionally makes it
+  strictly faster end-to-end (leg 2 wall −8.1% vs leg 1) and confines the semantics change to
+  the decode range it was built for.
+- **But the decision ruler is RED in both configurations: −3.42pt unrestricted, −3.00pt
+  capped, both with the truncation/rambling collapse signature.** The prefill-poisoning
+  hypothesis is refuted (§5): the dominant cost is decode-side per-token-int8 in the
+  generation loop, i.e. it is intrinsic to what the kernel *is* (w4a8 semantics at decode
+  batch), not to how it was dispatched. There is no dispatch-shaped fix left to try.
+- **Final positioning (per the pre-registered rule: no third iteration without new
+  evidence):** `RWKV_W4_TC_LARGE_M=1` (+ `RWKV_W4_TC_MAX_M`, default 512) stays an
+  experimental, default-OFF opt-in for throughput-tolerant workloads — bulk/draft generation,
+  data pipelines, anything where +47–52% decode throughput above the c=64 cliff (peak +4.4%
+  at 2× concurrency, in 4.6 GB of weights) is worth a ~3pt MATH500-class accuracy cost that
+  rungs 1–2 show is invisible on perplexity-family metrics. It is NOT for reasoning
+  workloads; accuracy-critical high-concurrency serving on a VRAM budget should use the
+  near-lossless w8 (g64 weight-only) tier instead, or run w4 at c≤64 where the unchanged
+  w4a16 kernels serve everything.
+- **Cross-cert conclusion (with F0056, same day, same 7.2B MATH500 protocol):** storing the
+  recurrent WKV *state* in fp16 moved the ruler −0.32pt (inside noise — GREEN, F0056 §4);
+  quantizing *activations* to int8 moved it −3.42/−3.00pt (RED twice, here). RWKV-7's
+  precision-sensitive axis under serving is the activations entering the projections, not the
+  state's storage width: halving state bytes is nearly free, int8-quantizing the generation
+  loop's GEMM inputs is not. That asymmetry is now measured, not assumed, on this project's
+  decision ruler — and it generalizes the F0043 lesson: the cheap rulers stay blind to
+  exactly the mechanism (autoregressive re-injection) that the decision ruler punishes.
+- The flag stays default OFF permanently; `scripts/serve.sh` does not export it. Anyone
+  turning it on gets the §1 speed table and owns the §5 accuracy table — both are disclosed
+  side by side in `docs/BENCHMARKS.md` §4b.
 - Artifacts: `/tmp/w4a8_cert/` in the 3090 container (uncheat_72b_w4gptq_{OFF,ON}.json +
-  curves, math500 out JSON), `~/w4a8_cert_stage/lambada_{OFF,ON}.log` on the box host — all
-  landed in `bench/results/` this session as `uncheatable_7.2b_w4gptq_w4a8{off,on}_n300_3090.json`
-  (+ curves), `lambada_7.2b_w4gptq_w4a8{off,on}_3090.log`,
-  `math500_avg64_7.2b_w4gptq_w4a8full_3090.json` (+ `.log`), and the Stage-1 speed sweep as
-  `bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_{base,w4a8}.json`. Counter patch reverted
-  byte-identical (md5 verified) after the runs.
+  curves, math500 out JSONs for both legs, serve/smoke logs, the cap/smoke patch scripts,
+  `rwkv7.py.capped_clean` reference build), `~/w4a8_cert_stage/lambada_{OFF,ON}.log` on the
+  box host — all landed in `bench/results/` as
+  `uncheatable_7.2b_w4gptq_w4a8{off,on}_n300_3090.json` (+ curves),
+  `lambada_7.2b_w4gptq_w4a8{off,on}_3090.log`,
+  `math500_avg64_7.2b_w4gptq_w4a8full_3090.json` and
+  `math500_avg64_7.2b_w4gptq_w4a8capped_3090.json` (+ `.log`s), and the Stage-1 speed sweep
+  as `bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_{base,w4a8}.json`. Full 32k-rollout generations
+  JSONLs (~90 MB/leg) are archived in the 3090 box checkout's `bench/results/`, not committed.
+  Counter and smoke instrumentation reverted byte-identical (md5-verified) after their
+  sessions; the deployed container build is the clean capped one (md5 `04674263…`).
