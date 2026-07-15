@@ -741,6 +741,14 @@ B200——单流解码拼的是显存带宽,GDDR7 不输 HBM。原始件:
 PP 的职责是装下超过单卡的模型,不是给小模型每 token 提速)。价值在于两者在 main 上都**正确且可
 生产**;真正需要多卡的模型(7.2B+、NVLink)上的扩展曲线是后续工作。原始件:`bench/results/tppp_l4_main.json`。
 
+**图——三种配置随并发的曲线。**线尾的倍率是用图中 c=64 两点当场重算的 vs-tp=1 值;
+24/24 精确的贪心结论直接写进图例——那才是头条(多卡不改变任何输出)。
+
+![多卡扩展:tp=1 对 tp=2 对 pp=2](assets/plots/f10_tp_pp_zh.svg)
+
+*协议:1.5B bf16,2×L4,64 进/256 出,cuda-graph 开。原始件:`tppp_l4_main.json`。
+重新生成:`python bench/plots/make_benchmark_plots.py`。*
+
 ## 7. 与 Albatross 对比(BlinkDL 官方速度参照)
 
 Albatross 是一个纯前向测速程序(没有请求调度、动态批和服务接口),所以这个对比只回答
@@ -1026,6 +1034,15 @@ rwkv-sglang 的 int8 峰值(9,851)反超 vllm-rwkv 的 fp16 峰值(8,583)达 **1
 每秒 16 个请求以内完全不排队——首字延迟稳定在 26 毫秒上下。3090(v0.5.10)在同样
 16 请求/秒时首字延迟是 302 毫秒。原始件:`bench/results/pd_mixed_5090.json`、
 `pd_mixed_3090main.json`。
+
+**图——同一张表,外加一个正文略过的实测速率。**首字延迟用对数轴(300 个同时涌入是
+稳态 p50 的 60 倍——线性轴会把所有可用的工作点压扁在地板上),每字间隔线性轴,吞吐
+是第三格;原始件里还有一行表格没列的 4 req/s,图里画了。
+
+![泊松到达下的延迟:首字、每字、吞吐](assets/plots/f12_latency_poisson_zh.svg)
+
+*协议:512 进/256 出,每个速率 300 个请求,RTX 5090 main。原始件:`pd_mixed_5090.json`。
+重新生成:`python bench/plots/make_benchmark_plots.py`。*
 
 **ShareGPT 真实对话负载**(RWKV-7 1.5B;标准 `bench_serving`,500 个请求,RTX 5090):峰值输出
 9,845.6 tok/s、总吞吐 27,527.7 tok/s;每秒 16 个请求时首字延迟中位数 32.3 毫秒。

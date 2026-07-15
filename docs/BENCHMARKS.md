@@ -837,6 +837,15 @@ card, not per-token speedup for a small one). The value is that both are **corre
 production-viable** on main; scaling for models that actually need multiple cards (7.2B+,
 NVLink) is a follow-up. Raw: `bench/results/tppp_l4_main.json`.
 
+**Figure — the three configs over concurrency.** The end-of-line ratios are the c=64
+vs-tp=1 values recomputed from the plotted points; the 24/24-exact greedy verdicts ride in
+the legend labels because they are the headline (multi-GPU changes nothing about outputs).
+
+![Multi-GPU scaling: tp=1 vs tp=2 vs pp=2](assets/plots/f10_tp_pp.svg)
+
+*Protocol: 1.5B bf16, 2×L4, 64-in/256-out, cuda-graph ON. Raw: `tppp_l4_main.json`.
+Regenerate: `python bench/plots/make_benchmark_plots.py`.*
+
 ## 7. Comparison with Albatross (BlinkDL's official speed reference)
 
 Albatross is a forward-loop benchmark (no scheduler, no dynamic batching, no API); this
@@ -1157,6 +1166,16 @@ methodology (including the clock-ramp artifact that forced the interleaved desig
 
 No queueing below 16 req/s — first-token latency stays ~26 ms. The 3090 (v0.5.10) reference
 had 302 ms TTFT at 16 req/s. Raw: `bench/results/pd_mixed_5090.json`, `pd_mixed_3090main.json`.
+
+**Figure — the same table, plus one measured rate the prose skips.** TTFT on a log axis
+(the 300-at-once flood is 60× the steady-state p50 — a linear axis would flatten every
+usable operating point into the floor), per-token latency linear, throughput as the third
+panel; the raw carries a 4 req/s row the table above omits, and the figure draws it.
+
+![Latency under Poisson arrivals: TTFT, per-token, throughput](assets/plots/f12_latency_poisson.svg)
+
+*Protocol: 512-in/256-out, 300 requests per rate, RTX 5090 main. Raw: `pd_mixed_5090.json`.
+Regenerate: `python bench/plots/make_benchmark_plots.py`.*
 
 **ShareGPT** (RWKV-7 1.5B; real conversation lengths, standard `bench_serving`, 500 requests, RTX 5090):
 peak 9,845.6 output / 27,527.7 total tok/s; at 16 req/s median TTFT 32.3 ms. Raw:

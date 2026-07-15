@@ -2205,6 +2205,155 @@ def fig_f9b_sharegpt_w4(out_path, lang):
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# F10 -- multi-GPU TP / PP scaling (§6b)
+# ---------------------------------------------------------------------------
+def f10_data():
+    """§6b's TP/PP matrix -- see f1_panels()'s docstring for why this is
+    factored out. tppp_l4_main.json carries, per config, the c1/8/32/64
+    throughputs plus the greedy-vs-single-GPU verdict; the vs-tp=1 ratio at
+    c=64 is recomputed from the plotted values."""
+    d = load_raw("tppp_l4_main.json")
+    series = []
+    for key, label_key, role in (("tp1", "f10_tp1", "ours"),
+                                 ("tp2", "f10_tp2", "tp2"),
+                                 ("pp2", "f10_pp2", "pp2")):
+        thr = d[key]["throughput"]  # {"1": v, "8": v, "32": v, "64": v}
+        rows = [(int(c), thr[c]) for c in ("1", "8", "32", "64")]
+        series.append({"key": key, "label_key": label_key, "color": XCOLOR[role],
+                       "rows": rows, "matches": d[key].get("matches_tp1")})
+    return series
+
+
+def fig_f10_tp_pp(out_path, lang):
+    series = f10_data()
+    fig, ax = plt.subplots(figsize=(9.2, 5.8), dpi=DPI)
+
+    base_c64 = dict(series[0]["rows"])[64]
+    end_entries = []
+    for s in series:
+        xs = [r[0] for r in s["rows"]]
+        ys = [r[1] for r in s["rows"]]
+        ax.plot(xs, ys, linestyle="-", linewidth=2, color=s["color"], zorder=3,
+                marker="o", markersize=7, markerfacecolor=s["color"],
+                markeredgecolor=SURFACE, markeredgewidth=0.8,
+                label=T(s["label_key"], lang))
+        ratio = ys[-1] / base_c64
+        tag = f"{ys[-1]:,.0f}" if s["key"] == "tp1" else f"{ys[-1]:,.0f} · {ratio:.2f}×"
+        end_entries.append((xs[-1], ys[-1], s["color"], tag))
+
+    ax.set_xscale("log", base=2)
+    ax.xaxis.set_major_locator(FixedLocator([1, 8, 32, 64]))
+    ax.xaxis.set_major_formatter(_INT_FMT)
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.xaxis.set_minor_formatter(NullFormatter())
+    ax.yaxis.set_major_formatter(_INT_FMT)
+    ax.set_xlabel(T("concurrency", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.set_ylabel(T("tok_s", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.set_title(T("f10_title", lang), fontsize=13, color=INK, pad=11, loc="left")
+    ax.grid(True, color=GRID, linewidth=0.8, zorder=0)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_color(AXIS)
+    ax.spines["bottom"].set_color(AXIS)
+    ax.tick_params(labelsize=10.5)
+    ax.set_facecolor(SURFACE)
+    ax.legend(loc="upper left", frameon=False, fontsize=10)
+    _extend_xlim_for_labels(ax, factor=1.09)
+
+    # right=0.88: the zh end labels ("3,026 · 1.17×") measure ~11px wider than
+    # the en ones under the CJK font stack -- verified via the overflow gate,
+    # 0.90 clipped them on the zh variant only.
+    fig.tight_layout(rect=(0, 0.01, 0.88, 0.99))
+    fig.canvas.draw()  # finalize transforms before pixel-space label math
+    _end_labels(ax, end_entries)
+    _source_note(fig)
+    fig.savefig(out_path, metadata=SVG_METADATA)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# F12 -- latency under Poisson arrivals (§9)
+# ---------------------------------------------------------------------------
+def f12_data():
+    """§9's Poisson table -- see f1_panels()'s docstring for why this is
+    factored out. pd_mixed_5090.json's rows carry one extra measured rate
+    (4 req/s) the table's prose omits; the figure draws every landed row."""
+    d = load_raw("pd_mixed_5090.json")
+    return d["rows"]  # [{rate, out_tok_per_s, ttft_p50_ms, ttft_p99_ms, tpot_p50_ms, tpot_p99_ms}]
+
+
+def fig_f12_latency_poisson(out_path, lang):
+    rows = f12_data()
+    fig, axes = plt.subplots(1, 3, figsize=(13.4, 5.0), dpi=DPI,
+                              gridspec_kw={"width_ratios": [1.15, 1.15, 0.9]})
+
+    xs = list(range(len(rows)))
+    xticklabels = [T("f12_inf", lang) if r["rate"] == "inf" else f"{r['rate']:g}" for r in rows]
+
+    def latency_panel(ax, p50_key, p99_key, title_key, logy):
+        for key, xkey, color in ((p50_key, "f12_p50", XCOLOR["p50"]), (p99_key, "f12_p99", XCOLOR["p99"])):
+            ys = [r[key] for r in rows]
+            ax.plot(xs, ys, linestyle="-", linewidth=2, color=color, zorder=3,
+                    marker="o", markersize=6.5, markerfacecolor=color,
+                    markeredgecolor=SURFACE, markeredgewidth=0.8, label=T(xkey, lang))
+            for x, y in zip(xs, ys):
+                # p99 tags above their points, p50 tags below -- fixed offsets,
+                # the two series never cross in this data. The final (all-at-
+                # once) point sits atop a near-vertical segment, so its tag
+                # goes to the LEFT of the marker instead.
+                val = f"{y:,.0f}" if y >= 100 else f"{y:g}"
+                if x == xs[-1]:
+                    ax.annotate(val, (x, y), xytext=(-7, 0), textcoords="offset points",
+                                fontsize=7.4, color=color, ha="right", va="center", zorder=5)
+                else:
+                    dy = 8 if key == p99_key else -14
+                    ax.annotate(val, (x, y), xytext=(0, dy), textcoords="offset points",
+                                fontsize=7.4, color=color, ha="center", zorder=5)
+        if logy:
+            ax.set_yscale("log")
+            ax.yaxis.set_major_locator(FixedLocator([10, 30, 100, 300, 1000, 3000]))
+            ax.yaxis.set_major_formatter(_INT_FMT)
+            ax.yaxis.set_minor_locator(NullLocator())
+            ax.yaxis.set_minor_formatter(NullFormatter())
+        else:
+            ax.yaxis.set_major_formatter(_INT_FMT)
+            ax.set_ylim(0, max(r[p99_key] for r in rows) * 1.28)
+        ax.set_title(T(title_key, lang), fontsize=11.6, color=INK, pad=9, loc="left")
+        ax.set_ylabel(T("f12_ms", lang), fontsize=10.5, color=INK_SECONDARY)
+        ax.legend(loc="upper left", frameon=False, fontsize=9.2)
+
+    latency_panel(axes[0], "ttft_p50_ms", "ttft_p99_ms", "f12_ttft_title", logy=True)
+    latency_panel(axes[1], "tpot_p50_ms", "tpot_p99_ms", "f12_tpot_title", logy=False)
+
+    ax = axes[2]
+    tp = [r["out_tok_per_s"] for r in rows]
+    ax.bar(xs, tp, width=0.6, color=ROLE_COLOR["fp16"], zorder=3, edgecolor=SURFACE, linewidth=1.0)
+    for x, v in zip(xs, tp):
+        ax.text(x, v, f"{v:,.0f}", ha="center", va="bottom", fontsize=7.6, color=INK, zorder=4)
+    ax.set_title(T("tok_s", lang), fontsize=11.6, color=INK, pad=9, loc="left")
+    ax.yaxis.set_major_formatter(_INT_FMT)
+    ax.set_ylim(0, max(tp) * 1.18)
+
+    for ax in axes:
+        ax.set_xticks(xs)
+        ax.set_xticklabels(xticklabels, fontsize=9.2, color=INK)
+        ax.set_xlabel(T("f12_xlabel", lang), fontsize=10.5, color=INK_SECONDARY)
+        ax.grid(True, axis="y", color=GRID, linewidth=0.8, zorder=0)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.spines["left"].set_color(AXIS)
+        ax.spines["bottom"].set_color(AXIS)
+        ax.tick_params(labelsize=9.2)
+        ax.set_facecolor(SURFACE)
+
+    fig.suptitle(T("f12_suptitle", lang), fontsize=13.5, color=INK, x=0.01, ha="left", y=0.99)
+    fig.tight_layout(rect=(0, 0.01, 1, 0.91))
+    _source_note(fig)
+    fig.savefig(out_path, metadata=SVG_METADATA)
+    plt.close(fig)
+
+
 FIGURES = [
     ("f1_concurrency_5090", fig_f1_concurrency_5090),
     ("f2_concurrency_3090", fig_f2_concurrency_3090),
@@ -2215,6 +2364,8 @@ FIGURES = [
     ("f8_albatross", fig_f8_albatross),
     ("f9a_sharegpt_engines", fig_f9a_sharegpt_engines),
     ("f9b_sharegpt_w4", fig_f9b_sharegpt_w4),
+    ("f10_tp_pp", fig_f10_tp_pp),
+    ("f12_latency_poisson", fig_f12_latency_poisson),
 ]
 
 
