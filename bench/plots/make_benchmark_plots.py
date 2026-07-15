@@ -1763,12 +1763,81 @@ def fig_f6_fleet(out_path, lang):
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# F7 -- the §3 single-request speed ladder, RTX 5090 (ordered bars)
+# ---------------------------------------------------------------------------
+def f7_data():
+    """§3's 5090 ladder column for F7 -- see f1_panels()'s docstring for why
+    this is factored out. Each step's tok/s is the context-1024/bsz-1 row of
+    its own serving-scale log (ladder_bsz1's regex); the vs-baseline percents
+    are recomputed here from those raw values, never copied from the table.
+    The table's 3090 column is the v0.5.10 historical ladder with no landed
+    per-step raws (repo + boxes checked 2026-07-15), so this figure draws the
+    5090 column only -- the doc caption says so.
+
+    Roles: the four stack steps are the fp16 tier; the two prequantized rows
+    take their tier hues. The int4 row keeps the doc's own tier-neutral label
+    ("int4 (prequantized)") but wears the int4-GPTQ hue readers know from
+    F1-F4 -- §4b established GPTQ==RTN speed at every paired point, so the
+    hue stands for "the int4 kernel path", not a calibration-method claim.
+    """
+    steps = [
+        ("ladder_base_5090.log", "f7_step_base", "fp16"),
+        ("ladder_mid_5090.log", "f7_step_mid", "fp16"),
+        ("ladder_lora_5090.log", "f7_step_lora", "fp16"),
+        ("ladder_full_5090.log", "f7_step_full", "fp16"),
+        ("ladder_w8_5090.log", "f7_step_w8", "w8g64"),
+        ("ladder_w4_5090.log", "f7_step_w4", "int4_gptq"),
+    ]
+    return [{"label_key": key, "role": role, "toks": ladder_bsz1(rp)}
+            for rp, key, role in steps]
+
+
+def fig_f7_speed_ladder(out_path, lang):
+    data = f7_data()
+    base = data[0]["toks"]
+    fig, ax = plt.subplots(figsize=(9.8, 5.6), dpi=DPI)
+
+    n = len(data)
+    for i, d in enumerate(data):
+        y = n - 1 - i  # top-to-bottom = the table's build order
+        ax.barh(y, d["toks"], height=0.62, color=ROLE_COLOR[d["role"]], zorder=3,
+                edgecolor=SURFACE, linewidth=1.0)
+        if i == 0:
+            tag = f" {d['toks']:,.1f}"
+        else:
+            pct = (d["toks"] / base - 1.0) * 100.0
+            tag = f" {d['toks']:,.1f} · +{pct:.1f}% {T('f7_vs_base', lang)}"
+        ax.text(d["toks"], y, tag, va="center", ha="left", fontsize=9.2, color=INK, zorder=4)
+
+    ax.set_yticks([n - 1 - i for i in range(n)])
+    ax.set_yticklabels([T(d["label_key"], lang) for d in data], fontsize=9.8, color=INK)
+    ax.set_title(T("f7_title", lang), fontsize=13.5, color=INK, pad=11, loc="left")
+    ax.set_xlabel(T("tok_s", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.xaxis.set_major_formatter(_INT_FMT)
+    ax.set_xlim(0, max(d["toks"] for d in data) * 1.38)  # room for the longest end tag
+    ax.grid(True, axis="x", color=GRID, linewidth=0.8, zorder=0)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_color(AXIS)
+    ax.spines["bottom"].set_color(AXIS)
+    ax.tick_params(labelsize=10)
+    ax.tick_params(axis="y", length=0)
+    ax.set_facecolor(SURFACE)
+
+    fig.tight_layout(rect=(0, 0.01, 1, 0.99))
+    _source_note(fig)
+    fig.savefig(out_path, metadata=SVG_METADATA)
+    plt.close(fig)
+
+
 FIGURES = [
     ("f1_concurrency_5090", fig_f1_concurrency_5090),
     ("f2_concurrency_3090", fig_f2_concurrency_3090),
     ("f3_accuracy_speed_frontier", fig_f3_accuracy_speed_frontier),
     ("f4_math500_ladder", fig_f4_math500_ladder),
     ("f6_fleet", fig_f6_fleet),
+    ("f7_speed_ladder", fig_f7_speed_ladder),
 ]
 
 

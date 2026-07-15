@@ -166,6 +166,16 @@ RTX 5090 为 sglang main 实测;3090 列是 v0.5.10 的历史阶梯,供对照。
 
 原始件:`bench/results/ladder_*_5090.log`。3090 在 main 上的阶梯正在重测。
 
+**图——阶梯的条形版。**与表格同一构建顺序,自上而下;每个数值和每个百分比都从日志
+自己的 context-1024/bsz-1 行重新算出,不从上面的单元格抄。3090(v0.5.10)列没有逐级
+落地的原始件,所以图只画 5090 列——与表格备注同一处如实标注的缺口。
+
+![单请求速度阶梯,1.5B,RTX 5090](assets/plots/f7_speed_ladder_zh.svg)
+
+*协议:稳态 bsz1 解码,context 1024,已扣除预填充(serving-scale 工具自己的读数)。
+原始件:`ladder_{base,mid,lora,full,w8,w4}_5090.log`。重新生成:
+`python bench/plots/make_benchmark_plots.py`。*
+
 ## 4. 量化(付出什么,得到什么)
 
 三种模式,都配手写 CUDA 核,都能按 GPU 架构即时编译;档位名的展开解释见[名词表](#g-tiers),

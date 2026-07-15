@@ -181,6 +181,17 @@ the 3090 column is the v0.5.10 historical ladder for lineage.
 
 Raw: `bench/results/ladder_*_5090.log`. The 3090-on-main ladder is being re-measured.
 
+**Figure — the ladder as bars.** Same build order as the table, top to bottom; every value
+and every percentage is recomputed from the logs' own context-1024/bsz-1 rows, not copied
+from the cells above. The 3090 (v0.5.10) column has no landed per-step raws, so the figure
+draws the 5090 column only — same honest gap the table note states.
+
+![Single-request speed ladder, 1.5B, RTX 5090](assets/plots/f7_speed_ladder.svg)
+
+*Protocol: steady-state bsz1 decode at context 1024, prefill-subtracted (the serving-scale
+harness's own number). Raw: `ladder_{base,mid,lora,full,w8,w4}_5090.log`. Regenerate:
+`python bench/plots/make_benchmark_plots.py`.*
+
 ## 4. Quantization (what you trade and what you get)
 
 Three modes, all with hand-written kernels, all arch-portable (JIT per GPU); the tier names are
