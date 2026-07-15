@@ -1206,6 +1206,19 @@ A Transformer's [KV cache](#g-kv-cache) grows on both axes; RWKV-7's [state](#g-
 thing that scales with concurrency, and it is tiny and fixed-per-request. (The VRAM-growth
 rows above are v0.5.10 measurements; unchanged by design on main.)
 
+**Figure — the same equation, drawn.** RWKV-7's per-request state is `L·(2D+64D)` — a flat line
+regardless of context length; a hybrid/transformer's KV cache climbs with it. This one is
+**formula-derived, not measured** (an illustration of the state-size equations in §13, using each
+model's real `L`/`D`), and the on-figure note says so; the measured `+4 MiB` / `+0 MiB` rows above
+are the empirical corroboration.
+
+![Per-request state vs context: RWKV-7 flat, KV cache growing](assets/plots/f14_state_vs_kv.svg)
+
+*Formula-derived (not a raw): RWKV-7 state = `L·(2D+64D)`·bytes (1.5B L=24 D=2048; 7.2B L=32
+D=4096; §13 / F0056 — reproduces the doc's 33.0 / 17.0 MiB and 12.98 / 6.68 MB constants);
+Qwen3.5-2B = constant GDN state + its 6 attention layers' KV cache, ∝ context. Regenerate:
+`python bench/plots/make_benchmark_plots.py`.*
+
 ## 11. Speculative decoding
 
 **Updated 2026-07-07 — correctness done, speed a real partial win.** A 0.1B RWKV-7 draft

@@ -437,6 +437,19 @@ LABELS = {
     "f14_rwkv72": {"en": "RWKV-7 7.2B state (constant)", "zh": "RWKV-7 7.2B 状态(恒定)"},
     "f14_rwkv_fp16state": {"en": "same, with RWKV_STATE_FP16", "zh": "同上,开 RWKV_STATE_FP16"},
     "f14_qwen": {"en": "Qwen3.5-2B: GDN state + growing KV cache", "zh": "Qwen3.5-2B:GDN 状态 + 增长的 KV cache"},
+    "f14_note": {
+        "en": "Formula-derived, not measured (an illustration of the equation).\n"
+              "RWKV-7 state = L·(2D+64D) elements, constant in context length\n"
+              "(1.5B L=24 D=2048; 7.2B L=32 D=4096; §13 / F0056). Qwen3.5-2B\n"
+              "(18 GDN + 6 attn layers): KV cache of its 6 attention layers grows\n"
+              "linearly with context. §10's measured +4 MiB over 1K→64K corroborates flat.",
+        "zh": "公式推导,非实测(是对该公式的图示)。\n"
+              "RWKV-7 状态 = L·(2D+64D) 个元素,与上下文长度无关\n"
+              "(1.5B L=24 D=2048;7.2B L=32 D=4096;§13 / F0056)。Qwen3.5-2B\n"
+              "(18 层 GDN + 6 层 attn):那 6 层 attention 的 KV cache 随上下文\n"
+              "线性增长。§10 实测 1K→64K 仅 +4 MiB,佐证其恒定。",
+    },
+    "f14_grow": {"en": "grows with context →", "zh": "随上下文增长 →"},
 
     # F15
     "f15_suptitle": {
@@ -2579,6 +2592,88 @@ def fig_f13_autotune(out_path, lang):
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# F14 -- §10 constant-state story. FORMULA-DERIVED, not measured: the one
+# exception to this module's raw-only rule. It illustrates the per-request
+# state-size equations printed in §13/F0056 (RWKV-7 state = L·(2D+64D),
+# constant in context length; Qwen3.5-2B's 6 attention layers carry a KV cache
+# that grows with T). The on-figure note and the doc caption both say so.
+# ---------------------------------------------------------------------------
+MIB = 2 ** 20
+
+
+def f14_rwkv_state_mib(L, D, state_fp16=False):
+    # token-shift states (2D elements) stay fp32; the WKV recurrent state
+    # (64D elements = the [H,64,64] matrix, H=D/64) is the part RWKV_STATE_FP16
+    # narrows to fp16. Reproduces §13/F0056's recorded constants: 7.2B 33.0/17.0
+    # MiB, 1.5B 12.4 MiB (= the doc's "12.98 MB") / 6.4 MiB ("6.68 MB").
+    shift_bytes = 2 * D * 4
+    wkv_bytes = 64 * D * (2 if state_fp16 else 4)
+    return L * (shift_bytes + wkv_bytes) / MIB
+
+
+def f14_qwen_state_mib(T, L=24, D=2048):
+    # Qwen3.5-2B (§13's printed formula): 18 GDN layers (¾·L) contribute a
+    # constant state; its 6 attention layers (¼·L) carry a KV cache ∝ T.
+    gdn_bytes = (L * 3 // 4) * (3 * 6 * D + 2 * 128 * D)     # constant offset
+    kv_bytes = (L // 4) * (2 * 2 * 256 * T)                  # grows with context
+    return (gdn_bytes + kv_bytes) / MIB
+
+
+def fig_f14_state_vs_kv(out_path, lang):
+    fig, ax = plt.subplots(figsize=(10.4, 6.6), dpi=DPI)
+    T_MAX = 65536
+    ctx = list(range(0, T_MAX + 1, 1024))
+
+    # (constant MiB, color, linestyle, label key) -- explicit list, deterministic
+    flat = [
+        (f14_rwkv_state_mib(32, 4096), ROLE_COLOR["fp16"], "-", "f14_rwkv72"),
+        (f14_rwkv_state_mib(32, 4096, state_fp16=True), ROLE_COLOR["fp16_state_fp16"], "--", "f14_rwkv_fp16state"),
+        (f14_rwkv_state_mib(24, 2048), XCOLOR["ours_soft"], "-", "f14_rwkv15"),
+    ]
+    end_entries = []
+    for yval, color, ls, key in flat:
+        ax.plot([0, T_MAX], [yval, yval], linestyle=ls, linewidth=2, color=color, zorder=3,
+                label=T(key, lang))
+        end_entries.append((T_MAX, yval, color, f"{yval:.1f} MiB"))
+
+    qy = [f14_qwen_state_mib(t) for t in ctx]
+    ax.plot(ctx, qy, linestyle="-", linewidth=2.4, color=XCOLOR["qwen"], zorder=4,
+            label=T("f14_qwen", lang))
+    end_entries.append((T_MAX, qy[-1], XCOLOR["qwen"], f"{qy[-1]:.0f} MiB"))
+    tmid = ctx[len(ctx) * 6 // 10]
+    ax.annotate(T("f14_grow", lang), (tmid, f14_qwen_state_mib(tmid)), xytext=(-2, 13),
+                textcoords="offset points", fontsize=9, color=XCOLOR["qwen"], rotation=20,
+                ha="center", va="bottom", zorder=5, fontweight="bold")
+
+    ax.set_xlim(0, T_MAX * 1.015)
+    ax.set_ylim(0, max(qy) * 1.12)
+    ax.xaxis.set_major_locator(FixedLocator([0, 16384, 32768, 49152, 65536]))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: "0" if x == 0 else f"{x / 1024:g}K"))
+    ax.yaxis.set_major_formatter(_INT_FMT)
+    ax.set_xlabel(T("f14_xlabel", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.set_ylabel(T("f14_ylabel", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.set_title(T("f14_title", lang), fontsize=13, color=INK, pad=11, loc="left")
+    ax.grid(True, color=GRID, linewidth=0.8, zorder=0)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_color(AXIS)
+    ax.spines["bottom"].set_color(AXIS)
+    ax.tick_params(labelsize=10.5)
+    ax.set_facecolor(SURFACE)
+
+    ax.legend(loc="upper left", frameon=False, fontsize=9.6, bbox_to_anchor=(0.02, 0.995))
+    ax.text(0.035, 0.63, T("f14_note", lang), transform=ax.transAxes, fontsize=8.2,
+            color=INK_SECONDARY, va="top", ha="left", linespacing=1.5, style="italic")
+
+    fig.tight_layout(rect=(0, 0.01, 0.9, 0.99))
+    fig.canvas.draw()  # finalize transforms before pixel-space end-label math
+    _end_labels(ax, end_entries)
+    _source_note(fig)
+    fig.savefig(out_path, metadata=SVG_METADATA)
+    plt.close(fig)
+
+
 FIGURES = [
     ("f1_concurrency_5090", fig_f1_concurrency_5090),
     ("f2_concurrency_3090", fig_f2_concurrency_3090),
@@ -2593,6 +2688,7 @@ FIGURES = [
     ("f11_qwen35_readings", fig_f11_qwen35_readings),
     ("f12_latency_poisson", fig_f12_latency_poisson),
     ("f13_autotune", fig_f13_autotune),
+    ("f14_state_vs_kv", fig_f14_state_vs_kv),
 ]
 
 
