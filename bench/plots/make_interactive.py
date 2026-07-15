@@ -59,8 +59,8 @@ LANGS = mbp.LANGS  # ["en", "zh"] -- reused, not re-declared
 EXTRA_LABELS = {
     "page_title": {"en": "rwkv-sglang benchmark dashboard", "zh": "rwkv-sglang 基准仪表盘"},
     "page_subtitle": {
-        "en": "Interactive companion to the static F1-F5 figures in docs/BENCHMARKS.md",
-        "zh": "docs/BENCHMARKS.md 中静态 F1-F5 图表的交互版",
+        "en": "Interactive companion to the static figures in docs/BENCHMARKS.md",
+        "zh": "docs/BENCHMARKS.md 中静态图表的交互版",
     },
     "lang_toggle_en": {"en": "EN", "zh": "EN"},
     "lang_toggle_zh": {"en": "中文", "zh": "中文"},
@@ -71,6 +71,8 @@ EXTRA_LABELS = {
     "section_f3": {"en": "F3 — accuracy vs. speed frontier", "zh": "F3 — 精度-速度前沿"},
     "section_f4": {"en": "F4 — MATH500 accuracy ladder", "zh": "F4 — MATH500 精度阶梯"},
     "section_f5": {"en": "F5 — positional compression", "zh": "F5 — 位置维度压缩"},
+    "section_f11": {"en": "F11 — RWKV-7 vs Qwen3.5 (three readings)", "zh": "F11 — RWKV-7 对 Qwen3.5(三种读数)"},
+    "section_f15": {"en": "F15 — quantization tradeoff", "zh": "F15 — 量化权衡"},
     "f5_unavailable": {
         "en": "Not yet landed — see MANIFEST key f5_positional_compression_state_precision "
               "in make_benchmark_plots.py.",
@@ -182,6 +184,25 @@ def build_f5_json():
     }
 
 
+def build_f11_json():
+    # mbp.f11_data() -> per-tier bsz1 bars + (peak, concurrency) pairs. Reshaped
+    # to JSON (tuples -> lists); every number traces back to load_rows/sweep_peak.
+    return [{
+        "size": t["size"],
+        "rwkv_deploy": t["rwkv_deploy"],
+        "rwkv_bf16": t["rwkv_bf16"],
+        "qwen_bf16": t["qwen_bf16"],
+        "rwkv_peak": list(t["rwkv_peak"]),
+        "qwen_peak": list(t["qwen_peak"]),
+    } for t in mbp.f11_data()]
+
+
+def build_f15_json():
+    panel_a = [{"size_key": sk, "tiers": [{"role": r, "delta": d} for r, d in tiers]}
+               for sk, tiers in mbp.f15a_data()]
+    return {"panelA": panel_a, "panelB": mbp.f15b_data()}
+
+
 def build_data():
     return {
         "f1": build_f1_json(),
@@ -189,6 +210,8 @@ def build_data():
         "f3": build_f3_json(),
         "f4": build_f4_json(),
         "f5": build_f5_json(),
+        "f11": build_f11_json(),
+        "f15": build_f15_json(),
     }
 
 
@@ -282,6 +305,7 @@ DASHBOARD_JS = r"""
   var ROLE_LABEL = window.__DASH_ROLE_LABEL__;
   var SHORT_LABEL = window.__DASH_SHORT_LABEL__;
   var ROLE_COLOR = window.__DASH_ROLE_COLOR__;
+  var XCOLOR = window.__DASH_XCOLOR__;
   var THEME = window.__DASH_THEME__;
 
   var state = { lang: "en", f1view: "abs", f2view: "abs" };
@@ -686,6 +710,105 @@ DASHBOARD_JS = r"""
     }, true);
   }
 
+  // ---- F11 -- RWKV-7 vs Qwen3.5, three readings ----------------------
+  function catAxis(cats) {
+    return { type: "category", data: cats, axisLabel: { color: THEME.ink, fontSize: 12 },
+             axisLine: { lineStyle: { color: THEME.axis } }, axisTick: { show: false } };
+  }
+  function barValueTooltip() {
+    return { trigger: "axis", axisPointer: { type: "shadow" },
+             valueFormatter: function (v) { return v == null ? "" : fmtInt(v) + " tok/s"; } };
+  }
+  function tokLabel(digits) {
+    return { show: true, position: "top", fontSize: 9, color: THEME.ink,
+             formatter: function (p) { return p.value == null ? "" : fmtInt(p.value); } };
+  }
+  function renderF11() {
+    var tiers = DATA.f11;
+    var cats = tiers.map(function (x) { return x.size; });
+    getChart("f11-panel-0").setOption({
+      backgroundColor: "transparent",
+      title: { text: t("f11_pa_title"), left: 6, top: 2, textStyle: { fontSize: 12, color: THEME.ink, fontWeight: 600 } },
+      grid: { left: 60, right: 18, top: 80, bottom: 32 },
+      tooltip: barValueTooltip(),
+      legend: topLegend([t("f11_rwkv_deploy"), t("f11_rwkv_bf16"), t("f11_qwen")]),
+      xAxis: catAxis(cats),
+      yAxis: valueYAxis("tok_s"),
+      series: [
+        { name: t("f11_rwkv_deploy"), type: "bar", barMaxWidth: 26, itemStyle: { color: XCOLOR.ours }, label: tokLabel(), data: tiers.map(function (x) { return x.rwkv_deploy; }) },
+        { name: t("f11_rwkv_bf16"), type: "bar", barMaxWidth: 26, itemStyle: { color: XCOLOR.ours_soft }, label: tokLabel(), data: tiers.map(function (x) { return x.rwkv_bf16; }) },
+        { name: t("f11_qwen"), type: "bar", barMaxWidth: 26, itemStyle: { color: XCOLOR.qwen }, label: tokLabel(), data: tiers.map(function (x) { return x.qwen_bf16; }) },
+      ],
+    }, true);
+    getChart("f11-panel-1").setOption({
+      backgroundColor: "transparent",
+      title: { text: t("f11_pb_title"), left: 6, top: 2, textStyle: { fontSize: 12, color: THEME.ink, fontWeight: 600 } },
+      grid: { left: 60, right: 18, top: 80, bottom: 32 },
+      tooltip: barValueTooltip(),
+      legend: topLegend([t("f11_rwkv_bf16"), t("f11_qwen")]),
+      xAxis: catAxis(cats),
+      yAxis: valueYAxis("tok_s"),
+      series: [
+        { name: t("f11_rwkv_bf16"), type: "bar", barMaxWidth: 34, itemStyle: { color: XCOLOR.ours_soft }, label: tokLabel(), data: tiers.map(function (x) { return x.rwkv_peak[0]; }) },
+        { name: t("f11_qwen"), type: "bar", barMaxWidth: 34, itemStyle: { color: XCOLOR.qwen }, label: tokLabel(), data: tiers.map(function (x) { return x.qwen_peak[0]; }) },
+      ],
+    }, true);
+  }
+
+  // ---- F15 -- quantization tradeoff ---------------------------------
+  function renderF15() {
+    var d = DATA.f15;
+    var cats = d.panelA.map(function (c) { return t(c.size_key); });
+    var slots = ["w8g64", "w8a8", "int4_gptq"];
+    var seriesA = slots.map(function (role) {
+      return {
+        name: rl(role), type: "bar", barMaxWidth: 30, itemStyle: { color: ROLE_COLOR[role] },
+        data: d.panelA.map(function (c) {
+          var found = null;
+          for (var i = 0; i < c.tiers.length; i++) { if (c.tiers[i].role === role) found = c.tiers[i].delta; }
+          return found;
+        }),
+        label: { show: true, position: "top", fontSize: 8.5, color: THEME.ink,
+                 formatter: function (p) { return p.value == null ? "" : "+" + Number(p.value).toFixed(4); } },
+      };
+    });
+    getChart("f15-panel-0").setOption({
+      backgroundColor: "transparent",
+      title: { text: t("f15a_title"), left: 6, top: 2, textStyle: { fontSize: 11, color: THEME.ink, fontWeight: 600 } },
+      grid: { left: 64, right: 18, top: 76, bottom: 32 },
+      tooltip: { trigger: "item", formatter: function (p) { return "<strong>" + escapeHtml(p.seriesName) + "</strong> · " + escapeHtml(p.name) + "<br/>Δ +" + Number(p.value).toFixed(4) + " bpb"; } },
+      legend: topLegend(slots.map(function (s) { return rl(s); })),
+      xAxis: catAxis(cats),
+      yAxis: valueYAxis("f15a_ylabel", { nameGap: 60, formatter: function (v) { return Number(v).toFixed(3); } }),
+      series: seriesA,
+    }, true);
+    var seriesB = d.panelB.map(function (p) {
+      return {
+        name: rl(p.role), type: "scatter", symbolSize: Math.sqrt(p.gb) * 20,
+        itemStyle: { color: ROLE_COLOR[p.role], borderColor: THEME.surface, borderWidth: 1.3 },
+        data: [{ value: [p.speed, p.acc], gb: p.gb, cross: p.cross, labelText: rl(p.role) }],
+      };
+    });
+    getChart("f15-panel-1").setOption({
+      backgroundColor: "transparent",
+      title: { text: t("f15b_title"), left: 6, top: 2, textStyle: { fontSize: 11, color: THEME.ink, fontWeight: 600 } },
+      grid: { left: 56, right: 26, top: 76, bottom: 46 },
+      tooltip: { trigger: "item", formatter: function (pt) {
+        var dd = pt.data;
+        var html = "<strong>" + escapeHtml(dd.labelText) + "</strong><br/>"
+          + escapeHtml(t("speed_short")) + ": " + fmtInt(dd.value[0]) + " tok/s<br/>"
+          + escapeHtml(t("math500_pct_short")) + ": " + dd.value[1].toFixed(1) + "%<br/>~"
+          + Number(dd.gb).toFixed(1) + " GB";
+        if (dd.cross) { html += '<br/><span class="echarts-tooltip-note">' + escapeHtml(t("f15b_cross")) + "</span>"; }
+        return html;
+      } },
+      legend: topLegend(d.panelB.map(function (p) { return rl(p.role); })),
+      xAxis: Object.assign({}, valueYAxis(null), { type: "value", name: t("f15b_xlabel"), nameLocation: "middle", nameGap: 22, axisLabel: { formatter: fmtInt, color: THEME.ink_muted } }),
+      yAxis: valueYAxis("math500_ylabel", { nameGap: 40 }),
+      series: seriesB,
+    }, true);
+  }
+
   function renderAll() {
     applyI18nText();
     setActiveButtons();
@@ -694,6 +817,8 @@ DASHBOARD_JS = r"""
     renderF3();
     renderF4();
     renderF5();
+    renderF11();
+    renderF15();
   }
 
   function wireControls() {
@@ -794,6 +919,22 @@ HTML_SKELETON = """<title>@@PAGE_TITLE@@</title>
     <div id="f5-available" class="single-card"><div id="f5-chart" class="chart-el tall"></div></div>
     <div id="f5-unavailable-box" class="unavailable" data-i18n="f5_unavailable" style="display:none"></div>
   </section>
+
+  <section class="chart-section" id="section-f11">
+    <div class="section-head"><h2 data-i18n="section_f11"></h2></div>
+    <div class="panel-row">
+      <div class="panel-card"><div id="f11-panel-0" class="chart-el"></div></div>
+      <div class="panel-card"><div id="f11-panel-1" class="chart-el"></div></div>
+    </div>
+  </section>
+
+  <section class="chart-section" id="section-f15">
+    <div class="section-head"><h2 data-i18n="section_f15"></h2></div>
+    <div class="panel-row">
+      <div class="panel-card"><div id="f15-panel-0" class="chart-el"></div></div>
+      <div class="panel-card"><div id="f15-panel-1" class="chart-el"></div></div>
+    </div>
+  </section>
 </main>
 
 <footer class="dash-footer">
@@ -812,6 +953,7 @@ window.__DASH_LABELS__ = @@LABELS_JSON@@;
 window.__DASH_ROLE_LABEL__ = @@ROLE_LABEL_JSON@@;
 window.__DASH_SHORT_LABEL__ = @@SHORT_LABEL_JSON@@;
 window.__DASH_ROLE_COLOR__ = @@ROLE_COLOR_JSON@@;
+window.__DASH_XCOLOR__ = @@XCOLOR_JSON@@;
 window.__DASH_THEME__ = @@THEME_JSON@@;
 </script>
 <script>
@@ -848,6 +990,7 @@ def build_html():
         "@@ROLE_LABEL_JSON@@": _dump(mbp.ROLE_LABEL),
         "@@SHORT_LABEL_JSON@@": _dump(mbp.SHORT_LABEL),
         "@@ROLE_COLOR_JSON@@": _dump(mbp.ROLE_COLOR),
+        "@@XCOLOR_JSON@@": _dump(mbp.XCOLOR),
         "@@THEME_JSON@@": _dump(theme),
         "@@DASHBOARD_JS@@": DASHBOARD_JS,
     }
