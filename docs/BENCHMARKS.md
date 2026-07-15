@@ -79,8 +79,10 @@ link back to their row here on first use. (中文版见
 
 ## 1. Correctness (the gate everything else stands on)
 
-Greedy decoding is compared token-by-token against a pure-numpy fp32 reference implementation
-(`bench/oracle_numpy.py`). A config ships only if it matches 24/24 tokens.
+[Greedy decoding](#g-greedy) is compared token-by-token against a pure-numpy fp32 reference
+implementation (`bench/oracle_numpy.py`) — the ["24/24 EXACT" oracle gate](#g-oracle). A config
+ships only if it matches 24/24 tokens: in plain words, the engine must reproduce the reference
+answer to the letter before any of its speed numbers count.
 
 | what | result | raw |
 |---|---|---|
@@ -96,7 +98,7 @@ full re-run was **bit-identical** (pooled 0.6085, drift −0.0000 over ~7.5M tok
 
 ## 2. Accuracy rulers (official RWKV evaluation definitions)
 
-**Compression rate** (bits per byte on fresh corpora, lower is better; tokenizer-independent,
+**[Compression rate](#g-bpb)** (bits per byte on fresh corpora, lower is better; tokenizer-independent,
 15 corpora × 500 documents). **Re-measured in full on sglang main (2026-07-05): every value below reproduced to the 4th decimal on BOTH the RTX 5090 and RTX 3090** — different silicon, different engine version, same pooled cross-entropy over ~7.5M tokens (`bench/results/uncheatable_full_*_5090main.json`, `*_3090main.json`):
 
 | model · precision | pooled bpb | vs fp16 |
@@ -109,8 +111,8 @@ full re-run was **bit-identical** (pooled 0.6085, drift −0.0000 over ~7.5M tok
 | 7.2B int8 w8a8 | 0.5454 | +0.0041 vs 7.2B fp16 |
 | 7.2B int4 w4 (rwkv_w4, g64) | 0.5615 | +0.0202 vs 7.2B fp16 |
 
-**Quantization costs less at 7.2B than at 1.5B.** w8a8: +0.0041 (7.2B) vs +0.0076 (1.5B); int4:
-+0.0202 (7.2B, plain RTN `rwkv_w4`) vs +0.0429 (1.5B, the stronger GPTQ) — the 7.2B RTN checkpoint
+**[Quantization](#g-quant) costs less at 7.2B than at 1.5B.** [w8a8](#g-tiers): +0.0041 (7.2B) vs +0.0076 (1.5B); [int4](#g-int8):
++0.0202 (7.2B, plain [RTN](#g-gptq-rtn) `rwkv_w4`) vs +0.0429 (1.5B, the stronger GPTQ) — the 7.2B RTN checkpoint
 degrades *less than half* as much as the 1.5B GPTQ one despite the weaker quantizer, i.e. the larger
 model absorbs low-bit weights markedly better (`bench/results/uncheatable_full_{w4,w8a8}_7.2b_5090main.json`).
 
@@ -133,12 +135,12 @@ floor (`bench/verify_w4.py`, 12 configs, rel-err 7.6e-5–2.2e-4). See §4 and F
 reasoning-collapse picture this doesn't fully fix, and why Stage 2 (real K-quant mixed precision)
 isn't recommended yet.
 
-Per-corpus table (all 15, no cherry-picking) and the position-curve (proof the recurrent state
+Per-corpus table (all 15, no cherry-picking) and the [position-curve](#g-positional) (proof the recurrent state
 keeps absorbing context: 3.65 bits at position 0-64 → 2.24 bits past 1024) are in
 `bench/results/uncheatable_*` and F-series reports.
 
-**MATH500** (faithful port of Albatross's `eval_math500.py`: same prompt, sampling, grader,
-1500-token budget):
+**[MATH500](#g-math500)** (faithful port of Albatross's `eval_math500.py`: same prompt, sampling,
+grader, 1500-token budget; avg@64 = 64 sampled attempts per problem, averaged):
 
 All rows are the **RTX 5090** unless noted (avg@64 also has a 3090 column); "main"/"(v0.5.10)"
 is the engine version.
@@ -164,7 +166,8 @@ int4, which is why MATH500 is the ruler that decides quantization quality here.
 
 ## 3. Single-request speed ladder (steady-state, 1.5B fp16)
 
-Each row adds one hand-written kernel set on top of the previous. RTX 5090, sglang main;
+Each row adds one hand-written [kernel](#g-kernel) set on top of the previous (numbers are output
+[tok/s](#g-toks), [single-stream](#g-bsz1)). RTX 5090, sglang main;
 the 3090 column is the v0.5.10 historical ladder for lineage.
 
 | config | RTX 3090 (v0.5.10) | RTX 5090 (main) | 5090 vs its baseline |
@@ -180,22 +183,24 @@ Raw: `bench/results/ladder_*_5090.log`. The 3090-on-main ladder is being re-meas
 
 ## 4. Quantization (what you trade and what you get)
 
-Three modes, all with hand-written kernels, all arch-portable (JIT per GPU):
+Three modes, all with hand-written kernels, all arch-portable (JIT per GPU); the tier names are
+decoded in the [glossary](#g-tiers), and [weight-only vs activation quant](#g-weight-vs-act) is
+the load-bearing distinction between them:
 
 | mode | accuracy cost | when it wins | checkpoints |
 |---|---|---|---|
 | int8 w8g64 (weight-only) | none measurable (greedy-exact; compression +0.0001) | small-batch speed (+13% over fp16 full stack at bsz1 on 5090) + half the weight bytes | ModelScope `Hakureirm/rwkv7-g1-1.5b-w8g64` |
 | int8 w8a8 (tensor-core) | compression 0.6161 (+0.0076, == cutlass); **MATH500 avg@64 0.3812 vs fp16 0.4042 = −2.3pt** (the low-variance ruler resolves a real reasoning cost the compression rate and greedy hid — same pattern as int4, far milder) | large-batch throughput king on sm80–90 (3090 peak 9,851 tok/s, 64-in/256-out). On sm120/Blackwell the upstream cutlass op does not exist; rwkv-sglang's own s8-wmma kernel (register-blocked V2, bit-exact gate, batch-invariant) now serves the tier there — the int8 GEMM beats fp16 cuBLAS at M≥512 (1.03–1.55×), while e2e peak is 20,991 tok/s (@c512, 64-in/256-out) = 0.9466× fp16 (the residual gap is the per-token activation-quant launch tax against an already-tuned fp16 baseline) | box-relayable |
-| int4 GPTQ | lambada −1.28pt at 7.2B (RTN would be −2.64); **1.5B MATH500 avg@64 collapses regardless of symmetric/asymmetric (−25.6pt / −18.6pt vs fp16 — see below)** | lowest VRAM: 7.2B in 4.6 GB weights, serves on a 16 GB T4 at 32.9 tok/s (reproduced 2026-07-09 at 32.8–33.6) + fastest single-stream decode on every card measured, 1.09–2.61× fp16 — full GPTQ/RTN/fp16 speed matrix in §4b | ModelScope `Hakureirm/rwkv7-g1-{1.5b,7.2b}-w4gptq` |
+| int4 GPTQ | [lambada](#g-lambada) −1.28pt at 7.2B (RTN would be −2.64); **1.5B MATH500 avg@64 collapses regardless of symmetric/asymmetric (−25.6pt / −18.6pt vs fp16 — see below)** | lowest [VRAM](#g-vram): 7.2B in 4.6 GB weights, serves on a 16 GB T4 at 32.9 tok/s (reproduced 2026-07-09 at 32.8–33.6) + fastest single-stream decode on every card measured, 1.09–2.61× fp16 — full GPTQ/RTN/fp16 speed matrix in §4b | ModelScope `Hakureirm/rwkv7-g1-{1.5b,7.2b}-w4gptq` |
 
 Prequantized checkpoints are required (the loader reads qweight/scale keys; pointing the
 quant flags at an fp16 dir errors out by design).
 
 **Where int8 is decisive — 7.2B on a single 32 GB 5090 (measured 2026-07-06; fp16 side
 corrected 2026-07-07, [F0047](docs/findings/0047-fp16-72b-concurrency-correction.md)).**
-RWKV-7 state is constant-size, so the state-pool slot count is the max concurrency
-(per-request state ≈ 33 MB, identical for both — it is fp32 model state, independent of
-weight quantization).
+RWKV-7 [state](#g-state) is constant-size, so the state-pool slot count is the max
+[concurrency](#g-concurrency) (per-request state ≈ 33 MB, identical for both — it is fp32 model
+state, independent of weight quantization).
 
 **Correction:** the original fp16 sweep grid stopped at concurrency 221 on the untested
 assumption that fp16 was already pinned at a hard OOM ceiling there. Re-running with a finer
@@ -244,8 +249,8 @@ F0043):** perplexity-style metrics understate int4's damage to multi-step reason
 GPTQ checkpoint, compression looks mild (0.6514 old N=7500 / 0.6330 clean N=300 symmetric) but
 **MATH500 avg@64 is 0.1498** (32,000-rollout, 64-way temperature sampling — confirms the greedy
 read of 0.1560 wasn't a decoding-strategy fluke) **vs fp16's 0.4060** — the quantized model loses
-the thread mid-derivation and rambles to the token cap (57.7% truncation vs fp16's 14.2%, mean
-1023 vs 581 generated tokens).
+the thread mid-derivation and rambles to the token cap (57.7% [truncation](#g-truncation) vs
+fp16's 14.2%, mean 1023 vs 581 generated tokens).
 
 **Asymmetric (scale+zero) quantization — the cheap fix, tried first — helps for real but doesn't
 solve it at 1.5B:** avg@64 improves to **0.2199** (truncation down to 30.5%), closing 27.4% of
@@ -339,10 +344,10 @@ unless the caption says otherwise. Raw: `math500_avg64_{5090main,w8a8_5090main}.
 `bsz_sweep_7.2b_w4gptq_5090.json` + `bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_w4a8.json`
 (speed axis). Regenerate: `python bench/plots/make_benchmark_plots.py`.*
 
-**The sm120 w8a8 kernel (GEMM microbench).** Upstream cutlass `int8_scaled_mm` does not
+**The [sm120](#g-sm) w8a8 kernel (GEMM microbench).** Upstream cutlass `int8_scaled_mm` does not
 compile for sm120, so on Blackwell consumer cards our hand-written s8-wmma GEMM (register-
 blocked "V2", bit-exact vs a per-row reference, batch-invariant) is the only int8 path. It
-beats fp16 cuBLAS on the projection shapes at decode/prefill batch (RTX 5090, standalone
+beats fp16 cuBLAS on the projection shapes at [decode/prefill](#g-prefill-decode) batch (RTX 5090, standalone
 GEMM, × = our speedup over fp16):
 
 | projection shape | M=512 | M=1024 | M=4096 |
@@ -362,9 +367,9 @@ lives. Raw: `bench/verify_w8a8.py --bench`.
 §4 answers what int4 *costs* (accuracy); this section answers how fast it *serves* — a
 direct question from BlinkDL: how fast is symmetric GPTQ int4? Protocol at every point
 below: 64-in/256-out fixed-shape sweep, live server + `bench/bsz_throughput.py`
-(wall-clock window), cuda-graph ON with explicit `--cuda-graph-max-bs`, one server per GPU
-at a time. "Gate" = greedy token match vs the fp32 numpy oracle (§1's ruler), run against
-the same serving setup that produced the speed numbers.
+(wall-clock window), [cuda-graph](#g-cuda-graph) ON with explicit `--cuda-graph-max-bs`, one
+server per GPU at a time. "Gate" = greedy token match vs the fp32 numpy oracle ([§1's
+ruler](#g-oracle)), run against the same serving setup that produced the speed numbers.
 
 **The direct answer: GPTQ and RTN are the same speed, everywhere.** At every card/model
 pair where both were measured — the 5090 at 0.1B/1.5B/7.2B, the 3090 at 1.5B/7.2B,
@@ -398,8 +403,8 @@ the env. Net: **int4 single-stream 184.2 vs 123.7 = +48.9% over fp16; int4 peak 
 73% of fp16's 6,709** — int4 is the latency/VRAM tier, fp16 remains the high-concurrency
 throughput tier on this card.
 
-**A reproducible artifact, documented rather than smoothed over — the w4 cliff past
-c=64.** On the 5090 the w4 curve collapses from 4,149.6 @c64 to 2,051.0 @c96, then climbs
+**A reproducible artifact, documented rather than smoothed over — [the w4 cliff past
+c=64](#g-m64).** On the 5090 the w4 curve collapses from 4,149.6 @c64 to 2,051.0 @c96, then climbs
 back to 4,918.5 @c512. It is not noise: GPTQ and RTN reproduce it within 0.2% of each
 other (2,051.0 / 2,047.2), and the c=128 point repeated across two independent runs within
 0.4 tok/s (2,613.4 / 2,613.8). **Root cause confirmed (3090 fine map, 2026-07-10)** — this
@@ -444,8 +449,11 @@ still RED after the same-day `RWKV_W4_TC_MAX_M=512` cap confined the kernel to t
 range the table above measures — 58.07% (−3.00pt, truncation 33.0%), i.e. removing prefill from
 the path recovered only +0.42pt while cutting wall time 8%. The damage is decode-side
 per-token-int8 in the generation loop itself, not dispatch scope. **Final positioning: the
-speed fix is real and stays available, but it is accuracy-gated** — the flag pair remains an
-experimental, default-OFF opt-in for throughput-tolerant workloads (bulk/draft generation);
+speed fix is real and stays available, but it is accuracy-gated** — in plain words: this
+optimization **failed the accuracy exam ([RED](#g-gate))**, so it ships **default-OFF** and
+exists only as an experimental [opt-in switch](#g-opt-in); whoever flips it on accepts the
+measured −3pt MATH500 cost above. The flag pair remains that opt-in for throughput-tolerant
+workloads (bulk/draft generation);
 for accuracy-critical reasoning at high concurrency use the near-lossless w8 (g64 weight-only)
 tier instead, or run w4 at c≤64 where the unchanged w4a16 kernels serve everything. Full
 writeup, every number's raw citation, and the refuted-hypothesis analysis:
@@ -485,7 +493,7 @@ identity), but deploying 0.1B RTN would be shipping a broken model at high speed
 speed parity holds across all 8 sweep points (mean |diff| 0.64%) — the parity survives even
 where quality doesn't.
 
-**0.1B real workload** (ShareGPT, `python -m sglang.bench_serving`, 500 prompts): fp16
+**0.1B real workload** ([ShareGPT](#g-sharegpt), `python -m sglang.bench_serving`, 500 prompts): fp16
 31,255 output tok/s at rate=inf and 3,459 at rate=16; GPTQ 31,006 (−0.8%) and 3,476
 (+0.5%) — the fixed-shape parity carries over to variable-length load at this size. RTN
 ShareGPT was **not measured**: those two runs were blocked by an sglang-overlay version
@@ -652,8 +660,9 @@ kept for the record).
 **Figure — per-size concurrency curves, RTX 3090, including the w4 M=64 cliff.** The 7.2B
 panel overlays the base fp16/RTN matrix with the dense int4-GPTQ cliff map (the c=64→66
 edge from the fine map) and the w4a8-tc experimental fix (F0055) — drawn dashed with
-hollow markers because it is a default-OFF, accuracy-gated opt-in (§4b), not a
-recommended-path number. `bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_base.json` is consumed
+hollow markers because it is a default-OFF, accuracy-gated opt-in (§4b) — plain words: it
+failed the accuracy exam ([RED](#g-gate)), so it does nothing unless an operator explicitly
+enables it and accepts the measured accuracy cost — not a recommended-path number. `bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_base.json` is consumed
 as the matched control for the w4a8 delta (F0055 §1) but not drawn as its own line — it
 reproduces the plotted cliff-map curve within ~1.6% at shared points (1,407.0 vs 1,429.5
 tok/s @c=64), and a near-duplicate line would only add clutter.
@@ -667,18 +676,20 @@ Regenerate: `python bench/plots/make_benchmark_plots.py`.*
 ### `RWKV_STATE_FP16` — a recommended throughput switch (2026-07-13, F0056)
 
 Orthogonal to the three weight-quantization modes in §4: this flag halves the **temporal WKV
-recurrent state**'s storage from fp32 to fp16 (token-shift/conv state and the in-register fp32
+[recurrent state](#g-state)**'s storage from fp32 to fp16 (token-shift/conv state and the in-register fp32
 accumulation are unaffected — this is a storage-only change, the WKV kernel's arithmetic does
 not move). Same treatment as the quantization tiers above: a named opt-in, disclosed accuracy
-cost next to the speed number, default left OFF so the bitwise-oracle tier (§1) stays reachable
-with zero flags.
+cost next to the speed number, default left OFF so the [bitwise-oracle tier](#g-exact-tier) (§1) stays reachable
+with zero flags. In plain words: this switch **passed** all four accuracy exams ([GREEN](#g-gate))
+and is recommended — it defaults to off only so that "zero flags" keeps meaning "bit-for-bit
+exact"; turning it on is a documented choice, not a hidden one.
 
 **Capacity effect** (independently confirmed via reported free memory at matched batch size,
 not only computed from byte-widths): per-request state **7.2B 33→17 MB, 1.5B 12.98→6.68 MB** —
 at a 512-slot pool this is **1.5B 6.01→3.01 GB**, i.e. the same memory budget fits roughly twice
 the concurrent state.
 
-**Gate ladder, all green** (full derivation, every raw cited:
+**[Gate](#g-gate) ladder, all green** (full derivation, every raw cited:
 `docs/findings/0056-w1prime-serving-fixes.md`):
 
 | ruler | OFF | ON | Δ |
@@ -750,8 +761,8 @@ Raw: `bench/results/w1prime_legFinal_B_7.2b_5090.json`.
 
 ## 6. The 10-GPU fleet (same code, same recipe, every card)
 
-1.5B fp16 full stack on sglang main, wall-clock. **Single-request = bsz1 sustained decode
-(steady state); peak = best total throughput over a 64-in/256-out concurrency sweep** (capped
+1.5B fp16 full stack on sglang main, wall-clock. **Single-request = [bsz1](#g-bsz1) sustained decode
+(steady state); [peak](#g-peak) = best total throughput over a 64-in/256-out concurrency sweep** (capped
 at 384 concurrency on the fleet, 512 on the workstation 5090):
 
 | GPU | arch | single request | peak |
@@ -774,7 +785,7 @@ H100 and B200 — single-stream decode is a memory-bandwidth story and GDDR7 del
 
 ## 6b. Multi-GPU: TP / PP (verified on main, cuda-graph ON)
 
-Tensor- and pipeline-parallel, on sglang main under the production cuda-graph path (F0019's
+[Tensor- and pipeline-parallel](#g-tp-pp) (TP/PP), on sglang main under the production cuda-graph path (F0019's
 matrix was cuda-graph OFF). 1.5B bf16, 2×L4, wall-clock tok/s, **64-in/256-out** (c1/c8/c32/c64
 = concurrency). **TP=2 and PP=2 are both greedy 24/24 identical to single-GPU and
 deterministic** — multi-GPU changes nothing about the output. (Getting PP here first required
@@ -821,7 +832,7 @@ notes this is removable — a patched kernel runs on T4 — so it's a packaging 
 one. The claim here is strictly out-of-the-box: our stack serves T4 unmodified, and we have not
 benchmarked a hand-patched Albatross on T4.
 
-How to read it: the gap tracks memory bandwidth. On inference cards we are close (0.90 on
+How to read it: the gap tracks memory bandwidth ([bandwidth-bound](#g-bound) territory). On inference cards we are close (0.90 on
 L4); on HBM monsters its whole-layer fused kernel stretches ahead (0.51 on B200) because our
 per-operator launch overhead grows in relative terms as compute gets faster — which is
 precisely what our next speed increment (CUDA graphs + deeper fusion) targets. Meanwhile our
@@ -1044,7 +1055,7 @@ so this row is mild overload, not true steady state. The 5090 handles 16 req/s c
 **The reversal — and it's the point.** On the *synthetic fixed-shape* sweep, vllm-rwkv led
 high concurrency (its Albatross kernels + decode-wave batching like uniform shapes). On
 *real variable-length* load at peak, **rwkv-sglang leads throughput on both cards** (1.08× on
-the 5090, 1.42× on the 3090) with lower median time-to-first-token — sglang's continuous
+the 5090, 1.42× on the 3090) with lower median [time-to-first-token](#g-ttft) — sglang's continuous
 dynamic batching packs uneven requests without the bubbles a wave scheduler leaves on
 variable shapes. At steady 16 req/s the two are within a few percent on throughput, and
 tail latency is mixed (vllm-rwkv's steady-state inter-token tail is tighter; rwkv-sglang's
@@ -1098,7 +1109,7 @@ peak 9,845.6 output / 27,527.7 total tok/s; at 16 req/s median TTFT 32.3 ms. Raw
 | context 1K → 32K (7.2B) | 17,866 MiB | 17,866 MiB | **+0 MiB** |
 | concurrency 1 → 64 (7.2B, 24 GB card) | 46.6 tok/s | 1,802.7 tok/s | +308 MiB |
 
-A Transformer's KV cache grows on both axes; RWKV-7's state does not. This is why a single
+A Transformer's [KV cache](#g-kv-cache) grows on both axes; RWKV-7's [state](#g-state) does not. This is why a single
 32 GB 5090 serves **640 concurrent 7.2B streams** with w8a8 (§4) — the state pool is the only
 thing that scales with concurrency, and it is tiny and fixed-per-request. (The VRAM-growth
 rows above are v0.5.10 measurements; unchanged by design on main.)
@@ -1111,6 +1122,12 @@ plugin architecture (`RWKV_SPEC`, modeled on the `NGRAMWorker` template — reus
 verify+commit machinery rather than a bespoke worker, per the [2026-07-06 pivot in
 ADR-0006](adr/0006-speculative-decoding.md)); rejected tokens roll back via an O(1) state
 snapshot.
+
+Plain-words status first: [speculative decoding](#g-spec) is the "fast intern drafts, expert
+verifies" trick. Here the **correctness half is fully done** — with the feature on, outputs are
+still token-identical to normal decoding — but the **speed half is not**: end to end it is
+currently *slower* than not using the feature at all, so it stays off. It is documented anyway
+because this project records negative results with the same rigor as wins.
 
 **Correctness: `bench/spec_gate.py` is 10/10** token-identical (spec-on vs spec-off, greedy),
 holding at both 128 and 256 generation length, with zero regression on the pre-existing
