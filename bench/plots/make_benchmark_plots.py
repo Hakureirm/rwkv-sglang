@@ -457,14 +457,29 @@ LABELS = {
         "zh": "量化各档一览——每档付出什么、得到什么",
     },
     "f15a_title": {
-        "en": "accuracy cost: compression rate Δ vs same-size fp16 (pooled bpb, lower is better)",
-        "zh": "精度代价:压缩率相对同尺寸 fp16 的增量(池化 bpb,越低越好)",
+        "en": "compression-rate Δ vs same-size fp16 (pooled bpb, lower=better)",
+        "zh": "压缩率相对同尺寸 fp16 的增量(池化 bpb,越低越好)",
     },
     "f15a_ylabel": {"en": "Δ pooled bpb vs fp16", "zh": "池化 bpb 相对 fp16 增量"},
     "f15b_title": {
-        "en": "1.5B: single-stream speed vs MATH500 avg@64 (wall-clock c=1, RTX 5090)",
-        "zh": "1.5B:单流速度 对 MATH500 avg@64(全程计时 c=1,RTX 5090)",
+        "en": "1.5B speed vs MATH500 avg@64 (single-stream c=1, RTX 5090)",
+        "zh": "1.5B 单流速度 对 MATH500 avg@64(c=1,RTX 5090)",
     },
+    "f15b_xlabel": {"en": "single-stream output tok/s (c=1)", "zh": "单流输出 tok/s(c=1)"},
+    "f15_vram_note": {
+        "en": "marker area ∝ weight footprint (params × byte-width); GB annotated per point",
+        "zh": "标记面积与权重占用成正比(参数 × 字节宽);每点已标注 GB",
+    },
+    "f15b_cross": {
+        "en": "int4 point: speed 5090 · accuracy 3090 (ruler card-invariant ±0.27pt, §2)",
+        "zh": "int4 那点:速度 5090 · 精度 3090(尺子跨卡不变 ±0.27pt,§2)",
+    },
+    "f15a_note": {
+        "en": "compression barely moves — the metric that hides int4's 1.5B reasoning collapse (see right)",
+        "zh": "压缩率几乎不动——正是这个指标掩盖了 int4 在 1.5B 上的推理坍缩(见右)",
+    },
+    "f15_size_15": {"en": "1.5B", "zh": "1.5B"},
+    "f15_size_72": {"en": "7.2B", "zh": "7.2B"},
 
     # F16
     "f16_suptitle": {
@@ -506,6 +521,7 @@ ROLE_LABEL = {
         "en": "fp16 + RWKV_STATE_FP16 (W1')", "zh": "fp16 + RWKV_STATE_FP16 (W1')",
     },
     "int4_rtn": {"en": "int4 RTN", "zh": "int4 RTN"},
+    "w8g64": {"en": "int8 w8g64 (weight-only)", "zh": "int8 w8g64(仅权重)"},
     "w8a8": {"en": "int8 w8a8", "zh": "int8 w8a8"},
     "int4_gptq": {"en": "int4 GPTQ", "zh": "int4 GPTQ"},
     "int4_gptq_asym": {"en": "int4 GPTQ (asymmetric)", "zh": "int4 GPTQ(非对称)"},
@@ -2674,6 +2690,126 @@ def fig_f14_state_vs_kv(out_path, lang):
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# F15 -- §4 quantization tradeoff, two complementary panels that F3 (the 7.2B
+# accuracy/speed frontier) and F4 (the MATH500 ladder) do NOT already cover:
+#   A: compression-rate Δ vs same-size fp16 across tiers AND both sizes -- the
+#      one accuracy metric int8 w8g64/w8a8 has a landed 7.2B number for, and the
+#      metric §4 says "hides int4's reasoning damage".
+#   B: 1.5B single-stream speed vs MATH500 avg@64, marker area = weight VRAM --
+#      the size where int4's MATH500 collapse is dramatic (so it complements
+#      F3's 7.2B frontier instead of duplicating it). int4's accuracy raw is a
+#      3090 run (F0043-era, per F4's own note) while its speed is 5090; that
+#      one cross-card pair is labeled on-figure, F3-style.
+# ---------------------------------------------------------------------------
+def f15a_data():
+    fp16_15 = pooled_bpb("uncheatable_full_fp16_1.5b_5090main.json")
+    fp16_72 = pooled_bpb("uncheatable_full_fp16_7.2b_5090main.json")
+    return [
+        ("f15_size_15", [
+            ("w8g64", pooled_bpb("uncheatable_full_w8_1.5b_5090main.json") - fp16_15),
+            ("w8a8", pooled_bpb("uncheatable_full_w8a8_1.5b_5090main.json") - fp16_15),
+            ("int4_gptq", pooled_bpb("uncheatable_full_w4_1.5b_5090main.json") - fp16_15),
+        ]),
+        # 7.2B has no landed w8g64 uncheatable raw -> that tier slot is left empty
+        # (honest gap), not back-filled.
+        ("f15_size_72", [
+            ("w8a8", pooled_bpb("uncheatable_full_w8a8_7.2b_5090main.json") - fp16_72),
+            ("int4_gptq", pooled_bpb("uncheatable_full_w4_7.2b_5090main.json") - fp16_72),
+        ]),
+    ]
+
+
+def f15b_data():
+    # 1.5B total params (§13's non-emb table: total 1.527B). Weight footprint is
+    # the standard params x byte-width proxy (fp16 2B, int8 1B, int4 0.5B/param),
+    # stated as indicative in the caption -- §4 prints a weight-GB figure only for
+    # 7.2B int4 (4.6 GB), and this panel is 1.5B.
+    PARAMS = 1.527e9
+
+    def c1(p):
+        return dict(load_rows(p))[1]
+
+    return [
+        {"role": "fp16", "speed": c1("bsz_sweep_1.5b_fp16_5090.json"),
+         "acc": math500_pct("math500_avg64_5090main.json")[0], "gb": PARAMS * 2 / 1e9, "cross": False},
+        {"role": "w8a8", "speed": c1("bsz_sweep_w8a8v2_5090main.json"),
+         "acc": math500_pct("math500_avg64_w8a8_5090main.json")[0], "gb": PARAMS * 1 / 1e9, "cross": False},
+        {"role": "int4_gptq", "speed": c1("bsz_sweep_1.5b_w4gptq_5090.json"),
+         "acc": math500_pct("math500_avg64_1.5b_sym.json")[0], "gb": PARAMS * 0.5 / 1e9, "cross": True},
+    ]
+
+
+def fig_f15_quant_tradeoff(out_path, lang):
+    fig, (axa, axb) = plt.subplots(1, 2, figsize=(13.8, 6.2), dpi=DPI,
+                                   gridspec_kw={"width_ratios": [1.0, 1.12]})
+
+    # ---- panel A: compression-rate Δ, grouped by size, tier-hued ----
+    slot = {"w8g64": -0.27, "w8a8": 0.0, "int4_gptq": 0.27}  # fixed tier slots
+    clusters = f15a_data()
+    seen = []
+    for ci, (size_key, tiers) in enumerate(clusters):
+        for role, delta in tiers:
+            axa.bar(ci + slot[role], delta, width=0.25, color=ROLE_COLOR[role], zorder=3,
+                    edgecolor=SURFACE, linewidth=1.0,
+                    label=role_label(role, lang) if role not in seen else None)
+            seen.append(role)
+            axa.text(ci + slot[role], delta, f"+{delta:.4f}", ha="center", va="bottom",
+                     fontsize=8.4, color=INK, zorder=4)
+    max_d = max(d for _s, ts in clusters for _r, d in ts)
+    axa.set_ylim(0, max_d * 1.22)
+    axa.set_xticks(range(len(clusters)))
+    axa.set_xticklabels([T(s, lang) for s, _t in clusters], fontsize=11, color=INK)
+    axa.set_title(T("f15a_title", lang), fontsize=10.8, color=INK, pad=9, loc="left")
+    axa.set_ylabel(T("f15a_ylabel", lang), fontsize=11, color=INK_SECONDARY)
+    axa.yaxis.set_major_formatter(FuncFormatter(lambda y, p: f"{y:.3f}"))
+    axa.text(0.5, -0.14, T("f15a_note", lang), transform=axa.transAxes, fontsize=8.4,
+             color=INK_MUTED, ha="center", va="top", style="italic")
+    axa.legend(loc="upper left", frameon=False, fontsize=9.6)
+
+    # ---- panel B: 1.5B speed vs MATH500, marker area = weight VRAM ----
+    pts = f15b_data()
+    for p in pts:
+        axb.scatter([p["speed"]], [p["acc"]], s=130 * p["gb"], color=ROLE_COLOR[p["role"]],
+                    edgecolors=SURFACE, linewidths=1.3, zorder=4)
+    # annotations placed away from the markers; explicit per-point offsets (3 points)
+    ann = {"fp16": (10, 20, "left"), "w8a8": (12, 18, "left"), "int4_gptq": (10, 24, "left")}
+    for p in pts:
+        dx, dy, ha = ann[p["role"]]
+        txt = f"{role_label(p['role'], lang)}\n{p['speed']:,.0f} tok/s · {p['acc']:.1f}% · ~{p['gb']:.1f} GB"
+        if p["cross"]:
+            txt += f"\n{T('f15b_cross', lang)}"
+        axb.annotate(txt, (p["speed"], p["acc"]), textcoords="offset points", xytext=(dx, dy),
+                     fontsize=8.2, color=INK, zorder=6, ha=ha, va="bottom", linespacing=1.4,
+                     arrowprops=dict(arrowstyle="-", color=INK_MUTED, lw=0.7))
+    sp = [p["speed"] for p in pts]
+    ac = [p["acc"] for p in pts]
+    axb.set_xlim(min(sp) - 60, max(sp) + 90)
+    axb.set_ylim(min(ac) - 8, max(ac) + 16)
+    axb.set_title(T("f15b_title", lang), fontsize=10.8, color=INK, pad=9, loc="left")
+    axb.set_xlabel(T("f15b_xlabel", lang), fontsize=11, color=INK_SECONDARY)
+    axb.set_ylabel(T("math500_ylabel", lang), fontsize=11, color=INK_SECONDARY)
+    axb.xaxis.set_major_formatter(_INT_FMT)
+    axb.text(0.5, -0.145, T("f15_vram_note", lang), transform=axb.transAxes, fontsize=8.4,
+             color=INK_MUTED, ha="center", va="top", style="italic")
+
+    for ax in (axa, axb):
+        ax.grid(True, axis="y" if ax is axa else "both", color=GRID, linewidth=0.8, zorder=0)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.spines["left"].set_color(AXIS)
+        ax.spines["bottom"].set_color(AXIS)
+        ax.tick_params(labelsize=10)
+        ax.set_facecolor(SURFACE)
+    axa.tick_params(axis="x", length=0)
+
+    fig.suptitle(T("f15_suptitle", lang), fontsize=14.5, color=INK, x=0.01, ha="left", y=0.99)
+    fig.tight_layout(rect=(0, 0.06, 1, 0.93))
+    _source_note(fig)
+    fig.savefig(out_path, metadata=SVG_METADATA)
+    plt.close(fig)
+
+
 FIGURES = [
     ("f1_concurrency_5090", fig_f1_concurrency_5090),
     ("f2_concurrency_3090", fig_f2_concurrency_3090),
@@ -2689,6 +2825,7 @@ FIGURES = [
     ("f12_latency_poisson", fig_f12_latency_poisson),
     ("f13_autotune", fig_f13_autotune),
     ("f14_state_vs_kv", fig_f14_state_vs_kv),
+    ("f15_quant_tradeoff", fig_f15_quant_tradeoff),
 ]
 
 

@@ -355,6 +355,23 @@ unless the caption says otherwise. Raw: `math500_avg64_{5090main,w8a8_5090main}.
 `bsz_sweep_7.2b_w4gptq_5090.json` + `bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_w4a8.json`
 (speed axis). Regenerate: `python bench/plots/make_benchmark_plots.py`.*
 
+**Figure — each tier's cost, two ways.** Left: compression-rate Δ vs same-size fp16 across
+tiers and both sizes (the one accuracy metric int8 w8g64/w8a8 has a landed 7.2B number for) —
+every Δ is tiny, int4 included. Right: at 1.5B, single-stream speed vs MATH500 avg@64 with marker
+area = weight footprint — the *same* int4 checkpoint whose compression "looks mild" on the left has
+**collapsed to 14.98%** on MATH500 (vs fp16's 40.4%). That gap between the two panels *is* §4's
+central int4 warning, drawn. (w8a8's single-stream point is its *worst* case — its win is
+large-batch throughput, §4/§5 above — so read it as the accuracy anchor here, not a speed claim.)
+
+![Quantization tiers: compression-rate cost, and the 1.5B speed/accuracy/VRAM tradeoff](assets/plots/f15_quant_tradeoff.svg)
+
+*Left panel is compression-rate Δ recomputed from `uncheatable_full_{fp16,w8,w8a8,w4}_{1.5b,7.2b}_5090main.json`
+(7.2B has no landed w8g64 raw — that slot is left empty, not filled). Right panel: speed = c=1 from
+`bsz_sweep_1.5b_fp16_5090.json` / `bsz_sweep_w8a8v2_5090main.json` / `bsz_sweep_1.5b_w4gptq_5090.json`
+(RTX 5090); accuracy = `math500_avg64_{5090main,w8a8_5090main,1.5b_sym}.json` (int4's is a 3090
+run, labeled on-figure); marker area = params × byte-width (indicative). Regenerate:
+`python bench/plots/make_benchmark_plots.py`.*
+
 **The [sm120](#g-sm) w8a8 kernel (GEMM microbench).** Upstream cutlass `int8_scaled_mm` does not
 compile for sm120, so on Blackwell consumer cards our hand-written s8-wmma GEMM (register-
 blocked "V2", bit-exact vs a per-row reference, batch-invariant) is the only int8 path. It

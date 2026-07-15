@@ -313,6 +313,21 @@ int4-GPTQ 的速度(5090,§4b)和精度(3090,F0055 §0)就是一例。int8 w8a8/
 `bsz_sweep_7.2b_w4gptq_5090.json` + `bsz_sweep_7.2b_w4gptq_3090_cliff_stage1_w4a8.json`
 (速度轴)。重新生成:`python bench/plots/make_benchmark_plots.py`。*
 
+**图 — 每一档的代价,两种看法。** 左:压缩率相对同尺寸 fp16 的增量,跨档、跨两个尺寸(这是 int8
+w8g64/w8a8 唯一有落地 7.2B 数字的精度指标)——每个增量都很小,int4 也不例外。右:在 1.5B 上,单流
+速度对 MATH500 avg@64,标记面积 = 权重占用——左图里压缩率"看着还好"的*同一个* int4 checkpoint,在
+MATH500 上**坍缩到 14.98%**(fp16 是 40.4%)。两个面板之间的这个落差,正是 §4 的核心 int4 警告被画
+出来的样子。(w8a8 的单流那点是它*最差*的情况——它的强项是大批量吞吐,见上面 §4/§5——所以这里把它
+当准确率锚点读,不是速度主张。)
+
+![量化各档:压缩率代价,以及 1.5B 的速度/准确率/显存权衡](assets/plots/f15_quant_tradeoff_zh.svg)
+
+*左面板压缩率增量由 `uncheatable_full_{fp16,w8,w8a8,w4}_{1.5b,7.2b}_5090main.json` 现算(7.2B 没有
+落地的 w8g64 原始件——那个槽位留空,不回填)。右面板:速度为 c=1,取自 `bsz_sweep_1.5b_fp16_5090.json`
+/ `bsz_sweep_w8a8v2_5090main.json` / `bsz_sweep_1.5b_w4gptq_5090.json`(RTX 5090);准确率取自
+`math500_avg64_{5090main,w8a8_5090main,1.5b_sym}.json`(int4 那点是 3090 跑的,已在图上标注);标记面积
+= 参数 × 字节宽(指示性)。重新生成:`python bench/plots/make_benchmark_plots.py`。*
+
 **[sm120](#g-sm) w8a8 内核(GEMM 微基准)。**上游 cutlass `int8_scaled_mm` 在 sm120 上编译不了,
 所以 Blackwell 消费卡上我们自写的 s8-wmma GEMM(寄存器分块"V2",对逐行参考位精确、批不变)
 是唯一的 int8 路。它在 [decode/prefill](#g-prefill-decode) 批量的投影形状上快过 fp16 cuBLAS(RTX 5090,单核 GEMM,
