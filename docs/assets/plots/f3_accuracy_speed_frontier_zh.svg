@@ -472,7 +472,7 @@ Q 578.640055 257.745771 594.770155 253.083608
     <text style="font-size: 8.2px; font-family: 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Heiti SC', 'DejaVu Sans', sans-serif; fill: #0b0b0b" transform="translate(400.990864 298.527598)">不是单流:3090 峰值并发(c=128)· F0055 §6</text>
    </g>
    <g id="text_31">
-    <text style="font-weight: 700; font-size: 8.6px; font-family: 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Heiti SC', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #b3261e" x="578.693832" y="238.527598" transform="rotate(-0 578.693832 238.527598)">RED 门,仅 opt-in</text>
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Heiti SC', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #b3261e" x="578.693832" y="238.527598" transform="rotate(-0 578.693832 238.527598)">精度考试未过(RED)——默认关,须手动开启</text>
    </g>
   </g>
   <g id="text_32">

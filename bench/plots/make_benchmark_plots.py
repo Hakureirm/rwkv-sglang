@@ -28,6 +28,7 @@ parametrization cannot introduce dict-order nondeterminism.
 """
 import json
 import os
+import re
 
 import matplotlib
 
@@ -130,6 +131,28 @@ ROLE_COLOR = {
     "int4_gptq_asym": HUE["red"],
     "hybrid": HUE["magenta"],
     "w4a8_experimental": HUE["orange"],
+    # w8g64 first appears in F7/F15 (no earlier figure drew this tier). The 8 HUE
+    # slots are all taken by existing roles, so it gets a ninth, visually distinct
+    # teal (darker + bluer than both aqua and green; checked for adjacency contrast
+    # against both in the F7/F15 layouts where they co-occur).
+    "w8g64": "#0b7f8f",
+}
+
+# Non-tier chart identities (engines / model families / latency percentiles /
+# parallelism configs). These never share a panel with a precision-tier role
+# except fp16 (RWKV's own bars stay fp16-blue), so reusing HUE slots here cannot
+# create a same-panel ambiguity with the tier that hue means elsewhere.
+XCOLOR = {
+    "ours": HUE["blue"],        # rwkv-sglang, this repo (same hue as its fp16 tier)
+    "theirs": HUE["orange"],    # the competitor series in a 2-engine comparison
+    "theirs2": HUE["magenta"],  # third series where one exists (F8's f3_2605 tree)
+    "official": INK,            # official reference markers (F8 panel B)
+    "qwen": HUE["orange"],      # Qwen3.5 in cross-family charts (F11/F14/F18)
+    "qwen_soft": "#f0a97a",     # Qwen3.5 secondary mode (thinking) — lighter tint
+    "p50": HUE["blue"],
+    "p99": HUE["orange"],
+    "tp2": HUE["green"],
+    "pp2": HUE["orange"],
 }
 
 # ---------------------------------------------------------------------------
@@ -187,7 +210,10 @@ LABELS = {
         "en": "int4 GPTQ + w4a8-tc, capped (experimental)",
         "zh": "int4 GPTQ + w4a8-tc,封顶(实验性)",
     },
-    "f3_red_gate": {"en": "RED gate, opt-in only", "zh": "RED 门,仅 opt-in"},
+    "f3_red_gate": {
+        "en": "failed accuracy gate (RED) — default OFF, opt-in",
+        "zh": "精度考试未过(RED)——默认关,须手动开启",
+    },
     # Caveat BODY only (the card-provenance disclosure) -- the tier name + measured
     # values are prepended in code from the actual plotted point, so each point gets
     # exactly ONE consolidated annotation (name + values + caveat) instead of two
@@ -249,6 +275,178 @@ LABELS = {
     },
     "f5_delta_ylabel": {"en": "Δ (B-A), bits/token", "zh": "Δ(B-A),bits/token"},
     "f5_noise_band": {"en": "same-flag rerun noise", "zh": "同开关复跑噪声"},
+
+    # F6
+    "f6_suptitle": {
+        "en": "The 11-GPU fleet — 1.5B fp16 full stack (wall-clock)",
+        "zh": "11 卡全覆盖 — 1.5B fp16 手写核全开(全程计时)",
+    },
+    "f6_panel_single": {"en": "single request (bsz1)", "zh": "单请求(bsz1)"},
+    "f6_panel_peak": {"en": "peak over concurrency sweep", "zh": "并发扫描峰值"},
+
+    # F7
+    "f7_title": {
+        "en": "Single-request speed ladder — 1.5B, RTX 5090 (steady-state)",
+        "zh": "单请求速度阶梯 — 1.5B,RTX 5090(稳态)",
+    },
+    "f7_step_base": {"en": "no fast kernels", "zh": "不开任何加速核"},
+    "f7_step_mid": {"en": "+ fused GEMV\n+ sparse FFN", "zh": "+ 融合 GEMV\n+ 稀疏 FFN"},
+    "f7_step_lora": {"en": "+ fused LoRA chain", "zh": "+ 融合 LoRA 链"},
+    "f7_step_full": {"en": "+ token-shift glue\n+ autotune (full stack)", "zh": "+ token-shift 胶水\n+ 自调优(全开)"},
+    "f7_step_w8": {"en": "int8 w8g64\n(prequantized)", "zh": "int8 w8g64\n(预量化)"},
+    "f7_step_w4": {"en": "int4\n(prequantized)", "zh": "int4\n(预量化)"},
+    "f7_vs_base": {"en": "vs baseline", "zh": "对基线"},
+
+    # F8
+    "f8_suptitle": {
+        "en": "Albatross (BlinkDL's speed reference) vs rwkv-sglang",
+        "zh": "Albatross(BlinkDL 官方速度参照)对 rwkv-sglang",
+    },
+    "f8a_title": {
+        "en": "1.5B single-stream decode per card (Albatross excludes prompt reading, ours includes it — ~3% against us)",
+        "zh": "1.5B 单流解码,逐卡(Albatross 列不含读题时间,我们含——约压低我们 3%)",
+    },
+    "f8a_albatross": {"en": "Albatross", "zh": "Albatross"},
+    "f8a_ours": {"en": "rwkv-sglang (full stack)", "zh": "rwkv-sglang(全核栈)"},
+    "f8a_t4_note": {
+        "en": "Albatross stock kernel won't compile on T4 (sm75) — only ours runs",
+        "zh": "Albatross 出厂核在 T4(sm75)编译不过——只有我们能跑",
+    },
+    "f8b_title": {
+        "en": "7.2B large-batch grid on a single RTX 5090 — same public code; official headline numbers are RTX Pro 6000 (per Bo Peng)",
+        "zh": "7.2B 大批量格,单张 RTX 5090——同一份公开代码;官方招牌数字测于 RTX Pro 6000(据 Bo Peng 本人说明)",
+    },
+    "f8b_f3a_stock": {"en": "faster3a stock", "zh": "faster3a 出厂"},
+    "f8b_f3a_tuned": {"en": "faster3a re-tuned (ours)", "zh": "faster3a 重调(我们)"},
+    "f8b_f3_2605": {"en": "faster3_2605 stock", "zh": "faster3_2605 出厂"},
+    "f8b_official": {"en": "official chart (RTX Pro 6000, per Bo)", "zh": "官方图表值(RTX Pro 6000,据 Bo)"},
+    "f8b_readme": {"en": "README \"{val}+\" (Pro 6000-class claim)", "zh": "README「{val}+」(Pro 6000 级宣称)"},
+
+    # F9a / F9b
+    "f9a_title": {
+        "en": "ShareGPT real workload — rwkv-sglang vs vllm-rwkv (1.5B, output tok/s)",
+        "zh": "ShareGPT 真实负载 — rwkv-sglang 对 vllm-rwkv(1.5B,输出 tok/s)",
+    },
+    "f9a_peak": {"en": "peak (all at once)", "zh": "峰值(全部涌入)"},
+    "f9a_r16": {"en": "16 req/s", "zh": "16 req/s"},
+    "f9a_r16_3090": {"en": "16 req/s (overload on this card)", "zh": "16 req/s(这张卡上已过载)"},
+    "f9a_ttft": {"en": "med. TTFT", "zh": "首字延迟中位"},
+    "f9b_title": {
+        "en": "ShareGPT real workload — fp16 vs int4 GPTQ (output tok/s)",
+        "zh": "ShareGPT 真实负载 — fp16 对 int4 GPTQ(输出 tok/s)",
+    },
+    "f9b_note_01b_rtn": {
+        "en": "RTN not measured on ShareGPT (overlay version drift, §4b) — honest gap",
+        "zh": "RTN 的 ShareGPT 没有测(overlay 版本漂移,§4b)——如实标注的缺口",
+    },
+
+    # F10
+    "f10_title": {
+        "en": "Multi-GPU scaling — TP / PP (1.5B bf16, 2×L4, 64-in/256-out)",
+        "zh": "多卡扩展 — TP / PP(1.5B bf16,2×L4,64 进/256 出)",
+    },
+    "f10_tp1": {"en": "tp=1 (1 GPU)", "zh": "tp=1(单卡)"},
+    "f10_tp2": {"en": "tp=2 (24/24 exact)", "zh": "tp=2(24/24 精确)"},
+    "f10_pp2": {"en": "pp=2 (24/24 exact)", "zh": "pp=2(24/24 精确)"},
+
+    # F11
+    "f11_suptitle": {
+        "en": "RWKV-7 vs Qwen3.5, same engine, RTX 5090 — three readings, kept distinct",
+        "zh": "RWKV-7 对 Qwen3.5,同一引擎,RTX 5090——三种读数,分开摆",
+    },
+    "f11_deploy": {
+        "en": "deployment reading — each side's\nfastest available config, bsz1",
+        "zh": "部署读数——两边各用\n自己最快的可用配置,bsz1",
+    },
+    "f11_arch": {
+        "en": "architecture reading — same\nprecision (bf16), stock paths, bsz1",
+        "zh": "架构读数——同精度(bf16),\n双方原生路径,bsz1",
+    },
+    "f11_peak": {
+        "en": "peak concurrency — same\nprecision (bf16), full sweep",
+        "zh": "峰值并发——同精度(bf16),\n完整扫描",
+    },
+    "f11_rwkv_deploy": {"en": "RWKV-7 fp16 stack + STATE_FP16", "zh": "RWKV-7 fp16 全核栈 + STATE_FP16"},
+    "f11_rwkv_bf16": {"en": "RWKV-7 bf16 (stock)", "zh": "RWKV-7 bf16(原生)"},
+    "f11_qwen": {"en": "Qwen3.5 bf16 (best available)", "zh": "Qwen3.5 bf16(最佳可用)"},
+
+    # F12
+    "f12_suptitle": {
+        "en": "Latency under Poisson arrivals — 1.5B, RTX 5090 (512-in/256-out)",
+        "zh": "泊松到达下的延迟 — 1.5B,RTX 5090(512 进/256 出)",
+    },
+    "f12_ttft_title": {"en": "time to first token (log scale)", "zh": "首字延迟(对数轴)"},
+    "f12_tpot_title": {"en": "per-token latency", "zh": "每字间隔"},
+    "f12_xlabel": {"en": "arrival rate (req/s)", "zh": "到达速率(请求/秒)"},
+    "f12_ms": {"en": "ms", "zh": "毫秒"},
+    "f12_inf": {"en": "300 at once", "zh": "300 个同时涌入"},
+    "f12_p50": {"en": "p50 (typical)", "zh": "p50(典型)"},
+    "f12_p99": {"en": "p99 (worst 1%)", "zh": "p99(最差 1%)"},
+
+    # F13
+    "f13_title": {
+        "en": "Launch-autotune gain per card, per projection shape (kernel-level A/B)",
+        "zh": "启动自调优逐卡收益,按投影形状(核级 A/B)",
+    },
+    "f13_ylabel": {"en": "time saved on shape (%)", "zh": "该形状省下的时间(%)"},
+    "f13_zero_note": {
+        "en": "honest zeros kept: H100/H200/B200 heuristic already optimal",
+        "zh": "如实保留的零:H100/H200/B200 上启发式已是最优",
+    },
+
+    # F14
+    "f14_title": {
+        "en": "Per-request memory vs context length — formula-derived, not measured",
+        "zh": "每请求显存 对 上下文长度——公式推导,非实测",
+    },
+    "f14_xlabel": {"en": "context length (tokens)", "zh": "上下文长度(token)"},
+    "f14_ylabel": {"en": "per-request state / cache (MiB)", "zh": "每请求状态 / 缓存(MiB)"},
+    "f14_rwkv15": {"en": "RWKV-7 1.5B state (constant)", "zh": "RWKV-7 1.5B 状态(恒定)"},
+    "f14_rwkv72": {"en": "RWKV-7 7.2B state (constant)", "zh": "RWKV-7 7.2B 状态(恒定)"},
+    "f14_rwkv_fp16state": {"en": "same, with RWKV_STATE_FP16", "zh": "同上,开 RWKV_STATE_FP16"},
+    "f14_qwen": {"en": "Qwen3.5-2B: GDN state + growing KV cache", "zh": "Qwen3.5-2B:GDN 状态 + 增长的 KV cache"},
+
+    # F15
+    "f15_suptitle": {
+        "en": "Quantization tiers at a glance — what each tier costs and buys",
+        "zh": "量化各档一览——每档付出什么、得到什么",
+    },
+    "f15a_title": {
+        "en": "accuracy cost: compression rate Δ vs same-size fp16 (pooled bpb, lower is better)",
+        "zh": "精度代价:压缩率相对同尺寸 fp16 的增量(池化 bpb,越低越好)",
+    },
+    "f15a_ylabel": {"en": "Δ pooled bpb vs fp16", "zh": "池化 bpb 相对 fp16 增量"},
+    "f15b_title": {
+        "en": "1.5B: single-stream speed vs MATH500 avg@64 (wall-clock c=1, RTX 5090)",
+        "zh": "1.5B:单流速度 对 MATH500 avg@64(全程计时 c=1,RTX 5090)",
+    },
+
+    # F16
+    "f16_suptitle": {
+        "en": "int4 GPTQ vs fp16 across the fleet — the crossover, per card (GPTQ ÷ fp16)",
+        "zh": "int4 GPTQ 对 fp16 全卡对比——逐卡反超点(GPTQ ÷ fp16)",
+    },
+    "f16_c1": {"en": "single-stream (c=1)", "zh": "单流(c=1)"},
+    "f16_c128": {"en": "high concurrency (c=128)", "zh": "高并发(c=128)"},
+    "f16_ylabel": {"en": "int4 GPTQ ÷ fp16 (>1 = int4 faster)", "zh": "int4 GPTQ ÷ fp16(>1 = int4 更快)"},
+
+    # F17
+    "f17_title": {
+        "en": "vllm-rwkv ÷ rwkv-sglang by concurrency — 1.5B, shared points only",
+        "zh": "vllm-rwkv ÷ rwkv-sglang,按并发——1.5B,只画双方共测点",
+    },
+    "f17_ylabel": {"en": "vllm-rwkv ÷ rwkv-sglang (>1 = vllm-rwkv faster)", "zh": "vllm-rwkv ÷ rwkv-sglang(>1 = vllm-rwkv 更快)"},
+
+    # F18
+    "f18_title": {
+        "en": "MATH500 avg@64 — RWKV-7 vs Qwen3.5 (protocols differ by design; see caption)",
+        "zh": "MATH500 avg@64 — RWKV-7 对 Qwen3.5(两家协议本就不同,见图注)",
+    },
+    "f18_rwkv_budget": {"en": "RWKV-7 (1,500-tok budget)", "zh": "RWKV-7(1,500 token 预算)"},
+    "f18_qwen_direct": {"en": "Qwen3.5 non-thinking (16,384)", "zh": "Qwen3.5 非思考(16,384)"},
+    "f18_qwen_thinking": {"en": "Qwen3.5 thinking (16,384, capped floor)", "zh": "Qwen3.5 思考(16,384,截断下限)"},
+    "f18_not_measured": {"en": "not measured —\nrun stopped at 25%\n(§13.4)", "zh": "未测出——\n跑到 25% 主动停\n(§13.4)"},
+    "f18_trunc": {"en": "truncated", "zh": "截断"},
 }
 
 
@@ -341,6 +539,90 @@ MANIFEST = {
         "uncheatable_positional_7.2b_fp16_state32_3090.json",
         "uncheatable_positional_7.2b_fp16_state16_3090.json",
     ],
+    "f6_fleet": [
+        "fleet_main_10cards.json", "bsz_sweep_fullstack_5090.json",
+    ],
+    "f7_speed_ladder": [
+        "ladder_base_5090.log", "ladder_mid_5090.log", "ladder_lora_5090.log",
+        "ladder_full_5090.log", "ladder_w8_5090.log", "ladder_w4_5090.log",
+    ],
+    "f8_albatross": [
+        "albatross_fleet_10cards.json", "fleet_main_10cards.json",
+        "albatross_3090.md", "albatross_5090/retuned_summary.json",
+        "bsz_sweep_fullstack_3090main.json", "bsz_sweep_fullstack_5090.json",
+        "albatross_5090/large_batch_grid.json",
+    ],
+    "f9a_sharegpt_engines": [
+        "realload/sglang_5090_inf.json", "realload/sglang_5090_r16.json",
+        "realload/vllm_5090_inf.json", "realload/vllm_5090_r16.json",
+        "realload/sglang_3090_inf.json", "realload/sglang_3090_r16.json",
+        "realload/vllm_3090_inf.json", "realload/vllm_3090_r16.json",
+    ],
+    "f9b_sharegpt_w4": [
+        "sharegpt_0.1b_fp16_5090_rinf.log", "sharegpt_0.1b_fp16_5090_r16.log",
+        "sharegpt_0.1b_w4gptq_5090_rinf.log", "sharegpt_0.1b_w4gptq_5090_r16.log",
+        "sharegpt_1.5b_fp16_5090_rinf.log", "sharegpt_1.5b_fp16_5090_r16.log",
+        "sharegpt_1.5b_w4gptq_5090_rinf.log", "sharegpt_1.5b_w4gptq_5090_r16.log",
+        "sharegpt_7.2b_fp16_5090_rinf.log", "sharegpt_7.2b_fp16_5090_r16.log",
+        "sharegpt_7.2b_w4gptq_5090_rinf.log", "sharegpt_7.2b_w4gptq_5090_r16.log",
+        "sharegpt_1.5b_fp16_3090_rinf.log", "sharegpt_1.5b_fp16_3090_r16.log",
+        "sharegpt_1.5b_w4gptq_3090_rinf.log", "sharegpt_1.5b_w4gptq_3090_r16.log",
+        "sharegpt_7.2b_fp16_3090_rinf.log", "sharegpt_7.2b_fp16_3090_r16.log",
+        "sharegpt_7.2b_w4gptq_3090_rinf.log", "sharegpt_7.2b_w4gptq_3090_r16.log",
+    ],
+    "f10_tp_pp": ["tppp_l4_main.json"],
+    "f11_qwen35_readings": [
+        "w1prime_legEf_1.5b_5090.json", "w1prime_legFinal_B_7.2b_5090.json",
+        "qwen35/rwkv7_1.5b_bf16_bsz1_5090.json", "qwen35/rwkv7_7.2b_bf16_bsz1_5090.json",
+        "qwen35/qwen35_2b_bf16_bsz1_5090.json", "qwen35/qwen35_9b_bf16_bsz1_5090.json",
+        "qwen35/rwkv7_1.5b_bf16_sweep_5090.json", "qwen35/qwen35_2b_bf16_sweep_5090.json",
+        "qwen35/rwkv7_7.2b_bf16_sweep_5090_v2.json", "qwen35/qwen35_9b_bf16_sweep_5090_v2.json",
+    ],
+    "f12_latency_poisson": ["pd_mixed_5090.json"],
+    "f13_autotune": ["autotune_ab_9cards.json", "autotune_ab_5090.json"],
+    # f14 is formula-derived (BENCHMARKS §13's printed state formulas + F0056's
+    # doc-recorded measured per-request state constants) — it reads no raw file
+    # by design and its caption says so.
+    "f14_state_vs_kv": [],
+    "f15_quant_tradeoff": [
+        "uncheatable_full_fp16_1.5b_5090main.json", "uncheatable_full_w8_1.5b_5090main.json",
+        "uncheatable_full_w8a8_1.5b_5090main.json", "uncheatable_full_w4_1.5b_5090main.json",
+        "uncheatable_full_fp16_7.2b_5090main.json", "uncheatable_full_w8a8_7.2b_5090main.json",
+        "uncheatable_full_w4_7.2b_5090main.json",
+        "bsz_sweep_1.5b_fp16_5090.json", "bsz_sweep_w8a8v2_5090main.json", "bsz_sweep_1.5b_w4gptq_5090.json",
+        "math500_avg64_5090main.json", "math500_avg64_w8a8_5090main.json", "math500_avg64_1.5b_sym.json",
+    ],
+    "f16_w4_fleet": [
+        "bsz_sweep_1.5b_fp16_3090.json", "bsz_sweep_1.5b_w4gptq_3090.json",
+        "bsz_sweep_7.2b_fp16_3090.json", "bsz_sweep_7.2b_w4gptq_3090.json",
+        "bsz_sweep_1.5b_fp16_5090.json", "bsz_sweep_1.5b_w4gptq_5090.json",
+        "qwen35/rwkv7_7.2b_fp16_fullstack_resweep_5090_v3.json",
+        "bsz_sweep_7.2b_w4gptq_5090.json",
+        "w4_speed_fleet/T4_1.5b_fp16.json", "w4_speed_fleet/T4_1.5b_w4gptq.json",
+        "w4_speed_fleet/L4_1.5b_fp16.json", "w4_speed_fleet/L4_1.5b_w4gptq.json",
+        "w4_speed_fleet/A10G_1.5b_fp16.json", "w4_speed_fleet/A10G_1.5b_w4gptq.json",
+        "w4_speed_fleet/A100-40GB_1.5b_fp16.json", "w4_speed_fleet/A100-40GB_1.5b_w4gptq.json",
+        "w4_speed_fleet/H100_1.5b_fp16.json", "w4_speed_fleet/H100_1.5b_w4gptq_retry.json",
+        "w4_speed_fleet/T4_7.2b_fp16_v2.json", "w4_speed_fleet/T4_7.2b_fp16.json",
+        "w4_speed_fleet/T4_7.2b_w4gptq_full.json", "w4_speed_fleet/T4_7.2b_w4gptq.json",
+        "w4_speed_fleet/L4_7.2b_fp16_v2.json", "w4_speed_fleet/L4_7.2b_fp16_c128.json", "w4_speed_fleet/L4_7.2b_fp16.json",
+        "w4_speed_fleet/L4_7.2b_w4gptq_full.json", "w4_speed_fleet/L4_7.2b_w4gptq.json",
+        "w4_speed_fleet/A10G_7.2b_fp16_v2.json", "w4_speed_fleet/A10G_7.2b_fp16_c128.json", "w4_speed_fleet/A10G_7.2b_fp16.json",
+        "w4_speed_fleet/A10G_7.2b_w4gptq.json",
+        "w4_speed_fleet/A100-40GB_7.2b_fp16.json", "w4_speed_fleet/A100-40GB_7.2b_w4gptq.json",
+        "w4_speed_fleet/H100_7.2b_fp16.json", "w4_speed_fleet/H100_7.2b_w4gptq.json",
+    ],
+    "f17_vllmrwkv_ratio": [
+        "vllmrwkv/their_sweep_small_5090.json", "vllmrwkv/their_sweep_large_5090.json",
+        "vllmrwkv/their_sweep_small_3090_v2.json", "vllmrwkv/their_sweep_large_3090_v2.json",
+        "bsz_sweep_fullstack_5090.json", "bsz_sweep_fullstack_3090main.json",
+    ],
+    "f18_qwen35_math500": [
+        "math500_avg64_5090main.json", "math500_avg64_7.2b_fp16.json",
+        "qwen35_accuracy/math500_avg64_2b_chatml_direct_5090.json",
+        "qwen35_accuracy/math500_avg64_2b_chatml_thinking_5090_v2.json",
+        "qwen35_accuracy/math500_avg64_9b_chatml_direct_5090.json",
+    ],
 }
 
 
@@ -391,6 +673,70 @@ def sweep_value_at(relpath, concurrency):
 
 def sweep_peak(rows):
     return max(rows, key=lambda t: t[1])
+
+
+def load_raw(relpath):
+    """Any landed JSON raw, unmodified."""
+    with open(_path(relpath)) as f:
+        return json.load(f)
+
+
+# serving_scale.py log table row: " 1024 |    1 |         409.8 | ..." — the
+# context=1024 / bsz=1 steady-state decode tok/s (the §3 ladder's own number).
+_LADDER_BSZ1_RE = re.compile(r"^\s*1024 \|\s+1 \|\s+([\d.]+)", re.M)
+
+
+def ladder_bsz1(relpath):
+    with open(_path(relpath), errors="replace") as f:
+        m = _LADDER_BSZ1_RE.search(f.read())
+    return float(m.group(1))
+
+
+# sglang.bench_serving summary line: "Output token throughput (tok/s):  9560.49"
+_SHAREGPT_OUT_RE = re.compile(r"Output token throughput \(tok/s\):\s+([\d.]+)")
+
+
+def sharegpt_output_toks(relpath):
+    with open(_path(relpath), errors="replace") as f:
+        m = _SHAREGPT_OUT_RE.search(f.read())
+    return float(m.group(1))
+
+
+def albatross_3090_15b_b1():
+    """albatross_3090.md §5 (the internally-consistent all-sizes re-measurement,
+    the table the raw itself says feeds comparison.md): 1.5B bsz1 decode tok/s."""
+    with open(_path("albatross_3090.md"), errors="replace") as f:
+        sec = f.read().split("## 5.", 1)[1]
+    m = re.search(r"^\|\s*1\.5B\s*\|\s*1\s*\|\s*([\d.]+)", sec, re.M)
+    return float(m.group(1))
+
+
+def fleet_w4_rows(relpath):
+    """w4_speed_fleet/<GPU>_<model>_<cfg>.json -> sorted [(concurrency, tok/s)].
+    The file carries a `results` list; every kind=="sweep" entry contributes its
+    rows (a follow-up file passed separately handles partial first attempts)."""
+    d = load_raw(relpath)
+    by_c = {}
+    for r in d["results"]:
+        if r.get("kind") == "sweep":
+            for x in (r.get("rows") or []):
+                by_c.setdefault(x["concurrency"], x["out_tok_per_s"])
+    return sorted(by_c.items())
+
+
+def merge_any(relpaths_priority, loader):
+    """merge_rows generalized over the row loader: union of concurrency points,
+    first file in the list wins on overlap (same first-wins discipline)."""
+    by_c = {}
+    for rp in relpaths_priority:
+        for c, v in loader(rp):
+            if c not in by_c:
+                by_c[c] = v
+    return sorted(by_c.items())
+
+
+def pooled_bpb(relpath):
+    return load_raw(relpath)["overall"]["pooled_bpb"]
 
 
 # ---------------------------------------------------------------------------
@@ -1327,11 +1673,102 @@ def fig_f5_positional_compression_state_precision(out_path, lang):
     return True
 
 
+# ---------------------------------------------------------------------------
+# F6 -- the 11-GPU fleet (1.5B fp16 full stack): single-request + peak bars
+# ---------------------------------------------------------------------------
+# Explicit (json_key, display_name) list -- fixed order, never dict iteration.
+# Display names match the §6 table's spelling ("RTX PRO 6000", not the JSON's
+# dash-separated key).
+F6_FLEET_CARDS = [
+    ("T4", "T4"), ("L4", "L4"), ("A10G", "A10G"),
+    ("A100-40GB", "A100-40GB"), ("A100-80GB", "A100-80GB"), ("L40S", "L40S"),
+    ("H100", "H100"), ("H200", "H200"), ("B200", "B200"),
+    ("RTX-PRO-6000", "RTX PRO 6000"),
+]
+
+
+def f6_data():
+    """11-card fleet rows for F6 -- see f1_panels()'s docstring for why this
+    is factored out (single source of truth for the static SVG and
+    make_interactive.py). 10 cloud cards from fleet_main_10cards.json (each
+    card's runs.sweep_json is the §6 sweep: c=1/32/128/384, 64-in/256-out)
+    plus the workstation RTX 5090 from bsz_sweep_fullstack_5090.json (same
+    recipe, swept to c=512). Every value is read from those raws; the §6
+    table's own cells reproduce from this function.
+    """
+    fleet = load_raw("fleet_main_10cards.json")
+    cards = []
+    for key, disp in F6_FLEET_CARDS:
+        v = fleet[key]
+        rows = sorted((r["concurrency"], r["out_tok_per_s"])
+                      for r in v["runs"]["sweep_json"]["rows"])
+        peak_c, peak_v = sweep_peak(rows)
+        cards.append({"name": disp, "sm": v["sm"], "single": dict(rows)[1],
+                      "peak": peak_v, "peak_c": peak_c})
+    rows_5090 = load_rows("bsz_sweep_fullstack_5090.json")
+    peak_c, peak_v = sweep_peak(rows_5090)
+    cards.append({"name": "RTX 5090", "sm": 120, "single": dict(rows_5090)[1],
+                  "peak": peak_v, "peak_c": peak_c})
+    return cards
+
+
+def fig_f6_fleet(out_path, lang):
+    cards = f6_data()
+    fig, axes = plt.subplots(1, 2, figsize=(12.8, 6.2), dpi=DPI)
+
+    # (field, panel-title key, bar-end tag) -- the peak tag carries the
+    # concurrency it was hit at, straight from the raw's own peak row.
+    panels = [
+        ("single", "f6_panel_single", lambda c: f"{c['single']:,.1f}"),
+        ("peak", "f6_panel_peak", lambda c: f"{c['peak']:,.0f} @c{c['peak_c']}"),
+    ]
+    for ax, (field, title_key, fmt) in zip(axes, panels):
+        # each panel sorts independently (ascending -> largest bar on top with
+        # barh's bottom-up y): the two panels answer two different ranking
+        # questions, so a shared order would misrank one of them.
+        order = sorted(cards, key=lambda c: c[field])
+        ys = list(range(len(order)))
+        vals = [c[field] for c in order]
+        # one hue: every bar is the same fp16 tier (identity lives on the y
+        # axis, not in color), 2px surface edge = the mark-gap spacer.
+        ax.barh(ys, vals, height=0.66, color=ROLE_COLOR["fp16"], zorder=3,
+                edgecolor=SURFACE, linewidth=1.0)
+        for y, c in zip(ys, order):
+            ax.text(c[field], y, f" {fmt(c)}", va="center", ha="left",
+                    fontsize=8.6, color=INK, zorder=4)
+        ax.set_yticks(ys)
+        # GPU name + arch tag in one tick label -- sm is a technical token,
+        # shared verbatim between languages like fp16/w8a8 elsewhere.
+        ax.set_yticklabels([f"{c['name']}  (sm{c['sm']})" for c in order],
+                           fontsize=9.6, color=INK)
+        ax.set_title(T(title_key, lang), fontsize=12.5, color=INK, pad=9, loc="left")
+        ax.set_xlabel(T("tok_s", lang), fontsize=11.5, color=INK_SECONDARY)
+        ax.xaxis.set_major_formatter(_INT_FMT)
+        # headroom for the bar-end value tags (the longest is the peak panel's
+        # "40,544 @c384" on the topmost bar)
+        ax.set_xlim(0, max(vals) * 1.24)
+        ax.grid(True, axis="x", color=GRID, linewidth=0.8, zorder=0)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.spines["left"].set_color(AXIS)
+        ax.spines["bottom"].set_color(AXIS)
+        ax.tick_params(labelsize=9.6)
+        ax.tick_params(axis="y", length=0)
+        ax.set_facecolor(SURFACE)
+
+    fig.suptitle(T("f6_suptitle", lang), fontsize=14.5, color=INK, x=0.01, ha="left", y=0.99)
+    fig.tight_layout(rect=(0, 0.01, 1, 0.93))
+    _source_note(fig)
+    fig.savefig(out_path, metadata=SVG_METADATA)
+    plt.close(fig)
+
+
 FIGURES = [
     ("f1_concurrency_5090", fig_f1_concurrency_5090),
     ("f2_concurrency_3090", fig_f2_concurrency_3090),
     ("f3_accuracy_speed_frontier", fig_f3_accuracy_speed_frontier),
     ("f4_math500_ladder", fig_f4_math500_ladder),
+    ("f6_fleet", fig_f6_fleet),
 ]
 
 

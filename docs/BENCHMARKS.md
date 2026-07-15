@@ -768,7 +768,7 @@ at 384 concurrency on the fleet, 512 on the workstation 5090):
 | GPU | arch | single request | peak |
 |---|---|---|---|
 | T4 | sm75 | 97.1 | 3,176 |
-| L4 | sm89 | 102.2 | 4,674 |
+| L4 | sm89 | 102.2 | 4,627 |
 | A10G | sm86 | 168.3 | 6,627 |
 | A100-40GB | sm80 | 257.0 | 17,042 |
 | A100-80GB | sm80 | 278.9 | 18,420 |
@@ -782,6 +782,17 @@ at 384 concurrency on the fleet, 512 on the workstation 5090):
 Notable: at single-request the consumer RTX 5090 matches H200 (397.3 vs 399.3) and beats
 H100 and B200 — single-stream decode is a memory-bandwidth story and GDDR7 delivers. Raw:
 `bench/results/fleet_main_10cards.json`.
+
+**Figure — the fleet, both readings side by side.** Each panel is sorted by its own metric,
+which is the point: the single-request ranking (bandwidth story — the consumer 5090 sits
+between H200 and B200) is not the peak ranking (total-throughput story — the HBM cards pull
+away, B200 on top). Peak tags carry the concurrency the sweep hit it at.
+
+![The 11-GPU fleet: single-request and peak, sorted bars](assets/plots/f6_fleet.svg)
+
+*Protocol: 1.5B fp16 full stack, 64-in/256-out, wall-clock. Raw: `fleet_main_10cards.json`
+(10 cloud cards) + `bsz_sweep_fullstack_5090.json` (the workstation 5090, same recipe).
+Regenerate: `python bench/plots/make_benchmark_plots.py`.*
 
 ## 6b. Multi-GPU: TP / PP (verified on main, cuda-graph ON)
 

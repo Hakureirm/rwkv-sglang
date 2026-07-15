@@ -472,7 +472,7 @@ Q 570.741428 272.607871 594.630702 267.530243
     <text style="font-size: 8.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; fill: #0b0b0b" transform="translate(318.775558 313.114071)">NOT single-stream: 3090 peak-concurrency (c=128) · F0055 §6</text>
    </g>
    <g id="text_31">
-    <text style="font-weight: 700; font-size: 8.6px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: end; fill: #b3261e" x="578.588714" y="253.114071" transform="rotate(-0 578.588714 253.114071)">RED gate, opt-in only</text>
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: end; fill: #b3261e" x="578.588714" y="253.114071" transform="rotate(-0 578.588714 253.114071)">failed accuracy gate (RED) — default OFF, opt-in</text>
    </g>
   </g>
   <g id="text_32">
