@@ -149,6 +149,12 @@ XCOLOR = {
     "official": INK,            # official reference markers (F8 panel B)
     "qwen": HUE["orange"],      # Qwen3.5 in cross-family charts (F11/F14/F18)
     "qwen_soft": "#f0a97a",     # Qwen3.5 secondary mode (thinking) — lighter tint
+    # RWKV's own bf16 "stock path" bar in F11 (its hand kernels don't fire in bf16):
+    # a lighter tint of the fp16-blue "ours" identity, so a reader reads "same model
+    # family (RWKV, blue), the stock-precision variant" — deliberately parallel to the
+    # qwen/qwen_soft pair. Not a precision-tier hue (bf16 has no ROLE_COLOR slot); it
+    # only ever co-occurs with its own darker blue + Qwen orange, never a tier legend.
+    "ours_soft": "#8bb4e3",
     "p50": HUE["blue"],
     "p99": HUE["orange"],
     "tp2": HUE["green"],
@@ -377,6 +383,19 @@ LABELS = {
     "f11_rwkv_deploy": {"en": "RWKV-7 fp16 stack + STATE_FP16", "zh": "RWKV-7 fp16 全核栈 + STATE_FP16"},
     "f11_rwkv_bf16": {"en": "RWKV-7 bf16 (stock)", "zh": "RWKV-7 bf16(原生)"},
     "f11_qwen": {"en": "Qwen3.5 bf16 (best available)", "zh": "Qwen3.5 bf16(最佳可用)"},
+    "f11_pa_title": {
+        "en": "single-stream, bsz1 — deployment vs architecture reading",
+        "zh": "单流,bsz1——部署读数 对 架构读数",
+    },
+    "f11_pb_title": {
+        "en": "peak concurrency — bf16, full sweep",
+        "zh": "峰值并发——bf16,完整扫描",
+    },
+    # {p} filled in code from the two plotted bars, never copied from the doc table.
+    "f11_v_deploy": {"en": "deployment: RWKV +{p:.0f}%", "zh": "部署读数:RWKV +{p:.0f}%"},
+    "f11_v_arch": {"en": "architecture: Qwen3.5 +{p:.0f}%", "zh": "架构读数:Qwen3.5 +{p:.0f}%"},
+    "f11_v_peak": {"en": "RWKV +{p:.0f}%", "zh": "RWKV +{p:.0f}%"},
+    "f11_at": {"en": "@c{c}", "zh": "@c{c}"},
 
     # F12
     "f12_suptitle": {
@@ -2354,6 +2373,121 @@ def fig_f12_latency_poisson(out_path, lang):
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# F11 -- RWKV-7 vs Qwen3.5, same engine (§13.1): the two bsz1 readings the doc
+# tables draw a hard line between (deployment = each side's fastest config, so
+# RWKV's fp16 hand kernels vs Qwen's bf16-only; architecture = both bf16 stock),
+# plus the peak-concurrency reading on its own axis. Every bar is the c=1 (or
+# sweep-peak) value from its own landed raw; the win % under each group is
+# recomputed here from the two plotted bars, never lifted from the doc.
+# ---------------------------------------------------------------------------
+def f11_data():
+    def b1(rp):
+        return dict(load_rows(rp))[1]
+
+    def pk(rp):
+        c, v = sweep_peak(load_rows(rp))
+        return v, c
+
+    # explicit ordered list (no dict iteration) -> deterministic
+    return [
+        {
+            "size": "1.5B / 2B",
+            "rwkv_deploy": b1("w1prime_legEf_1.5b_5090.json"),
+            "rwkv_bf16": b1("qwen35/rwkv7_1.5b_bf16_bsz1_5090.json"),
+            "qwen_bf16": b1("qwen35/qwen35_2b_bf16_bsz1_5090.json"),
+            "rwkv_peak": pk("qwen35/rwkv7_1.5b_bf16_sweep_5090.json"),
+            "qwen_peak": pk("qwen35/qwen35_2b_bf16_sweep_5090.json"),
+        },
+        {
+            "size": "7.2B / 9B",
+            "rwkv_deploy": b1("w1prime_legFinal_B_7.2b_5090.json"),
+            "rwkv_bf16": b1("qwen35/rwkv7_7.2b_bf16_bsz1_5090.json"),
+            "qwen_bf16": b1("qwen35/qwen35_9b_bf16_bsz1_5090.json"),
+            "rwkv_peak": pk("qwen35/rwkv7_7.2b_bf16_sweep_5090_v2.json"),
+            "qwen_peak": pk("qwen35/qwen35_9b_bf16_sweep_5090_v2.json"),
+        },
+    ]
+
+
+def fig_f11_qwen35_readings(out_path, lang):
+    tiers = f11_data()
+    fig, (axa, axb) = plt.subplots(
+        1, 2, figsize=(13.6, 6.6), dpi=DPI, gridspec_kw={"width_ratios": [1.55, 1.0]}
+    )
+    xs = list(range(len(tiers)))
+
+    # ---- panel A: bsz1, three bars per tier (fp16-deploy / bf16-arch / qwen) ----
+    w = 0.26
+    for i, t in enumerate(tiers):
+        bars = [
+            (i - w, t["rwkv_deploy"], XCOLOR["ours"], T("f11_rwkv_deploy", lang)),
+            (i, t["rwkv_bf16"], XCOLOR["ours_soft"], T("f11_rwkv_bf16", lang)),
+            (i + w, t["qwen_bf16"], XCOLOR["qwen"], T("f11_qwen", lang)),
+        ]
+        for x, v, c, lab in bars:
+            axa.bar(x, v, width=w, color=c, zorder=3, edgecolor=SURFACE, linewidth=1.0,
+                    label=lab if i == 0 else None)
+            axa.text(x, v, f" {v:,.1f}", rotation=90, ha="center", va="bottom",
+                     fontsize=8.6, color=INK, zorder=4)
+    top_a = max(max(t["rwkv_deploy"], t["rwkv_bf16"], t["qwen_bf16"]) for t in tiers)
+    axa.set_ylim(0, top_a * 1.42)
+    # per-group verdicts, recomputed from the plotted bars -> impossible to
+    # misread which reading each margin belongs to
+    for i, t in enumerate(tiers):
+        dep = (t["rwkv_deploy"] / t["qwen_bf16"] - 1.0) * 100.0   # RWKV fp16 vs Qwen
+        arch = (t["qwen_bf16"] / t["rwkv_bf16"] - 1.0) * 100.0    # Qwen vs RWKV bf16
+        ytag = top_a * 1.30
+        axa.text(i, ytag, T("f11_v_deploy", lang).format(p=dep), ha="center", va="bottom",
+                 fontsize=9.4, color=XCOLOR["ours"], fontweight="bold", zorder=5)
+        axa.text(i, ytag - top_a * 0.075, T("f11_v_arch", lang).format(p=arch), ha="center",
+                 va="bottom", fontsize=9.4, color=XCOLOR["qwen"], fontweight="bold", zorder=5)
+    axa.set_xticks(xs)
+    axa.set_xticklabels([t["size"] for t in tiers], fontsize=11, color=INK)
+    axa.set_title(T("f11_pa_title", lang), fontsize=12.2, color=INK, pad=9, loc="left")
+    axa.set_ylabel(T("tok_s", lang), fontsize=11.5, color=INK_SECONDARY)
+
+    # ---- panel B: peak concurrency, two bars per tier (both bf16) ----
+    wb = 0.2
+    for i, t in enumerate(tiers):
+        rp_v, rp_c = t["rwkv_peak"]
+        qp_v, qp_c = t["qwen_peak"]
+        for x, v, c, cc in ((i - wb, rp_v, XCOLOR["ours_soft"], rp_c), (i + wb, qp_v, XCOLOR["qwen"], qp_c)):
+            axb.bar(x, v, width=2 * wb, color=c, zorder=3, edgecolor=SURFACE, linewidth=1.0)
+            axb.text(x, v, f" {v:,.0f}\n {T('f11_at', lang).format(c=cc)}", rotation=0, ha="center",
+                     va="bottom", fontsize=8.2, color=INK, zorder=4)
+    top_b = max(max(t["rwkv_peak"][0], t["qwen_peak"][0]) for t in tiers)
+    axb.set_ylim(0, top_b * 1.28)
+    for i, t in enumerate(tiers):
+        peak = (t["rwkv_peak"][0] / t["qwen_peak"][0] - 1.0) * 100.0
+        axb.text(i, top_b * 1.17, T("f11_v_peak", lang).format(p=peak), ha="center", va="bottom",
+                 fontsize=9.4, color=XCOLOR["ours"], fontweight="bold", zorder=5)
+    axb.set_xticks(xs)
+    axb.set_xticklabels([t["size"] for t in tiers], fontsize=11, color=INK)
+    axb.set_title(T("f11_pb_title", lang), fontsize=12.2, color=INK, pad=9, loc="left")
+    axb.set_ylabel(T("tok_s", lang), fontsize=11.5, color=INK_SECONDARY)
+
+    for ax in (axa, axb):
+        ax.yaxis.set_major_formatter(_INT_FMT)
+        ax.grid(True, axis="y", color=GRID, linewidth=0.8, zorder=0)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.spines["left"].set_color(AXIS)
+        ax.spines["bottom"].set_color(AXIS)
+        ax.tick_params(labelsize=10.5)
+        ax.tick_params(axis="x", length=0)
+        ax.set_facecolor(SURFACE)
+
+    handles, labels = axa.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.0), ncol=3,
+               frameon=False, fontsize=10, handlelength=1.6)
+    fig.suptitle(T("f11_suptitle", lang), fontsize=14.5, color=INK, x=0.01, ha="left", y=0.99)
+    fig.tight_layout(rect=(0, 0.07, 1, 0.93))
+    _source_note(fig)
+    fig.savefig(out_path, metadata=SVG_METADATA)
+    plt.close(fig)
+
+
 FIGURES = [
     ("f1_concurrency_5090", fig_f1_concurrency_5090),
     ("f2_concurrency_3090", fig_f2_concurrency_3090),
@@ -2365,6 +2499,7 @@ FIGURES = [
     ("f9a_sharegpt_engines", fig_f9a_sharegpt_engines),
     ("f9b_sharegpt_w4", fig_f9b_sharegpt_w4),
     ("f10_tp_pp", fig_f10_tp_pp),
+    ("f11_qwen35_readings", fig_f11_qwen35_readings),
     ("f12_latency_poisson", fig_f12_latency_poisson),
 ]
 

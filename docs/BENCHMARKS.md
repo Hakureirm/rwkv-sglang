@@ -1534,6 +1534,20 @@ contradictory: bsz1 favors Qwen3.5 (no RWKV hand kernels in bf16); peak concurre
 RWKV-7 (Qwen3.5's growing KV-cache cost for its 6 real-attention layers caps its ceiling
 lower, per the state-size formula above). Both are reported, neither is hidden.
 
+**Figure — the three §13.1 readings side by side, kept distinct.** The two bsz1 readings share
+the *same* Qwen3.5 bar, so which engine "wins" flips with the reading: deployment (each side's
+fastest config — RWKV-7 fp16 hand-kernels + STATE_FP16 vs Qwen3.5 bf16-only) hands RWKV-7 the
+win; architecture (both bf16 stock) hands it to Qwen3.5. Peak concurrency (bf16) is a third,
+separate axis. Precisions differ by design — each engine runs its own fastest available config.
+
+![RWKV-7 vs Qwen3.5, three readings — deployment, architecture, peak concurrency](assets/plots/f11_qwen35_readings.svg)
+
+*Protocol: RTX 5090, 64-in/256-out; bsz1 = single-stream, peak = full concurrency sweep. Every
+win % is recomputed in-figure from the two plotted bars. Raw: `w1prime_legEf_1.5b_5090.json`,
+`w1prime_legFinal_B_7.2b_5090.json` (RWKV-7 deployment) + `qwen35/{rwkv7_1.5b,rwkv7_7.2b}_bf16_bsz1_5090.json`,
+`qwen35/qwen35_{2b,9b}_bf16_bsz1_5090.json` (bf16 stock) + the matching `*_sweep_5090*.json` files
+(peak). Regenerate: `python bench/plots/make_benchmark_plots.py`.*
+
 Bonus data point: Qwen3.5 also runs natively at **FP8** (`--quantization fp8`, zero extra
 code) — this is a *different* quantization tier from RWKV's int8, not a matched comparison,
 but worth recording: Qwen3.5 FP8 is **25–39% slower than its own bf16 at bsz1** (206.6 vs

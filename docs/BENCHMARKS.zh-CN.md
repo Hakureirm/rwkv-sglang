@@ -1357,6 +1357,18 @@ RWKV 的原生/未优化路径)。
 峰值并发有利 RWKV-7(Qwen3.5 那 6 层真 attention 需要随长度增长的 KV cache,把它的天花
 板压得更低,呼应上面的 state 大小公式)。两个结果都如实报,谁也不藏。
 
+**图 — §13.1 的三种读数并排,分开摆。** 两种单流读数共用*同一根* Qwen3.5 柱子,所以"谁赢"
+随读数翻面:部署读数(两边各用最快配置——RWKV-7 fp16 手写核 + STATE_FP16 对 Qwen3.5 只能
+bf16)是 RWKV-7 赢;架构读数(双方都是 bf16 原生路径)是 Qwen3.5 赢。峰值并发(bf16)是第三
+根、独立的轴。精度不同是设计使然——每个引擎都跑自己最快的可用配置。
+
+![RWKV-7 对 Qwen3.5,三种读数——部署、架构、峰值并发](assets/plots/f11_qwen35_readings_zh.svg)
+
+*协议:RTX 5090,64 进/256 出;bsz1 = 单流,峰值 = 完整并发扫描。图上每个胜率百分比都由两根
+柱子现算。原始件:`w1prime_legEf_1.5b_5090.json`、`w1prime_legFinal_B_7.2b_5090.json`(RWKV-7
+部署)+ `qwen35/{rwkv7_1.5b,rwkv7_7.2b}_bf16_bsz1_5090.json`、`qwen35/qwen35_{2b,9b}_bf16_bsz1_5090.json`
+(bf16 原生)+ 对应的 `*_sweep_5090*.json` 文件(峰值)。重新生成:`python bench/plots/make_benchmark_plots.py`。*
+
 顺带一条数据:Qwen3.5 原生也能跑 **FP8**(`--quantization fp8`,零额外代码)——这是
 跟 RWKV int8 不同的量化档,不是匹配比较,但值得记一笔:Qwen3.5 FP8 在单流下比自己的
 bf16 **慢 25–39%**(2B 是 206.6 对 336.0;9B 是 71.7 对 96.0)——跟 RWKV 自己 w8a8 在
