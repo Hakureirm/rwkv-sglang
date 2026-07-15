@@ -491,6 +491,18 @@ fp16 比 GPTQ 快 27%)——这台机器在两个尺寸上都撑不住 16 req/s(
 `bench/results/sharegpt_{0.1b,1.5b,7.2b}_{fp16,w4gptq}_5090_{rinf,r16}.log`;fp16 7.2B 对照线
 `bench/results/qwen35/rwkv7_7.2b_fp16_fullstack_resweep_5090_v3.json`。
 
+**图——ShareGPT 的 fp16 对 GPTQ 矩阵。**每个 卡×模型 一小格(各用各的纵轴——0.1B 的
+3.1 万和 3090 上 7.2B 的 756 硬挤同一根轴才是不诚实),峰值与 16 req/s 并排,GPTQ 柱上
+的 Δ% 由图里两根柱当场重算。缺失的 0.1B RTN 一对,就是上文如实披露的 overlay 版本
+漂移缺口。
+
+![ShareGPT 真实负载:fp16 对 int4 GPTQ,逐卡逐模型](assets/plots/f9b_sharegpt_w4_zh.svg)
+
+*协议:§4b 的 ShareGPT 轮次——500 条提示,seed 42,同箱同条件。原始件:
+`sharegpt_{0.1b,1.5b,7.2b}_{fp16,w4gptq}_5090_{rinf,r16}.log` +
+`sharegpt_{1.5b,7.2b}_{fp16,w4gptq}_3090_{rinf,r16}.log`。重新生成:
+`python bench/plots/make_benchmark_plots.py`。*
+
 **交互版仪表盘(悬停/缩放/开关精度档):
 [hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)** ——
 下面的 F1/F2/F3/F4/F5 图表是静态 SVG;仪表盘用同一批落地原始数据渲染,支持悬停提示、
@@ -970,6 +982,16 @@ rwkv-sglang 的 int8 峰值(9,851)反超 vllm-rwkv 的 fp16 峰值(8,583)达 **1
 两者吞吐相差几个百分点,尾延迟互有胜负(vllm-rwkv 稳态的每字间隔尾更紧;rwkv-sglang 在 5090
 峰值下的尾紧得多)。总结:高负载真实混合长度服务下 rwkv-sglang 领先;轻稳态负载下互有来回。
 原始件:`bench/results/realload/`。
+
+**图——把反转画出来。**逐卡逐负载的吞吐柱,每根柱子里印着自己那次运行的首字延迟中位——
+峰值组就是 rwkv-sglang 两张卡都领先(且 TTFT 更低)的地方;稳态 16 组是正文说的
+近乎平手,3090 的过载注意事项直接写进了它的组标签。
+
+![ShareGPT 真实负载:rwkv-sglang 对 vllm-rwkv,两张卡](assets/plots/f9a_sharegpt_engines_zh.svg)
+
+*协议:§7c 自己的——500 条 ShareGPT 提示,同卡进出 token 完全一致。原始件:
+`realload/{sglang,vllm}_{5090,3090}_{inf,r16}.json`。重新生成:
+`python bench/plots/make_benchmark_plots.py`。*
 
 ## 8. 启动参数自调优逐卡收益(硬编码参数为什么换卡就失效)
 

@@ -335,6 +335,10 @@ LABELS = {
     "f9a_r16": {"en": "16 req/s", "zh": "16 req/s"},
     "f9a_r16_3090": {"en": "16 req/s (overload on this card)", "zh": "16 req/s(这张卡上已过载)"},
     "f9a_ttft": {"en": "med. TTFT", "zh": "首字延迟中位"},
+    "f9a_ttft_note": {
+        "en": "white in-bar number = median time to first token (TTFT, ms)",
+        "zh": "柱子里的白字 = 首字延迟中位(TTFT,毫秒)",
+    },
     "f9b_title": {
         "en": "ShareGPT real workload — fp16 vs int4 GPTQ (output tok/s)",
         "zh": "ShareGPT 真实负载 — fp16 对 int4 GPTQ(输出 tok/s)",
@@ -2045,6 +2049,162 @@ def fig_f8_albatross(out_path, lang):
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# F9a -- ShareGPT real workload: rwkv-sglang vs vllm-rwkv (§7c)
+# F9b -- ShareGPT real workload: fp16 vs int4 GPTQ (§4b)
+# ---------------------------------------------------------------------------
+def f9a_data():
+    """§7c's engine comparison -- see f1_panels()'s docstring for why this is
+    factored out. Reads the eight realload JSONs (sglang.bench_serving's own
+    output): output tok/s + median TTFT per (card, load, engine)."""
+    cards = []
+    for card in ["5090", "3090"]:
+        loads = []
+        for rate in ["inf", "r16"]:
+            pair = {}
+            for eng in ["sglang", "vllm"]:
+                d = load_raw(f"realload/{eng}_{card}_{rate}.json")
+                pair[eng] = {"out": d["output_throughput"], "ttft_med": d["median_ttft_ms"]}
+            loads.append({"rate": rate, "engines": pair})
+        cards.append({"card": f"RTX {card}", "loads": loads})
+    return cards
+
+
+def fig_f9a_sharegpt_engines(out_path, lang):
+    data = f9a_data()
+    fig, axes = plt.subplots(1, 2, figsize=(11.6, 5.5), dpi=DPI)
+
+    def ttft_tag(ms):
+        # ms precision follows the value's own scale (31.6 ms vs 2,503 ms),
+        # matching how §7c's table prints them
+        val = f"{ms:,.1f}" if ms < 100 else f"{ms:,.0f}"
+        return f"{val} ms"
+
+    for ax, card in zip(axes, data):
+        is_3090 = card["card"] == "RTX 3090"
+        xs = [0.0, 1.0]
+        ymax_panel = max(e["out"] for l in card["loads"] for e in l["engines"].values())
+        for xi, load in zip(xs, card["loads"]):
+            for dx, eng, color in ((-0.19, "sglang", XCOLOR["ours"]), (0.19, "vllm", XCOLOR["theirs"])):
+                e = load["engines"][eng]
+                label = ("rwkv-sglang" if eng == "sglang" else "vllm-rwkv") if xi == 0 else None
+                ax.bar(xi + dx, e["out"], width=0.34, color=color, zorder=3,
+                       edgecolor=SURFACE, linewidth=1.0, label=label)
+                ax.text(xi + dx, e["out"], f"{e['out']:,.0f}", ha="center", va="bottom",
+                        fontsize=8.2, color=INK, zorder=4)
+                # median TTFT lives INSIDE its own bar (white, near the base) --
+                # collision-proof where above-bar sub-labels of near-equal bars
+                # were not; the footnote below the figure decodes it.
+                ax.text(xi + dx, ymax_panel * 0.025, ttft_tag(e["ttft_med"]), ha="center",
+                        va="bottom", fontsize=7.4, color=SURFACE, zorder=4, fontweight="bold")
+        ax.set_xticks(xs)
+        ax.set_xticklabels([
+            T("f9a_peak", lang),
+            T("f9a_r16_3090" if is_3090 else "f9a_r16", lang),
+        ], fontsize=9.8, color=INK)
+        ax.set_title(card["card"], fontsize=12.5, color=INK, pad=9, loc="left")
+        ax.set_ylabel(T("tok_s", lang), fontsize=11, color=INK_SECONDARY)
+        ax.yaxis.set_major_formatter(_INT_FMT)
+        ax.set_ylim(0, max(e["out"] for l in card["loads"] for e in l["engines"].values()) * 1.26)
+        ax.set_xlim(-0.62, 1.62)
+        ax.grid(True, axis="y", color=GRID, linewidth=0.8, zorder=0)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.spines["left"].set_color(AXIS)
+        ax.spines["bottom"].set_color(AXIS)
+        ax.tick_params(labelsize=9.6)
+        ax.tick_params(axis="x", length=0)
+        ax.set_facecolor(SURFACE)
+    axes[0].legend(loc="upper right", frameon=False, fontsize=9.6)
+
+    fig.text(0.01, 0.012, T("f9a_ttft_note", lang), fontsize=7.4, color=INK_MUTED,
+             style="italic", ha="left", va="bottom")
+    fig.suptitle(T("f9a_title", lang), fontsize=13.5, color=INK, x=0.01, ha="left", y=0.99)
+    fig.tight_layout(rect=(0, 0.045, 1, 0.92))
+    _source_note(fig)
+    fig.savefig(out_path, metadata=SVG_METADATA)
+    plt.close(fig)
+
+
+# §4b ShareGPT panels: (card, display model, filename slug). 0.1B exists on
+# the 5090 only; the 3090 ran 1.5B/7.2B (that box's §4b scope).
+F9B_PANELS = [
+    ("5090", "0.1B", "0.1b"), ("5090", "1.5B", "1.5b"), ("5090", "7.2B", "7.2b"),
+    ("3090", "1.5B", "1.5b"), ("3090", "7.2B", "7.2b"),
+]
+
+
+def f9b_data():
+    """§4b's ShareGPT fp16-vs-GPTQ matrix -- see f1_panels()'s docstring for
+    why this is factored out. Each value is the 'Output token throughput'
+    line of its own bench_serving log; the Δ% annotations are recomputed
+    from the two plotted bars at draw time."""
+    out = []
+    for card, disp, slug in F9B_PANELS:
+        entry = {"card": card, "model": disp, "vals": {}}
+        for role, cfg in (("fp16", "fp16"), ("int4_gptq", "w4gptq")):
+            for rate in ("rinf", "r16"):
+                entry["vals"][(role, rate)] = sharegpt_output_toks(
+                    f"sharegpt_{slug}_{cfg}_{card}_{rate}.log")
+        out.append(entry)
+    return out
+
+
+def fig_f9b_sharegpt_w4(out_path, lang):
+    data = f9b_data()
+    fig, axes = plt.subplots(1, 5, figsize=(14.2, 4.9), dpi=DPI)
+
+    for ax, entry in zip(axes, data):
+        vals = entry["vals"]
+        xs = [0.0, 1.0]
+        ymax = max(vals.values())
+        for xi, rate in zip(xs, ("rinf", "r16")):
+            fp = vals[("fp16", rate)]
+            w4 = vals[("int4_gptq", rate)]
+            ax.bar(xi - 0.19, fp, width=0.34, color=ROLE_COLOR["fp16"], zorder=3,
+                   edgecolor=SURFACE, linewidth=1.0)
+            ax.bar(xi + 0.19, w4, width=0.34, color=ROLE_COLOR["int4_gptq"], zorder=3,
+                   edgecolor=SURFACE, linewidth=1.0)
+            ax.text(xi - 0.19, fp, f"{fp:,.0f}", ha="center", va="bottom", fontsize=7.3,
+                    color=INK, zorder=4)
+            # GPTQ ÷ fp16 delta, computed from the two plotted bars
+            pct = (w4 / fp - 1.0) * 100.0
+            ax.text(xi + 0.19, w4, f"{w4:,.0f}\n{pct:+.1f}%", ha="center", va="bottom",
+                    fontsize=7.3, color=INK, zorder=4, linespacing=1.3)
+        ax.set_xticks(xs)
+        ax.set_xticklabels([T("f9a_peak", lang), T("f9a_r16", lang)], fontsize=8.6, color=INK)
+        ax.set_title(f"{entry['card']} · {entry['model']}", fontsize=11.5, color=INK,
+                     pad=8, loc="left")
+        if ax is axes[0]:
+            ax.set_ylabel(T("tok_s", lang), fontsize=11, color=INK_SECONDARY)
+        ax.yaxis.set_major_formatter(_INT_FMT)
+        ax.set_ylim(0, ymax * 1.3)
+        ax.set_xlim(-0.62, 1.62)
+        ax.grid(True, axis="y", color=GRID, linewidth=0.8, zorder=0)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.spines["left"].set_color(AXIS)
+        ax.spines["bottom"].set_color(AXIS)
+        ax.tick_params(labelsize=8.4)
+        ax.tick_params(axis="x", length=0)
+        ax.set_facecolor(SURFACE)
+
+    handles = [plt.Rectangle((0, 0), 1, 1, color=ROLE_COLOR["fp16"]),
+               plt.Rectangle((0, 0), 1, 1, color=ROLE_COLOR["int4_gptq"])]
+    fig.legend(handles, [role_label("fp16", lang), role_label("int4_gptq", lang)],
+               loc="lower center", bbox_to_anchor=(0.5, 0.005), ncol=2, frameon=False,
+               fontsize=9.6)
+    # the honest RTN gap (§4b: overlay version drift blocked the 0.1B RTN pair)
+    fig.text(0.01, 0.012, T("f9b_note_01b_rtn", lang), fontsize=7.2, color=INK_MUTED,
+             style="italic", ha="left", va="bottom")
+
+    fig.suptitle(T("f9b_title", lang), fontsize=13.5, color=INK, x=0.01, ha="left", y=0.99)
+    fig.tight_layout(rect=(0, 0.075, 1, 0.91))
+    _source_note(fig)
+    fig.savefig(out_path, metadata=SVG_METADATA)
+    plt.close(fig)
+
+
 FIGURES = [
     ("f1_concurrency_5090", fig_f1_concurrency_5090),
     ("f2_concurrency_3090", fig_f2_concurrency_3090),
@@ -2053,6 +2213,8 @@ FIGURES = [
     ("f6_fleet", fig_f6_fleet),
     ("f7_speed_ladder", fig_f7_speed_ladder),
     ("f8_albatross", fig_f8_albatross),
+    ("f9a_sharegpt_engines", fig_f9a_sharegpt_engines),
+    ("f9b_sharegpt_w4", fig_f9b_sharegpt_w4),
 ]
 
 

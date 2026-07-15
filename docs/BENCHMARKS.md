@@ -558,6 +558,18 @@ Raw (5090): `bench/results/bsz_sweep_7.2b_w4gptq_5090.json` (c=1/32/128) +
 `bench/results/sharegpt_{0.1b,1.5b,7.2b}_{fp16,w4gptq}_5090_{rinf,r16}.log`; fp16 7.2B comparison line
 `bench/results/qwen35/rwkv7_7.2b_fp16_fullstack_resweep_5090_v3.json`.
 
+**Figure — the ShareGPT fp16-vs-GPTQ matrix.** One small panel per card × model (each on
+its own scale — 0.1B's 31k and the 3090's 7.2B 756 don't share an axis honestly), peak and
+16 req/s side by side, the GPTQ bar's Δ% recomputed from the two plotted values. The
+missing 0.1B RTN pair is the same overlay-version-drift gap the prose above discloses.
+
+![ShareGPT real workload: fp16 vs int4 GPTQ, per card and model](assets/plots/f9b_sharegpt_w4.svg)
+
+*Protocol: §4b's ShareGPT rounds — 500 prompts, seed 42, within-box equal-conditions. Raw:
+`sharegpt_{0.1b,1.5b,7.2b}_{fp16,w4gptq}_5090_{rinf,r16}.log` +
+`sharegpt_{1.5b,7.2b}_{fp16,w4gptq}_3090_{rinf,r16}.log`. Regenerate:
+`python bench/plots/make_benchmark_plots.py`.*
+
 **Interactive dashboard (hover / zoom / toggle tiers):
 [hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)** —
 the F1/F2/F3/F4/F5 figures below are static SVGs; the dashboard renders the same landed raws
@@ -1100,6 +1112,17 @@ variable shapes. At steady 16 req/s the two are within a few percent on throughp
 tail latency is mixed (vllm-rwkv's steady-state inter-token tail is tighter; rwkv-sglang's
 peak-load tail is far tighter on the 5090). Net: for realistic mixed-length serving at high
 load, rwkv-sglang is ahead; at light steady load they trade. Raw: `bench/results/realload/`.
+
+**Figure — the reversal, drawn.** Throughput bars per card and load level with each run's
+median TTFT printed inside its own bar — the peak-load groups are where rwkv-sglang leads
+on both cards (and with the lower TTFT); the steady-16 groups are the near-tie the prose
+describes, including the 3090's overload caveat carried into its group label.
+
+![ShareGPT real workload: rwkv-sglang vs vllm-rwkv, both cards](assets/plots/f9a_sharegpt_engines.svg)
+
+*Protocol: §7c's own — 500 ShareGPT prompts, identical tokens in/out per card. Raw:
+`realload/{sglang,vllm}_{5090,3090}_{inf,r16}.json`. Regenerate:
+`python bench/plots/make_benchmark_plots.py`.*
 
 ## 8. Launch autotune across cards (why hardcoded constants don't travel)
 
