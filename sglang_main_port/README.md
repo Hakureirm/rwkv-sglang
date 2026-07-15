@@ -1,7 +1,7 @@
 # RWKV-7 port to sglang `main`
 
 The overlay (developed against **v0.5.10.post1**) verified on **sglang main**
-(`base_commit.txt`, currently a3f6680) inside the official CUDA-12.9 dev
+(`base_commit.txt`, currently 754524d) inside the official CUDA-12.9 dev
 container (`lmsysorg/sglang:dev-cu12`) — **greedy 24/24 token-EXACT vs the
 numpy oracle at 0.1B and 1.5B (bf16)**, same result as on v0.5.10.post1.
 

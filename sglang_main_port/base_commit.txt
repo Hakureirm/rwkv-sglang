@@ -1,1 +1,1 @@
-a3f6680 [AMD]: docker(rocm) bump Mooncake to latest main + enable multi-protocol (#27730)
+754524d [Fix] Skip cross-node probe in MultimemAllGatherer on single-node runs (fixes mooncake EP segfault) (#30139)
