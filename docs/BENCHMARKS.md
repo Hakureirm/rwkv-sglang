@@ -1153,6 +1153,17 @@ numerically-safe axis is tuned by default). Gain = time saved on that shape:
 Raw: `bench/results/autotune_ab_9cards.json`, `autotune_ab_5090.json`. F0025 has the
 methodology (including the clock-ramp artifact that forced the interleaved design).
 
+**Figure — the same table, sorted, with the honest zeros kept in view.** One bar per projection
+shape per card; each gain is recomputed in-figure as `heuristic_us / best_locked_us − 1`, and
+cards are sorted by their best-shape gain — L4's +24.1% `ffn_value` on top, the H100/H200/B200
+"heuristic already optimal" zeros at the bottom, drawn not dropped.
+
+![Launch-autotune gain per card and projection shape](assets/plots/f13_autotune.svg)
+
+*Protocol: kernel-level A/B, interleaved 4-pass median (F0025). Raw: `autotune_ab_9cards.json`
+(9 cloud cards) + `autotune_ab_5090.json`; the RTX 3090's serving-level zero has no kernel A/B raw
+and is noted on-figure. Regenerate: `python bench/plots/make_benchmark_plots.py`.*
+
 ## 9. Latency under real load
 
 **Poisson arrivals** (RWKV-7 1.5B; requests arrive at a fixed average rate; 512-in/256-out; RTX 5090 main):

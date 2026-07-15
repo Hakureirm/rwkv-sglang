@@ -1020,6 +1020,16 @@ rwkv-sglang 的 int8 峰值(9,851)反超 vllm-rwkv 的 fp16 峰值(8,583)达 **1
 原始件:`bench/results/autotune_ab_9cards.json`、`autotune_ab_5090.json`。方法学
 (包括迫使我们改用交错测量的时钟爬坡伪影)见 F0025。
 
+**图 — 同一张表,排好序,把如实的零也留在画面里。** 每个投影形状每张卡一根柱子;每个收益都在
+图里现算为 `heuristic_us / best_locked_us − 1`,卡按各自最佳形状收益排序——L4 的 +24.1%
+`ffn_value` 在最上面,H100/H200/B200 那几个"启发式已是最优"的零在最下面,是画出来而不是删掉。
+
+![逐卡、逐投影形状的启动自调优收益](assets/plots/f13_autotune_zh.svg)
+
+*协议:核级 A/B,交错 4 遍取中位(F0025)。原始件:`autotune_ab_9cards.json`(9 张云卡)+
+`autotune_ab_5090.json`;RTX 3090 的服务级零没有核级 A/B 原始件,已在图上标注。重新生成:
+`python bench/plots/make_benchmark_plots.py`。*
+
 ## 9. 真实负载下的延迟
 
 **泊松到达**(RWKV-7 1.5B;请求按固定平均速率随机到达;512 进/256 出;RTX 5090,main):

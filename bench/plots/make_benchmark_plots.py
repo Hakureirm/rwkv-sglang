@@ -420,6 +420,11 @@ LABELS = {
         "en": "honest zeros kept: H100/H200/B200 heuristic already optimal",
         "zh": "如实保留的零:H100/H200/B200 上启发式已是最优",
     },
+    "f13_3090_note": {
+        "en": "RTX 3090: 0% ± noise (serving-level, 7 runs — no kernel A/B raw)",
+        "zh": "RTX 3090:0% ± 噪声(服务级,7 次跑——无核级 A/B 原始件)",
+    },
+    "f13_shape_legend": {"en": "projection shape:", "zh": "投影形状:"},
 
     # F14
     "f14_title": {
@@ -2488,6 +2493,92 @@ def fig_f11_qwen35_readings(out_path, lang):
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# F13 -- §8 launch-autotune, kernel-level A/B per card per projection shape.
+# Three GEMV projection shapes, NOT precision tiers: this figure has no tier
+# axis and never shares a panel with a tier legend, so a single-hue blue ramp
+# ("the same autotune, three shapes of the one kernel") avoids borrowing a
+# tier's meaning. Each gain is recomputed from the two timed legs in the raw.
+# ---------------------------------------------------------------------------
+F13_SHAPES = [
+    ("att_rkvo", "#a9c9ee"),
+    ("ffn_key", "#5b97dd"),
+    ("ffn_value", HUE["blue"]),
+]
+
+
+def f13_data():
+    """§8's kernel-level A/B -- one gain per (card, projection shape), recomputed
+    here as (heuristic_us / best_locked_us - 1)*100 straight from the two timed
+    legs (heuristic = built-in launch heuristic, best_locked = our autotuned
+    launch), never read off the raw's own `locked_gain_pct` or the doc table.
+    9 cloud cards from autotune_ab_9cards.json + the workstation RTX 5090 from
+    autotune_ab_5090.json. The RTX 3090's §8 zero is serving-level (no kernel A/B
+    raw exists), so it is a caption note below, not a bar.
+    """
+    order = ["T4", "L4", "A10G", "A100-40GB", "A100-80GB", "L40S", "H100", "H200", "B200"]
+    d9 = load_raw("autotune_ab_9cards.json")
+    d5090 = load_raw("autotune_ab_5090.json")
+
+    def gains(node):
+        return [(node["shapes"][name]["heuristic_us"] / node["shapes"][name]["best_locked_us"] - 1.0)
+                * 100.0 for name, _c in F13_SHAPES]
+
+    cards = [{"name": k, "sm": d9[k]["sm"], "gains": gains(d9[k])} for k in order]
+    cards.append({"name": "RTX 5090", "sm": d5090["sm"], "gains": gains(d5090)})
+    cards.sort(key=lambda c: max(c["gains"]))  # ascending -> barh renders the max-gain card on top
+    return cards
+
+
+def fig_f13_autotune(out_path, lang):
+    cards = f13_data()
+    fig, ax = plt.subplots(figsize=(11.0, 8.4), dpi=DPI)
+
+    n = len(cards)
+    off = [0.26, 0.0, -0.26]  # att_rkvo top, ffn_value bottom within each card cluster
+    for i, c in enumerate(cards):
+        allzero = max(c["gains"]) < 0.05
+        for (name, color), o, g in zip(F13_SHAPES, off, c["gains"]):
+            ax.barh(i + o, g, height=0.24, color=color, zorder=3, edgecolor=SURFACE,
+                    linewidth=0.6, label=name if i == n - 1 else None)
+            ax.text(g + max(c["gains"], default=1) * 0.006 + 0.12, i + o, f"+{g:.1f}%",
+                    va="center", ha="left", fontsize=7.6,
+                    color=INK_MUTED if allzero else INK, zorder=4)
+
+    ax.set_yticks(range(n))
+    ax.set_yticklabels([f"{c['name']}  (sm{c['sm']})" for c in cards], fontsize=9.6, color=INK)
+    ax.set_ylim(-0.6, n - 0.4)
+    xmax = max(max(c["gains"]) for c in cards)
+    ax.set_xlim(0, xmax * 1.17)
+    ax.set_title(T("f13_title", lang), fontsize=13, color=INK, pad=11, loc="left")
+    ax.set_xlabel(T("f13_ylabel", lang), fontsize=11.5, color=INK_SECONDARY)
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{x:g}%"))
+    ax.grid(True, axis="x", color=GRID, linewidth=0.8, zorder=0)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_color(AXIS)
+    ax.spines["bottom"].set_color(AXIS)
+    ax.tick_params(labelsize=9.6)
+    ax.tick_params(axis="y", length=0)
+    ax.set_facecolor(SURFACE)
+
+    # near-zero cards sit at the bottom (sorted asc), so the bottom-right corner is
+    # empty -- anchor both honest-zero notes there.
+    ax.text(0.985, 0.075, T("f13_zero_note", lang), transform=ax.transAxes, fontsize=8.6,
+            color=INK_SECONDARY, ha="right", va="bottom", style="italic")
+    ax.text(0.985, 0.028, T("f13_3090_note", lang), transform=ax.transAxes, fontsize=8.6,
+            color=INK_MUTED, ha="right", va="bottom", style="italic")
+
+    handles = [plt.Rectangle((0, 0), 1, 1, color=col) for _n, col in F13_SHAPES]
+    ax.legend(handles, [nm for nm, _c in F13_SHAPES], title=T("f13_shape_legend", lang),
+              loc="upper center", bbox_to_anchor=(0.5, -0.075), ncol=3, frameon=False,
+              fontsize=9.6, title_fontsize=9.6)
+    fig.tight_layout(rect=(0, 0.05, 1, 0.99))
+    _source_note(fig)
+    fig.savefig(out_path, metadata=SVG_METADATA)
+    plt.close(fig)
+
+
 FIGURES = [
     ("f1_concurrency_5090", fig_f1_concurrency_5090),
     ("f2_concurrency_3090", fig_f2_concurrency_3090),
@@ -2501,6 +2592,7 @@ FIGURES = [
     ("f10_tp_pp", fig_f10_tp_pp),
     ("f11_qwen35_readings", fig_f11_qwen35_readings),
     ("f12_latency_poisson", fig_f12_latency_poisson),
+    ("f13_autotune", fig_f13_autotune),
 ]
 
 
