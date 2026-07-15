@@ -1001,6 +1001,23 @@ B128 cells (0.46% stock / 0.82% re-tuned). Raw (both repeats, p10/p50/p90 per ce
 official/community reference numbers as recorded):
 `bench/results/albatross_5090/large_batch_grid.json`.
 
+**Figure — both Albatross comparisons in one place.** Top: §7's per-card single-stream
+pairs, sorted by the Albatross value, with the ours÷Albatross ratio computed from the two
+plotted numbers (the 3090's Albatross bar is the value *after* our per-card re-tune, tagged
+right on the bar; T4 draws ours only). Bottom: §7a's large-batch grid as a dot plot on a log
+axis — our two-repeat means for all three code variants on the single RTX 5090, with the
+official chart values and README claims drawn as reference markers and labeled with the
+same per-Bo RTX Pro 6000 attribution the table above carries; two cards, one code, both
+shown, neither smoothed into the other.
+
+![Albatross vs rwkv-sglang: per-card single-stream and the 7.2B large-batch grid](assets/plots/f8_albatross.svg)
+
+*Raw: `albatross_fleet_10cards.json` + `fleet_main_10cards.json` + `albatross_3090.md` (§5
+table) + `albatross_5090/retuned_summary.json` + `bsz_sweep_fullstack_{3090main,5090}.json`
+(top panel); `albatross_5090/large_batch_grid.json`, including its recorded
+official/README reference numbers (bottom panel). Regenerate:
+`python bench/plots/make_benchmark_plots.py`.*
+
 ## 7b. Comparison with vllm-rwkv (the community vLLM fork)
 
 Measured 2026-07-06 under strictly equal conditions, **RWKV-7 1.5B**: same GPUs (RTX 3090 + RTX

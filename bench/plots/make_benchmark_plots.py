@@ -312,6 +312,7 @@ LABELS = {
         "en": "Albatross stock kernel won't compile on T4 (sm75) — only ours runs",
         "zh": "Albatross 出厂核在 T4(sm75)编译不过——只有我们能跑",
     },
+    "f8a_retuned": {"en": "we re-tuned it for this card", "zh": "我们为这张卡重调过"},
     "f8b_title": {
         "en": "7.2B large-batch grid on a single RTX 5090 — same public code; official headline numbers are RTX Pro 6000 (per Bo Peng)",
         "zh": "7.2B 大批量格,单张 RTX 5090——同一份公开代码;官方招牌数字测于 RTX Pro 6000(据 Bo Peng 本人说明)",
@@ -321,6 +322,9 @@ LABELS = {
     "f8b_f3_2605": {"en": "faster3_2605 stock", "zh": "faster3_2605 出厂"},
     "f8b_official": {"en": "official chart (RTX Pro 6000, per Bo)", "zh": "官方图表值(RTX Pro 6000,据 Bo)"},
     "f8b_readme": {"en": "README \"{val}+\" (Pro 6000-class claim)", "zh": "README「{val}+」(Pro 6000 级宣称)"},
+    "f8b_cls_decode": {"en": "decode", "zh": "解码"},
+    "f8b_cls_prefill": {"en": "prefill", "zh": "预填充"},
+    "f8b_cls_batch_prefill": {"en": "batch prefill", "zh": "批量预填充"},
 
     # F9a / F9b
     "f9a_title": {
@@ -1831,6 +1835,216 @@ def fig_f7_speed_ladder(out_path, lang):
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# F8 -- Albatross vs rwkv-sglang: §7 per-card single-stream + §7a large-batch
+# ---------------------------------------------------------------------------
+def f8a_data():
+    """§7's per-card single-stream rows -- see f1_panels()'s docstring for why
+    this is factored out. Albatross values: albatross_fleet_10cards.json b1
+    decode (T4 = compile fail, carried as None); the 3090 from
+    albatross_3090.md §5 (the internally-consistent re-measurement, per that
+    raw's own note it is the table that feeds comparison.md; §7 flags it as
+    re-tuned for the card); the 5090 from retuned_summary.json's stock leg
+    (the author's own card -- stock IS its best case there, §7 lead). Ours:
+    the same per-card c=1 values F6 draws. Sorted by the Albatross value
+    (ascending -> largest on top), T4 pinned last as the no-Albatross row.
+    """
+    alb = load_raw("albatross_fleet_10cards.json")
+    fleet = load_raw("fleet_main_10cards.json")
+    rows = []
+    for key, disp in F6_FLEET_CARDS:
+        a = alb[key]["results"].get("b1", {}).get("decode_tok_s")  # None on T4
+        ours = dict(sorted((r["concurrency"], r["out_tok_per_s"])
+                           for r in fleet[key]["runs"]["sweep_json"]["rows"]))[1]
+        rows.append({"name": disp, "sm": fleet[key]["sm"], "alb": a, "ours": ours})
+    rows.append({"name": "RTX 3090", "sm": 86, "alb": albatross_3090_15b_b1(),
+                 "ours": dict(load_rows("bsz_sweep_fullstack_3090main.json"))[1],
+                 "alb_retuned": True})
+    rows.append({"name": "RTX 5090", "sm": 120,
+                 "alb": load_raw("albatross_5090/retuned_summary.json")["1.5b/b1/decode"]["stock_tok_s"],
+                 "ours": dict(load_rows("bsz_sweep_fullstack_5090.json"))[1]})
+    with_alb = sorted((r for r in rows if r["alb"] is not None), key=lambda r: r["alb"])
+    no_alb = [r for r in rows if r["alb"] is None]
+    return no_alb + with_alb  # bottom-up barh order: T4 (no bar) at the bottom
+
+
+# §7a's shape rows -- explicit order (the table's own), never dict iteration.
+# (grid_case, display, class_label_key, readme_key)
+F8B_SHAPES = [
+    ("B1T1", "1×1", "f8b_cls_decode", None),
+    ("B8T1", "8×1", "f8b_cls_decode", None),
+    ("B32T1", "32×1", "f8b_cls_decode", None),
+    ("B64T1", "64×1", "f8b_cls_decode", None),
+    ("B128T1", "128×1", "f8b_cls_decode", None),
+    ("B256T1", "256×1", "f8b_cls_decode", None),
+    ("B1024T1", "1024×1", "f8b_cls_decode", "B1024T1_decode"),
+    ("B1T256", "1×256", "f8b_cls_prefill", None),
+    ("B1T1024", "1×1024", "f8b_cls_prefill", "B1T1024_prefill"),
+    ("B16T16", "16×16", "f8b_cls_batch_prefill", None),
+    ("B32T32", "32×32", "f8b_cls_batch_prefill", "B32T32_batch_prefill"),
+]
+
+
+def f8b_data():
+    """§7a's large-batch grid -- see f1_panels()'s docstring for why this is
+    factored out. Each variant's value per shape = mean of the two process
+    repeats (the table's own protocol; repeats agree within 0.82% worst
+    case). faster3a's B1024 cells come from their dedicated fresh-process
+    run groups (the disclosed OOM note in §7a). Official Pro 6000 chart
+    values + README "N+" claims are carried verbatim from the raw's own
+    reference_numbers block -- reference markers, not our measurements.
+    """
+    d = load_raw("albatross_5090/large_batch_grid.json")
+    grid = d["grid"]
+
+    def mean_case(group, case):
+        vals = [grid[group][run]["cases"][case]["tok_s_p50"] for run in ("run1", "run2")]
+        return sum(vals) / len(vals)
+
+    def series(main_group, b1024_group):
+        out = {}
+        for case, _disp, _cls, _readme in F8B_SHAPES:
+            group = b1024_group if (case == "B1024T1" and b1024_group) else main_group
+            out[case] = mean_case(group, case)
+        return out
+
+    ref = d["reference_numbers"]
+    official = ref["bo_zhihu_pro6000_2026-07-10"]  # {"B1T1": 144.04, ...}
+    readme = ref["albatross_readme_5090_claims"]   # {"B1024T1_decode": "15000+", ...}
+    return {
+        "f3a_stock": series("f3a_stock_72b", "f3a_stock_1024"),
+        "f3a_tuned": series("f3a_tuned_72b", "f3a_tuned_1024"),
+        "f3_2605": series("f3_2605_stock_72b", None),
+        "official": {k: v for k, v in official.items() if k != "note"},
+        "readme": {k: v for k, v in readme.items() if k != "note"},
+    }
+
+
+def fig_f8_albatross(out_path, lang):
+    rows = f8a_data()
+    b = f8b_data()
+    fig, (axa, axb) = plt.subplots(
+        2, 1, figsize=(13.2, 12.6), dpi=DPI,
+        gridspec_kw={"height_ratios": [1.25, 1.0]},
+    )
+
+    # ---- panel A: per-card single-stream, grouped horizontal bars ----
+    n = len(rows)
+    ys = list(range(n))
+    bar_h = 0.34
+    for y, r in zip(ys, rows):
+        if r["alb"] is not None:
+            axa.barh(y + 0.19, r["alb"], height=bar_h, color=XCOLOR["theirs"], zorder=3,
+                     edgecolor=SURFACE, linewidth=0.8,
+                     label=T("f8a_albatross", lang) if y == ys[-1] else None)
+            alb_tag = f" {r['alb']:,.1f}"
+            if r.get("alb_retuned"):
+                # §7's own table note, carried into the figure: this cell is the
+                # value AFTER our per-card re-tune, not out-of-box.
+                alb_tag += f" ({T('f8a_retuned', lang)})"
+            axa.text(r["alb"], y + 0.19, alb_tag, va="center", ha="left",
+                     fontsize=7.8, color=INK, zorder=4)
+        else:
+            axa.text(r["ours"] + 14, y + 0.19, T("f8a_t4_note", lang), va="center", ha="left",
+                     fontsize=7.8, color=INK_SECONDARY, style="italic", zorder=4)
+        axa.barh(y - 0.19, r["ours"], height=bar_h, color=XCOLOR["ours"], zorder=3,
+                 edgecolor=SURFACE, linewidth=0.8,
+                 label=T("f8a_ours", lang) if y == ys[-1] else None)
+        axa.text(r["ours"], y - 0.19, f" {r['ours']:,.1f}", va="center", ha="left",
+                 fontsize=7.8, color=INK, zorder=4)
+        if r["alb"] is not None:
+            # ours ÷ Albatross, computed from the two plotted values -- right column
+            axa.text(0.995, y, f"{r['ours'] / r['alb']:.2f}×", transform=blended_transform_factory(
+                axa.transAxes, axa.transData), va="center", ha="right", fontsize=8.6,
+                color=INK_SECONDARY, fontweight="bold", zorder=4)
+    axa.set_yticks(ys)
+    axa.set_yticklabels([f"{r['name']}  (sm{r['sm']})" for r in rows], fontsize=9.4, color=INK)
+    axa.set_title(T("f8a_title", lang), fontsize=11.6, color=INK, pad=9, loc="left")
+    axa.set_xlabel(T("tok_s", lang), fontsize=11, color=INK_SECONDARY)
+    axa.xaxis.set_major_formatter(_INT_FMT)
+    axa.set_xlim(0, max(r["alb"] or 0 for r in rows) * 1.22)
+    axa.set_ylim(-0.62, n - 0.38)
+    axa.grid(True, axis="x", color=GRID, linewidth=0.8, zorder=0)
+    for spine in ("top", "right"):
+        axa.spines[spine].set_visible(False)
+    axa.spines["left"].set_color(AXIS)
+    axa.spines["bottom"].set_color(AXIS)
+    axa.tick_params(labelsize=9.4)
+    axa.tick_params(axis="y", length=0)
+    axa.set_facecolor(SURFACE)
+    axa.legend(loc="lower right", frameon=False, fontsize=9.6, bbox_to_anchor=(0.995, 0.02))
+
+    # ---- panel B: §7a large-batch grid, dot plot on a log axis ----
+    # (position encodes value honestly across the 84 -> 21,000+ span; bar
+    # lengths on a log axis would not)
+    yb = list(range(len(F8B_SHAPES)))[::-1]  # table order top -> bottom
+    for y, (case, disp, cls_key, readme_key) in zip(yb, F8B_SHAPES):
+        axb.axhline(y, color=GRID, linewidth=0.7, zorder=0)
+        axb.scatter([b["f3a_stock"][case]], [y], s=64, color=XCOLOR["theirs"], zorder=4,
+                    edgecolors=SURFACE, linewidths=0.9)
+        axb.scatter([b["f3a_tuned"][case]], [y], s=74, facecolors=SURFACE, zorder=5,
+                    edgecolors=XCOLOR["theirs"], linewidths=1.7)
+        axb.scatter([b["f3_2605"][case]], [y], s=64, color=XCOLOR["theirs2"], zorder=3,
+                    edgecolors=SURFACE, linewidths=0.9)
+        if case in b["official"]:
+            v = b["official"][case]
+            axb.scatter([v], [y], s=86, marker="D", color=XCOLOR["official"], zorder=6,
+                        edgecolors=SURFACE, linewidths=0.9)
+            axb.annotate(f"{v:,.0f}", (v, y), xytext=(0, 8), textcoords="offset points",
+                         fontsize=8, color=INK, ha="center", fontweight="bold", zorder=6)
+        if readme_key:
+            claim = b["readme"][readme_key]          # e.g. "15000+"
+            v = float(claim.rstrip("+"))
+            axb.scatter([v], [y], s=92, marker=">", facecolors=SURFACE, zorder=6,
+                        edgecolors=XCOLOR["official"], linewidths=1.5)
+            axb.annotate(T("f8b_readme", lang).format(val=f"{v:,.0f}"), (v, y), xytext=(0, 9),
+                         textcoords="offset points", fontsize=7.4, color=INK_SECONDARY,
+                         ha="center", zorder=6)
+    axb.set_yticks(yb)
+    axb.set_yticklabels([f"{disp}  ·  {T(cls_key, lang)}" for _c, disp, cls_key, _r in F8B_SHAPES],
+                        fontsize=9.4, color=INK)
+    axb.set_xscale("log")
+    xticks = [100, 300, 1000, 3000, 10000, 20000]
+    axb.xaxis.set_major_locator(FixedLocator(xticks))
+    axb.xaxis.set_major_formatter(_INT_FMT)
+    axb.xaxis.set_minor_locator(NullLocator())
+    axb.xaxis.set_minor_formatter(NullFormatter())
+    axb.set_xlim(70, 30000)
+    axb.set_ylim(-0.7, len(F8B_SHAPES) - 0.3)
+    axb.set_title(T("f8b_title", lang), fontsize=11.6, color=INK, pad=9, loc="left")
+    axb.set_xlabel(T("tok_s", lang) + " (log)", fontsize=11, color=INK_SECONDARY)
+    axb.grid(True, axis="x", color=GRID, linewidth=0.8, zorder=0)
+    for spine in ("top", "right"):
+        axb.spines[spine].set_visible(False)
+    axb.spines["left"].set_color(AXIS)
+    axb.spines["bottom"].set_color(AXIS)
+    axb.tick_params(labelsize=9.4)
+    axb.tick_params(axis="y", length=0)
+    axb.set_facecolor(SURFACE)
+    legend_handles = [
+        plt.Line2D([0], [0], marker="o", linestyle="None", markersize=8,
+                   markerfacecolor=XCOLOR["theirs"], markeredgecolor=SURFACE,
+                   label=T("f8b_f3a_stock", lang)),
+        plt.Line2D([0], [0], marker="o", linestyle="None", markersize=8.6,
+                   markerfacecolor=SURFACE, markeredgecolor=XCOLOR["theirs"], markeredgewidth=1.7,
+                   label=T("f8b_f3a_tuned", lang)),
+        plt.Line2D([0], [0], marker="o", linestyle="None", markersize=8,
+                   markerfacecolor=XCOLOR["theirs2"], markeredgecolor=SURFACE,
+                   label=T("f8b_f3_2605", lang)),
+        plt.Line2D([0], [0], marker="D", linestyle="None", markersize=8.4,
+                   markerfacecolor=XCOLOR["official"], markeredgecolor=SURFACE,
+                   label=T("f8b_official", lang)),
+    ]
+    axb.legend(handles=legend_handles, loc="upper center", bbox_to_anchor=(0.5, -0.115),
+               ncol=2, frameon=False, fontsize=9.2)
+
+    fig.suptitle(T("f8_suptitle", lang), fontsize=14.5, color=INK, x=0.01, ha="left", y=0.995)
+    fig.tight_layout(rect=(0, 0.045, 1, 0.965))
+    _source_note(fig)
+    fig.savefig(out_path, metadata=SVG_METADATA)
+    plt.close(fig)
+
+
 FIGURES = [
     ("f1_concurrency_5090", fig_f1_concurrency_5090),
     ("f2_concurrency_3090", fig_f2_concurrency_3090),
@@ -1838,6 +2052,7 @@ FIGURES = [
     ("f4_math500_ladder", fig_f4_math500_ladder),
     ("f6_fleet", fig_f6_fleet),
     ("f7_speed_ladder", fig_f7_speed_ladder),
+    ("f8_albatross", fig_f8_albatross),
 ]
 
 
