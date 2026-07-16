@@ -577,3 +577,26 @@ Two corrections to §2.2's premise:
 - ✅ Spec-round split: table above. **A0's "can downgrade Stage B" clause fires:** the
   50 ms residual was a derivation artifact; Stage B is re-scoped as draft-kernel +
   verify-path + acceptance (three pieces, the last two now the binding ones).
+
+## Stage A first increment (2026-07-16, 3090 — see F0060)
+
+Stage A's first fused-block increment is in F0060 (do not duplicate the numbers here).
+Two results that update this ADR's framing:
+
+- **PDL is sm_90+ only (verified).** `griddepcontrol.wait/.launch_dependents` fails to
+  assemble on the 3090 (sm_86) and compiles only under `#if __CUDA_ARCH__ >= 900`. So the
+  route this ADR + the 2026-07-13 Albatross study settled on (PDL-chained micro-kernels, NOT
+  the §1 cooperative monolith) is **structurally untestable for overlap on the 3090** — the
+  3090 gates fusion structure + bit-exact correctness; the flagship overlap number is an sm120
+  run. (The §2.3(6) coop-in-graph question was already closed YES on the 5090 in A0.1.)
+- **The 3090 bsz1 GEMVs already run at 94–99% of the card's 889.4 GB/s achievable read BW**
+  (F0060 §2–3). The bsz1 megakernel win is therefore a **fast-card phenomenon** — on the 3090
+  the recoverable waste is the ~580 launch gaps/step + ~15% non-GEMV busy, not per-kernel GEMV
+  efficiency (which returns as a lever only where the M==1 GEMV can't saturate the bus, i.e.
+  the 5090). This sharpens §2.1(b)'s "the win is parity+structure, not a blowout" for the
+  slow-card case and confirms the prioritization ("do not reallocate W1 to this; it's the
+  bsz1/latency lever on fast cards").
+
+Increment delivered: grouped r/k/v GEMV (`gemv_rkv_m1`, `RWKV_MEGA=1`, PDL-scaffolded) —
+bit-exact (zero differing bytes), in-situ 18→16 launches/layer, microbench graphed +3.17/+6.19
+µs/layer (1.5B/7.2B) from 3 launches → 1. sm120 execution plan in F0060 §7.

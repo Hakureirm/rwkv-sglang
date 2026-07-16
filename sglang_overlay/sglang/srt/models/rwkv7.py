@@ -120,6 +120,19 @@ _INV_SQRT_E = 0.6065306597126334
 # Gate: greedy-EXACT (verify_m1d) before it can be the default. Default OFF.
 _FAST_LINEAR = os.environ.get("RWKV_FAST_LINEAR", "0") == "1"
 
+# #50 megakernel line (ADR-0008 / F0060) Stage-A: pack the r/k/v decode GEMVs
+# (3 separate gemv_m1 launches sharing the shift+lerp6 producer) into ONE launch
+# via rwkv7_mega.gemv_rkv_m1 (blockIdx.y role-split — Albatross's rkv multi-role
+# kernel, competitor study §5). Each output row reuses gemv_m1's exact fp32
+# reduction + the SAME arch-aware (threads,out_tile), so it is byte-identical to
+# the 3-launch path (bench/test_mega_rkv.py: zero differing bytes) and greedy
+# stays EXACT by construction. The kernel carries sm_90+-only PDL griddepcontrol
+# scaffolding (inert on sm_86); the flagship overlap number is an sm120 run.
+# Fires only on the eligible fp16 M==1 decode path with plain ReplicatedLinear
+# r/k/v (not W4/W8/int8/tp>1); else the 3-launch path is untouched. Default OFF.
+_MEGA = os.environ.get("RWKV_MEGA", "0") == "1"
+_MEGA_ANNOUNCED = False
+
 # M9 + R3: fused 4-chain LoRA on the small-batch fp16 decode path. Per layer the
 # w/a/g[,v] LoRA chains are ~12+ tiny launches (4x down-GEMV + act + up-GEMV[+bias])
 # whose LAUNCH LATENCY, not bandwidth, dominates; rwkv7_lora.lora4_m1 (M==1) and
@@ -856,9 +869,43 @@ class Rwkv7Attention(nn.Module):
             xa = x + self.x_a.view(-1) * d
             xg = x + self.x_g.view(-1) * d
 
-        r = _proj_gemv(self.r_proj, xr, self._fast)
-        k = _proj_gemv(self.k_proj, xk, self._fast)
-        v = _proj_gemv(self.v_proj, xv, self._fast)
+        # #50 Stage-A: grouped r/k/v GEMV (one launch) on the eligible fp16 bsz1
+        # decode path. Byte-identical to the 3 gemv_m1 calls below (same reduction,
+        # same config) so it drops in under the greedy-EXACT gate; anything the
+        # grouped kernel can't take falls through to the per-proj path unchanged.
+        r = k = v = None
+        if (
+            _MEGA
+            and self._fast
+            and T == 1
+            and xr.dtype == torch.float16
+            and not isinstance(self.r_proj, (W4Linear, W8Linear))
+            and not isinstance(self.k_proj, (W4Linear, W8Linear))
+            and not isinstance(self.v_proj, (W4Linear, W8Linear))
+        ):
+            from sglang.srt.layers.attention.rwkv7_kernels import mega
+            wr, wk, wv = self.r_proj.weight, self.k_proj.weight, self.v_proj.weight
+            if (
+                mega.available()
+                and wr.dtype == torch.float16 and wr.is_contiguous()
+                and wk.dtype == torch.float16 and wk.is_contiguous()
+                and wv.dtype == torch.float16 and wv.is_contiguous()
+                and wr.shape == wk.shape == wv.shape
+                and (wr.shape[0] % 2) == 0 and (wr.shape[1] % 4) == 0
+            ):
+                global _MEGA_ANNOUNCED
+                if self.layer_id == 0 and not _MEGA_ANNOUNCED:
+                    import sys
+                    _MEGA_ANNOUNCED = True
+                    print("[rwkv7] #50 Stage-A grouped r/k/v GEMV ENABLED "
+                          "(fp16 bsz1 decode; sm120 PDL overlap inert on this arch)",
+                          file=sys.stderr, flush=True)
+                y3 = mega.gemv_rkv_m1(xr, xk, xv, wr, wk, wv)  # [3, H]
+                r, k, v = y3[0:1], y3[1:2], y3[2:3]
+        if r is None:
+            r = _proj_gemv(self.r_proj, xr, self._fast)
+            k = _proj_gemv(self.k_proj, xk, self._fast)
+            v = _proj_gemv(self.v_proj, xv, self._fast)
 
         if self.layer_id == 0:
             v_first = v
