@@ -1041,6 +1041,15 @@ B128 cells (0.46% stock / 0.82% re-tuned). Raw (both repeats, p10/p50/p90 per ce
 official/community reference numbers as recorded):
 `bench/results/albatross_5090/large_batch_grid.json`.
 
+**Dated update (2026-07-14, their README).** Albatross has since landed a `bvec` cp.async
+race fix in its WKV kernels (`ff144b6b`) and a new `faster3a_2607` tree ("only tuned for
+7B", `63c53f4ab`); its README now leads with a `faster3a_2607` table whose rows sit
+0.3–1.4% above the `faster3a_2605` rows this grid measured against — B1 decode 144.04 →
+**145.80**, B1×256 prefill 14,006.1 → **14,199.2**, B128 decode 9,404.7 → **9,500.4**,
+B16×16 batch prefill 17,291.6 → **17,344.0** (their README as of 2026-07-14, commit
+`6af325a`; the README does not state which card that table was measured on). The grid
+above stays pinned at `343147a`; it has not been re-run against the new tree.
+
 **Figure — both Albatross comparisons in one place.** Top: §7's per-card single-stream
 pairs, sorted by the Albatross value, with the ours÷Albatross ratio computed from the two
 plotted numbers (the 3090's Albatross bar is the value *after* our per-card re-tune, tagged
@@ -1059,6 +1068,79 @@ official/README reference numbers (bottom panel). Regenerate:
 `python bench/plots/make_benchmark_plots.py`.*
 
 ## 7b. Comparison with vllm-rwkv (the community vLLM fork)
+
+**Update (2026-07-16): their varlen stack has merged — the current standing is the 7.2B
+comparison below; the 2026-07-06 campaign further down is kept as dated history.**
+vllm-rwkv's performance rework is now on its default branch: PR #8 — varlen prefill
+kernels, slot-mapped out-of-order decode state, "rapid" CUDA sampler — merged 2026-07-11
+(head `e7720a4f3`); PR #9 — a clean-history rewrite of the whole RWKV stack — merged
+2026-07-13; PR #10 — adopting Albatross's `ff144b6b` `bvec` cp.async race fix and its
+`faster3a_2607` 3D TMix/CMix kernels — merged 2026-07-15 (their own canonical numbers for
+it were still pending at merge time). This supersedes the 2026-07-06 rows below as a
+description of their engine, the high-concurrency reading especially: those tables (and
+§7c's real-workload comparison) measured their pre-varlen engine and have not been re-run
+against the merged stack — read them with their dates on.
+
+**The current same-card comparison — 7.2B fp16, single RTX 5090, at their canonical shape**
+(their regression gate's workload: 320 requests × 128-in/1,280-out). Same weights
+(tensor-verified conversion), same client logic both sides (fixed pseudo-random token-id
+prompts, greedy, ignore_eos, requests = 4× concurrency, completion tokens ÷ wall-clock),
+each engine at its documented best server config — theirs `vllm serve --max-num-seqs 320
+--max-num-batched-tokens 8192` at stock PR#8 defaults (incl. `VLLM_USE_V2_MODEL_RUNNER=1`,
+upstream vLLM 0.23.1rc1 base `9fde043f5`), ours the F0056 full-stack config at this card's
+7.2B pool cap (cuda-graph max-bs 344 / max-running 344); both engines cover c=320 under
+CUDA graphs. Their side measured 2026-07-10 at the then-PR#8 head `48b7fbda3` (one day
+before merge); ours measured 2026-07-13, after the W1' serving fixes (§4b, F0056):
+
+| concurrency | vllm-rwkv serving (2026-07-10, `48b7fbda3`) | rwkv-sglang serving (2026-07-13, W1') | theirs / ours |
+|---|---|---|---|
+| 64 | 5,267.9 | 4,999.1 | 1.054 |
+| 128 | 8,188.9 | 7,755.6 | 1.056 |
+| 320 | **9,892.8** | 9,334.7 full sweep / **9,406.1** best measured | 1.052–1.060 |
+
+Ours raw: `bench/results/w1prime_legFinal_A_7.2b_5090.json` (the c=64/128/320 sweep) +
+`bench/results/w1prime_legG1_vres_7.2b_5090.json` (the 9,406.1: same flag set plus
+VRESGATE, a focused c=320 re-measurement; the two c=320 readings agree within 0.8% — full
+per-fusion ledger in F0056). Their runs: same card, same client, server flags as above;
+their raw files are not landed in this repo — the commit pin and launch flags here are the
+reproduction recipe.
+
+Two reference numbers of theirs on this same shape, under **their own accounting**
+(in-process worker loop; decode tokens ÷ summed per-decode-step CUDA-event time; prefill,
+scheduler, API and tokenization all outside the timed window — not a serving measurement):
+their merged repo enforces a CI regression gate at **`RUNNER_BASELINE_TOKENS_PER_S =
+9712.562`** (max regression 1.0%, `benchmarks/rwkv7/benchmark_faster3a.py` on their
+default branch, checked 2026-07-16), and PR #8's body self-reported 9,640.42. Bridge
+between the two accountings, measured on our card at `48b7fbda3`: their harness reads
+10,537.65 where their same-build serving endpoint delivers 9,892.8 (−6.1%) — their runner
+class of number sits ~6% above what a serving client sees on their stack.
+
+**Net, said plainly:** on their canonical shape we are **~5% behind** their pre-merge head
+under the same client (9,406.1 vs 9,892.8), **~3% behind** their merged-stack contract
+constant (9,406.1 vs 9,712.562, cross-accounting), closed from **~24% behind** at the
+2026-07-10 session (ours then 7,558.6; the landed pre-fix anchor of the same config read
+7,603.5 on 07-13, raw `bench/results/w1prime_legA_anchor_7.2b_5090.json`; the fix ledger
+is §4b/F0056: 7,603.5 → 9,406.1, +23.7%). Their merged tip is newer than the head we
+measured — PR #10's kernel adoption postdates it, and their contract constant already sits
+above PR #8's body number — so the standing next measurement is a same-client rematch
+against the merged stack.
+
+**Our standard shape (64-in/256-out), 7.2B fp16, same session pair, for completeness.**
+Theirs (2026-07-10): c=1 **143.1**, c=32 2,697.3, c=128 7,542.2, peak 8,981.3 @c320 (their
+`--max-num-seqs` cap; that single point had an idle foreign process co-resident — the
+exclusive-GPU neighbors read c=192 7,860.2 and c=256 7,814.0). Ours after W1' (2026-07-13,
+raw `bench/results/w1prime_legFinal_B_7.2b_5090.json`): c=1 **133.4**, c=32 2,636.4, c=128
+7,087.3; that run was not swept past c=128 — our last full-sweep peak on this shape is
+6,709.0 @c320 (fp16, pre-W1', §4/F0047). Read plainly: at 7.2B fp16-vs-fp16, single
+request is **theirs by ~7%** (143.1 vs 133.4), c=32 theirs by ~2%, c=128 theirs by ~6%.
+(§13's 7.2B single-request figure — 133.4 vs 96.0 — is against Qwen3.5, a different
+comparison; and the 1.5B bsz1 results in the history below are a different model size. Do
+not conflate either with this engine pair.)
+
+**Open on their side:** PR #7 (INT8 + NVFP4 quantization) is open, not merged; when it
+merges, the quantization comparison reopens.
+
+**Dated history — the 2026-07-06 campaign (1.5B; their pre-varlen engine, superseded above):**
 
 Measured 2026-07-06 under strictly equal conditions, **RWKV-7 1.5B**: same GPUs (RTX 3090 + RTX
 5090), same weights file (1.5B, tensor-verified), same client logic (the sweep client ported to the
@@ -1090,9 +1172,10 @@ GEMV stack beats the port outright. rwkv-sglang leads the c8–64 middle on the 
 high concurrency on both cards (up to 1.26×)** — that is the real result of this comparison
 and rwkv-sglang's next kernel target. Two counters already exist: on the 3090 rwkv-sglang's int8 w8a8 peak
 (9,851) beats vllm-rwkv's fp16 peak (8,583) by **1.1477×**; on the 5090 the upstream cutlass
-int8 op does not exist; rwkv-sglang's own s8-wmma kernel (V1) now runs the tier there end-to-end
-(20,991 @c512 = 0.9466× fp16; the int8 GEMM itself is 1.03–1.55× fp16 at M≥512) — the availability gap is closed, and the 3090
-ratio is 1.38×) is the single highest-leverage speed item. Raw:
+int8 op does not exist; rwkv-sglang's own s8-wmma kernel (V2) now runs the tier there end-to-end
+(20,991 @c512 = 0.9466× fp16; the int8 GEMM itself is 1.03–1.55× fp16 at M≥512) — the
+availability gap is closed; at 1.5B its end-to-end sits just under our own highly-optimized
+fp16, and int8's decisive win is at 7.2B (the memory-bound tier, §4). Raw:
 `bench/results/vllmrwkv/` (correctness JSONs with full token ids + both sweeps per card).
 
 
