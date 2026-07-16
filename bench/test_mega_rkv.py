@@ -67,7 +67,36 @@ for name, N, K in SHAPES:
                 print(f"  FAIL {name:12s} cfg=({t},{ot}) {gen}/{scale}: "
                       f"{nd} differing / {got.numel()}")
     print(f"  {'PASS' if all_ok else 'FAIL'} {name:12s} N={N} K={K} cfg=({t},{ot})")
-print(f"\nGATE: {'PASS (zero differing bytes)' if all_ok else 'FAIL'}")
+print(f"\nGATE (rkv): {'PASS (zero differing bytes)' if all_ok else 'FAIL'}")
+
+
+# ---- Stage-A2 gate: o_proj as a role (G=1) + whole-block r/k/v/o (G=4) ------
+# o_proj is another M==1 [N,K]·[1,K]^T GEMV with (N,K)=(H,H) like r/k/v, so it
+# takes the SAME _select_config; gemv_o_m1[0] must be byte-identical to
+# gemv_m1(xo, wo), and gemv_rkvo_m1's 4 rows to [r,k,v,o] stacked.
+print("\n## STAGE-A2 GATE (o_proj role G=1 + whole-block r/k/v/o G=4)")
+o_ok = rkvo_ok = True
+for name, N, K in SHAPES:
+    t, ot = mega.rkv_config(N, K)
+    for gen in ("uniform", "heavy"):
+        for scale in (0.5, 2.0, 8.0):
+            xr, xk, xv, wr, wk, wv = mk(N, K, scale, gen)
+            xo, wo = mk(N, K, scale, gen)[0], mk(N, K, scale, gen)[3]
+            # G=1: o_proj alone
+            go = torch.ops.rwkv7_mega.gemv_o_m1(xo.view(-1), wo, t, ot)
+            eo = torch.ops.rwkv7_fast.gemv_m1_cfg(xo.view(1, -1), wo, t, ot)
+            o_ok &= torch.equal(go, eo)
+            # G=4: r/k/v/o in one launch
+            g4 = torch.ops.rwkv7_mega.gemv_rkvo_m1(
+                xr.view(-1), xk.view(-1), xv.view(-1), xo.view(-1),
+                wr, wk, wv, wo, t, ot)
+            e4 = torch.cat([oracle(xr, xk, xv, wr, wk, wv, t, ot), eo], dim=0)
+            rkvo_ok &= torch.equal(g4, e4)
+    print(f"  {'PASS' if o_ok and rkvo_ok else 'FAIL'} {name:12s} "
+          f"N={N} K={K} cfg=({t},{ot})  o(G1)={o_ok} rkvo(G4)={rkvo_ok}")
+print(f"\nGATE (o G=1): {'PASS (zero differing bytes)' if o_ok else 'FAIL'}")
+print(f"GATE (rkvo G=4): {'PASS (zero differing bytes)' if rkvo_ok else 'FAIL'}")
+all_ok = all_ok and o_ok and rkvo_ok
 
 
 # ---------------------------------------------------------------- microbench

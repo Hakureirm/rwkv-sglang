@@ -1048,7 +1048,31 @@ class Rwkv7Attention(nn.Module):
                 gate_corr = ((r * k * self.r_k).sum(dim=-1, keepdim=True) * v).reshape(T, H)
                 o = o + gate_corr
                 o = o * g
-        out = _proj_gemv(self.o_proj, o, self._fast)
+        # #50 Stage-A2: route o_proj through the megakernel grouped GEMV (G=1
+        # slice) on the eligible fp16 bsz1 decode path. o_proj is (N,K)=(H,H)
+        # like r/k/v, so mega.gemv_o_m1 uses the SAME _select_config and is
+        # byte-identical to the gemv_m1 in _proj_gemv (bench/test_mega_rkv.py).
+        # On the 3090 o_proj is post-WKV so this is launch-neutral (it cannot
+        # share the r/k/v launch without the 5090 persistent-grid PDL); the win
+        # is the whole-block r/k/v/o stage (gemv_rkvo_m1) the sm120 grid chains.
+        out = None
+        if (
+            _MEGA
+            and self._fast
+            and T == 1
+            and o.dtype == torch.float16
+            and not isinstance(self.o_proj, (W4Linear, W8Linear))
+        ):
+            from sglang.srt.layers.attention.rwkv7_kernels import mega
+            wo = self.o_proj.weight
+            if (
+                mega.available()
+                and wo.dtype == torch.float16 and wo.is_contiguous()
+                and (wo.shape[0] % 2) == 0 and (wo.shape[1] % 4) == 0
+            ):
+                out = mega.gemv_o_m1(o, wo)  # [1, H]
+        if out is None:
+            out = _proj_gemv(self.o_proj, o, self._fast)
         return out, v_first
 
 

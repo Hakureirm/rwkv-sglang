@@ -1,27 +1,38 @@
 // Copyright 2025-2026 SGLang Team
 // Licensed under the Apache License, Version 2.0 (the "License");
 //
-// RWKV-7 megakernel line (task #50, ADR-0008) — Stage-A fused-block increment.
+// RWKV-7 megakernel line (task #50, ADR-0008) — Stage-A fused-block increments.
 //
 // This file is the seed of the bsz1 decode "megakernel" — NOT a cooperative
 // single-launch monolith, but (following the 2026-07-13 Albatross structural
 // study) a PDL-chained + CUDA-graph-captured micro-kernel pipeline whose fused
 // stages keep intermediates on-chip and stream weights continuously.
 //
-// Stage-A increment: gemv_rkv_m1 — the r/k/v projections (three independent
-// [N,K]·[1,K]^T GEMVs that today are three separate launches) packed into ONE
-// grid via a blockIdx.y role-split (proj = blockIdx.y in {0,1,2}). This is the
-// "multi-role single-grid" primitive from the Albatross study §5
-// (rkv_lowrank_pre_executor) — the clearest real example of whole-block fusion,
-// and the megakernel's r/k/v stage.
+// ROLE-GENERIC GROUPED DECODE GEMV (gemv_grouped_m1_kernel): y[G,N] where
+// y[p] = x_p @ W_p[N,K]^T for role p in [0,G). Grid = dim3(N/OutTile, G) and
+// blockIdx.y selects the role. This is the "multi-role single-grid" primitive
+// from the Albatross study §5 (rkv_lowrank_pre_executor) — the clearest real
+// example of whole-block fusion. The public ops layer the projection stages of
+// the RWKV-7 time-mix block onto it:
+//   gemv_rkv_m1  (G=3)  r/k/v stage        — Stage-A1 increment (F0060 §5)
+//   gemv_o_m1    (G=1)  output projection  — Stage-A2 (F0060 §7.5 "add o_proj")
+//   gemv_rkvo_m1 (G=4)  whole-block r/k/v/o stage the sm120 megakernel chains
+// o_proj is another M==1 [N,K]·[1,K]^T GEMV structurally identical to r/k/v (same
+// (N,K)=(H,H), hence the SAME _select_config), so it slots in as a 4th role for
+// free. On the 3090 (no PDL persistent grid) o_proj still launches on its own —
+// it is post-WKV, so it cannot share the r/k/v launch here; gemv_rkvo_m1 is the
+// bit-exact-gated PREFAB the 5090 whole-block grid assembles (see F0060 §7.5).
 //
 // BIT-EXACTNESS (house law): every output element's fp32 accumulation is the
 // SAME code as rwkv7_fast.cu::gemv_m1_kernel (identical per-thread k-stride =
 // Threads*4, identical warp-shuffle tree, identical serial cross-warp sum), and
-// each proj is launched with the SAME (Threads, OutTile) the deployed
-// gemv_m1_cfg path picks for (N,K). => y3[p] is byte-identical to
-// gemv_m1(x3[p], w_p). Gated by bench/test_mega_rkv.py (torch.equal vs 3x
-// gemv_m1) + greedy verify_m1d. No new numerics are introduced.
+// each role is launched with the SAME (Threads, OutTile) the deployed
+// gemv_m1_cfg path picks for (N,K). => y[p] is byte-identical to gemv_m1(x_p,
+// W_p). Gated by bench/test_mega_rkv.py (torch.equal vs G x gemv_m1) + greedy
+// verify_m1d. No new numerics are introduced. Roles are passed by value in a
+// small pointer pack (param space, no device indirection / gather launch), so a
+// role can point at wherever its input lives (non-adjacent shift_lerp6 rows, the
+// post-WKV o input, ...).
 //
 // PDL (Programmatic Dependent Launch) scaffolding: griddepcontrol.launch_dependents
 // requires .target sm_90+ (verified: it FAILS to assemble on sm_86/3090 without
@@ -42,6 +53,9 @@ namespace {
 
 using dtype = at::Half;
 
+// Max roles a single grouped launch packs (r/k/v/o = 4).
+constexpr int kMaxRoles = 4;
+
 __device__ __forceinline__ float warp_sum(float x) {
 #pragma unroll
   for (int offset = 16; offset > 0; offset >>= 1) {
@@ -60,26 +74,29 @@ __device__ __forceinline__ void pdl_launch_dependents() {
 #endif
 }
 
-// gemv_rkv_m1: y3[3,N] where y3[p] = x_p @ W_p[N,K]^T, p in {r=0,k=1,v=2}.
-// Grid = dim3(N/OutTile, 3); blockIdx.y = proj. Body is gemv_m1_kernel verbatim
-// (per-proj select of x/weight/y), so each row is bit-identical to gemv_m1. The
-// three activations are passed as SEPARATE pointers (not a [3,K] stack) so the
-// caller never pays a gather/stack launch — xr/xk/xv can point at wherever they
-// live (e.g. non-adjacent rows of the shift_lerp6 output).
+// gemv_grouped_m1: y_all[G,N], y_all[p] = x_p @ W_p[N,K]^T, p = blockIdx.y.
+// Grid = dim3(N/OutTile, G). Body is gemv_m1_kernel verbatim (per-role select of
+// x/weight/y), so each row is bit-identical to gemv_m1. The up-to-4 role
+// activations/weights are SEPARATE __restrict__ scalar params (not a by-value
+// pointer pack) — a dynamic-indexed pack defeats the aliasing/register analysis
+// and measured ~1.5x SLOWER than the 3-pointer Stage-A1 kernel; the ternary on
+// __restrict__ params keeps the exact codegen of the original (proj = blockIdx.y
+// is uniform per block, so the select is a single resolved pointer). Unused
+// slots (G<4) mirror role 0's pointers and are never dereferenced (proj < G).
 template <int Threads, int OutTile>
-__global__ __launch_bounds__(Threads, 1) void gemv_rkv_m1_kernel(
+__global__ __launch_bounds__(Threads, 1) void gemv_grouped_m1_kernel(
     int K, int N,
-    const dtype* __restrict__ xr,     // [K]
-    const dtype* __restrict__ xk,     // [K]
-    const dtype* __restrict__ xv,     // [K]
-    const dtype* __restrict__ wr,     // [N, K]
-    const dtype* __restrict__ wk,     // [N, K]
-    const dtype* __restrict__ wv,     // [N, K]
-    dtype* __restrict__ y3) {         // [3, N]
-  const int proj = blockIdx.y;        // 0=r, 1=k, 2=v
-  const dtype* __restrict__ x = (proj == 0) ? xr : (proj == 1) ? xk : xv;
-  const dtype* __restrict__ weight = (proj == 0) ? wr : (proj == 1) ? wk : wv;
-  dtype* __restrict__ y = y3 + static_cast<int64_t>(proj) * N;
+    const dtype* __restrict__ x0, const dtype* __restrict__ x1,
+    const dtype* __restrict__ x2, const dtype* __restrict__ x3,
+    const dtype* __restrict__ w0, const dtype* __restrict__ w1,
+    const dtype* __restrict__ w2, const dtype* __restrict__ w3,
+    dtype* __restrict__ y_all) {
+  const int proj = blockIdx.y;
+  const dtype* __restrict__ x =
+      (proj == 0) ? x0 : (proj == 1) ? x1 : (proj == 2) ? x2 : x3;
+  const dtype* __restrict__ weight =
+      (proj == 0) ? w0 : (proj == 1) ? w1 : (proj == 2) ? w2 : w3;
+  dtype* __restrict__ y = y_all + static_cast<int64_t>(proj) * N;
 
   const int n0 = blockIdx.x * OutTile;
   float acc[OutTile];
@@ -120,12 +137,49 @@ __global__ __launch_bounds__(Threads, 1) void gemv_rkv_m1_kernel(
   pdl_launch_dependents();  // sm_90+ only; inert on sm_86 (see header)
 }
 
-#define RWKV7_RKV_LAUNCH(T, OT)                                                \
-  gemv_rkv_m1_kernel<T, OT><<<dim3(static_cast<int>(N) / (OT), 3), (T), 0,     \
-                              stream>>>(                                       \
-      static_cast<int>(K), static_cast<int>(N), xr.data_ptr<dtype>(),         \
-      xk.data_ptr<dtype>(), xv.data_ptr<dtype>(), wr.data_ptr<dtype>(),       \
-      wk.data_ptr<dtype>(), wv.data_ptr<dtype>(), y3.data_ptr<dtype>())
+#define RWKV7_GROUPED_LAUNCH(T, OT)                                            \
+  gemv_grouped_m1_kernel<T, OT><<<dim3(static_cast<int>(N) / (OT),            \
+                                       static_cast<int>(G)),                   \
+                                  (T), 0, stream>>>(                           \
+      static_cast<int>(K), static_cast<int>(N),                               \
+      xs[0], xs[1], xs[2], xs[3], ws[0], ws[1], ws[2], ws[3],                 \
+      y_all.data_ptr<dtype>())
+
+// Shared launcher: allocates y_all[G,N] and dispatches the (threads, out_tile)
+// the deployed gemv_m1 path uses for (N,K). Every public op below funnels here.
+// xs/ws are host-side 4-arrays (unused slots mirror role 0, never dereferenced
+// since blockIdx.y < G); they only expand into the kernel's scalar params.
+at::Tensor gemv_grouped_launch(const dtype* const xs[kMaxRoles],
+                               const dtype* const ws[kMaxRoles], int64_t G,
+                               int64_t K, int64_t N,
+                               const at::TensorOptions& opts,
+                               int64_t threads, int64_t out_tile) {
+  TORCH_CHECK(G >= 1 && G <= kMaxRoles, "gemv_grouped: G must be 1..", kMaxRoles);
+  TORCH_CHECK((K % 4) == 0, "gemv_grouped requires K%4==0");
+  TORCH_CHECK((N % out_tile) == 0, "gemv_grouped requires N % out_tile == 0");
+  auto y_all = at::empty({G, N}, opts);
+  if (N == 0) return y_all;
+  if (K == 0) return y_all.zero_();
+  auto stream = at::cuda::getCurrentCUDAStream();
+  switch (threads * 100 + out_tile) {
+    case 64 * 100 + 1:  RWKV7_GROUPED_LAUNCH(64, 1);  break;
+    case 64 * 100 + 2:  RWKV7_GROUPED_LAUNCH(64, 2);  break;
+    case 64 * 100 + 4:  RWKV7_GROUPED_LAUNCH(64, 4);  break;
+    case 128 * 100 + 1: RWKV7_GROUPED_LAUNCH(128, 1); break;
+    case 128 * 100 + 2: RWKV7_GROUPED_LAUNCH(128, 2); break;
+    case 128 * 100 + 4: RWKV7_GROUPED_LAUNCH(128, 4); break;
+    case 256 * 100 + 1: RWKV7_GROUPED_LAUNCH(256, 1); break;
+    case 256 * 100 + 2: RWKV7_GROUPED_LAUNCH(256, 2); break;
+    case 256 * 100 + 4: RWKV7_GROUPED_LAUNCH(256, 4); break;
+    default: TORCH_CHECK(false, "gemv_grouped unsupported (threads,out_tile)=(",
+                         threads, ",", out_tile, "); use {64,128,256}x{1,2,4}");
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return y_all;
+}
+#undef RWKV7_GROUPED_LAUNCH
+
+// ---- public ops: each validates M==1 + same (N,K) per role, then funnels ----
 
 at::Tensor gemv_rkv_m1(at::Tensor xr, at::Tensor xk, at::Tensor xv,
                        at::Tensor wr, at::Tensor wk, at::Tensor wv,
@@ -140,37 +194,64 @@ at::Tensor gemv_rkv_m1(at::Tensor xr, at::Tensor xk, at::Tensor xv,
               "gemv_rkv_m1 weight [N,K] mismatch");
   TORCH_CHECK(wk.size(0) == N && wv.size(0) == N,
               "gemv_rkv_m1 requires r/k/v same N");
-  TORCH_CHECK((K % 4) == 0, "gemv_rkv_m1 requires K%4==0");
-  TORCH_CHECK((N % out_tile) == 0, "gemv_rkv_m1 requires N % out_tile == 0");
-  auto y3 = at::empty({3, N}, xr.options());
-  if (N == 0) return y3;
-  if (K == 0) return y3.zero_();
-  auto stream = at::cuda::getCurrentCUDAStream();
-  switch (threads * 100 + out_tile) {
-    case 64 * 100 + 1:  RWKV7_RKV_LAUNCH(64, 1);  break;
-    case 64 * 100 + 2:  RWKV7_RKV_LAUNCH(64, 2);  break;
-    case 64 * 100 + 4:  RWKV7_RKV_LAUNCH(64, 4);  break;
-    case 128 * 100 + 1: RWKV7_RKV_LAUNCH(128, 1); break;
-    case 128 * 100 + 2: RWKV7_RKV_LAUNCH(128, 2); break;
-    case 128 * 100 + 4: RWKV7_RKV_LAUNCH(128, 4); break;
-    case 256 * 100 + 1: RWKV7_RKV_LAUNCH(256, 1); break;
-    case 256 * 100 + 2: RWKV7_RKV_LAUNCH(256, 2); break;
-    case 256 * 100 + 4: RWKV7_RKV_LAUNCH(256, 4); break;
-    default: TORCH_CHECK(false, "gemv_rkv_m1 unsupported (threads,out_tile)=(",
-                         threads, ",", out_tile, "); use {64,128,256}x{1,2,4}");
-  }
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-  return y3;
+  const dtype* xr_p = xr.data_ptr<dtype>();
+  const dtype* wr_p = wr.data_ptr<dtype>();
+  const dtype* xs[kMaxRoles] = {xr_p, xk.data_ptr<dtype>(),
+                                xv.data_ptr<dtype>(), xr_p};
+  const dtype* ws[kMaxRoles] = {wr_p, wk.data_ptr<dtype>(),
+                                wv.data_ptr<dtype>(), wr_p};
+  return gemv_grouped_launch(xs, ws, 3, K, N, xr.options(), threads, out_tile);
 }
-#undef RWKV7_RKV_LAUNCH
+
+at::Tensor gemv_o_m1(at::Tensor xo, at::Tensor wo,
+                     int64_t threads, int64_t out_tile) {
+  const int64_t K = wo.size(1);
+  const int64_t N = wo.size(0);
+  TORCH_CHECK(xo.numel() == K, "gemv_o_m1 requires xo numel==K (M==1)");
+  TORCH_CHECK(xo.is_contiguous(), "gemv_o_m1 requires contiguous xo");
+  const dtype* xo_p = xo.data_ptr<dtype>();
+  const dtype* wo_p = wo.data_ptr<dtype>();
+  const dtype* xs[kMaxRoles] = {xo_p, xo_p, xo_p, xo_p};
+  const dtype* ws[kMaxRoles] = {wo_p, wo_p, wo_p, wo_p};
+  return gemv_grouped_launch(xs, ws, 1, K, N, xo.options(), threads, out_tile);
+}
+
+at::Tensor gemv_rkvo_m1(at::Tensor xr, at::Tensor xk, at::Tensor xv,
+                        at::Tensor xo, at::Tensor wr, at::Tensor wk,
+                        at::Tensor wv, at::Tensor wo,
+                        int64_t threads, int64_t out_tile) {
+  const int64_t K = wr.size(1);
+  const int64_t N = wr.size(0);
+  TORCH_CHECK(xr.numel() == K && xk.numel() == K && xv.numel() == K
+                  && xo.numel() == K,
+              "gemv_rkvo_m1 requires xr/xk/xv/xo numel==K (M==1)");
+  TORCH_CHECK(xr.is_contiguous() && xk.is_contiguous() && xv.is_contiguous()
+                  && xo.is_contiguous(),
+              "gemv_rkvo_m1 requires contiguous xr/xk/xv/xo");
+  TORCH_CHECK(wr.size(1) == K && wk.size(1) == K && wv.size(1) == K
+                  && wo.size(1) == K,
+              "gemv_rkvo_m1 weight [N,K] mismatch");
+  TORCH_CHECK(wk.size(0) == N && wv.size(0) == N && wo.size(0) == N,
+              "gemv_rkvo_m1 requires r/k/v/o same N");
+  const dtype* xs[kMaxRoles] = {xr.data_ptr<dtype>(), xk.data_ptr<dtype>(),
+                                xv.data_ptr<dtype>(), xo.data_ptr<dtype>()};
+  const dtype* ws[kMaxRoles] = {wr.data_ptr<dtype>(), wk.data_ptr<dtype>(),
+                                wv.data_ptr<dtype>(), wo.data_ptr<dtype>()};
+  return gemv_grouped_launch(xs, ws, 4, K, N, xr.options(), threads, out_tile);
+}
 
 }  // namespace
 
 TORCH_LIBRARY(rwkv7_mega, m) {
   m.def("gemv_rkv_m1(Tensor xr, Tensor xk, Tensor xv, Tensor wr, Tensor wk, "
         "Tensor wv, int threads, int out_tile) -> Tensor");
+  m.def("gemv_o_m1(Tensor xo, Tensor wo, int threads, int out_tile) -> Tensor");
+  m.def("gemv_rkvo_m1(Tensor xr, Tensor xk, Tensor xv, Tensor xo, Tensor wr, "
+        "Tensor wk, Tensor wv, Tensor wo, int threads, int out_tile) -> Tensor");
 }
 
 TORCH_LIBRARY_IMPL(rwkv7_mega, CUDA, m) {
   m.impl("gemv_rkv_m1", TORCH_FN(gemv_rkv_m1));
+  m.impl("gemv_o_m1", TORCH_FN(gemv_o_m1));
+  m.impl("gemv_rkvo_m1", TORCH_FN(gemv_rkvo_m1));
 }

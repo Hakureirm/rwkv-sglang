@@ -2,12 +2,20 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 """JIT loader + adapter for the RWKV-7 megakernel-line fusions (rwkv7_mega.cu).
 
-Stage-A (task #50, ADR-0008 / F0060): gemv_rkv_m1 packs the r/k/v projections'
-three bsz1-decode GEMVs into ONE launch (blockIdx.y role-split). Each output row
-is byte-identical to fast_linear.gemv_m1 because it reuses that kernel's exact
-fp32 reduction and the SAME (threads, out_tile) the deployed decode path picks
-for (N, K) — so it composes under the same greedy-EXACT gate. Env-gated
-RWKV_MEGA (default OFF), fp16 M==1 only; anything else keeps the 3-launch path.
+Stage-A (task #50, ADR-0008 / F0060): a role-generic grouped decode GEMV
+(gemv_grouped_m1_kernel, blockIdx.y = role) onto which the time-mix block's
+projection stages layer:
+  gemv_rkv_m1  (G=3)  r/k/v stage        — Stage-A1 (F0060 §5)
+  gemv_o_m1    (G=1)  output projection  — Stage-A2 (F0060 §7.5 "add o_proj")
+  gemv_rkvo_m1 (G=4)  whole-block r/k/v/o stage the sm120 megakernel chains
+Each output row is byte-identical to fast_linear.gemv_m1 because it reuses that
+kernel's exact fp32 reduction and the SAME (threads, out_tile) the deployed
+decode path picks for (N, K) — o_proj shares (N,K)=(H,H) with r/k/v so it takes
+the identical config — so every role composes under the same greedy-EXACT gate.
+Env-gated RWKV_MEGA (default OFF), fp16 M==1 only; anything else keeps the
+per-projection path. gemv_rkvo_m1 is the bit-exact-gated PREFAB for the 5090
+whole-block grid — on the 3090 o_proj is post-WKV so it still launches on its
+own (no PDL persistent grid to share the r/k/v launch), see F0060 §7.5.
 
 The PDL griddepcontrol overlap in the .cu is sm_90+ only and currently inert
 (needs the launch-attribute + downstream-wait wiring, the documented sm120 step);
@@ -62,6 +70,14 @@ def _register_fakes():
         @torch.library.register_fake("rwkv7_mega::gemv_rkv_m1")
         def _f(xr, xk, xv, wr, wk, wv, threads, out_tile):
             return xr.new_empty((3, wr.shape[0]))
+
+        @torch.library.register_fake("rwkv7_mega::gemv_o_m1")
+        def _fo(xo, wo, threads, out_tile):
+            return xo.new_empty((1, wo.shape[0]))
+
+        @torch.library.register_fake("rwkv7_mega::gemv_rkvo_m1")
+        def _frkvo(xr, xk, xv, xo, wr, wk, wv, wo, threads, out_tile):
+            return xr.new_empty((4, wr.shape[0]))
     except Exception:
         pass
 
@@ -82,6 +98,34 @@ def gemv_rkv_m1(xr, xk, xv, wr, wk, wv):
     return torch.ops.rwkv7_mega.gemv_rkv_m1(
         xr.contiguous().view(-1), xk.contiguous().view(-1),
         xv.contiguous().view(-1), wr, wk, wv, t, ot)
+
+
+def gemv_o_m1(xo, wo):
+    """y[1,N] = xo@wo^T for M==1, ONE launch (G=1 slice of the grouped kernel).
+
+    Stage-A2 (F0060 §7.5): o_proj as a role of the megakernel's r/k/v/o stage.
+    Byte-identical to fast_linear.gemv_m1(xo, wo) — same reduction, same config
+    (o_proj is (N,K)=(H,H), so _select_config picks exactly the r/k/v config)."""
+    N, K = wo.size(0), wo.size(1)
+    t, ot = fast_linear._select_config(N, K)
+    return torch.ops.rwkv7_mega.gemv_o_m1(xo.contiguous().view(-1), wo, t, ot)
+
+
+def gemv_rkvo_m1(xr, xk, xv, xo, wr, wk, wv, wo):
+    """y[4,N] = stack(r,k,v,o) for M==1, ONE launch (G=4 whole-block stage).
+
+    The bit-exact-gated PREFAB for the sm120 megakernel's whole-block r/k/v/o
+    projection stage (F0060 §7.5): the persistent grid runs r/k/v (roles 0..2),
+    the WKV recurrence, then o_proj (role 3) with PDL between. Each row is
+    byte-identical to the corresponding fast_linear.gemv_m1. On the 3090 this is
+    the correctness/structure gate only (o depends on the WKV output, so it
+    cannot share the r/k/v launch without the 5090's persistent-grid PDL)."""
+    N, K = wr.size(0), wr.size(1)
+    t, ot = fast_linear._select_config(N, K)
+    return torch.ops.rwkv7_mega.gemv_rkvo_m1(
+        xr.contiguous().view(-1), xk.contiguous().view(-1),
+        xv.contiguous().view(-1), xo.contiguous().view(-1),
+        wr, wk, wv, wo, t, ot)
 
 
 def rkv_config(N, K):
