@@ -340,9 +340,11 @@ annotation instead of left implicit — int4-GPTQ's speed (5090, §4b) and accur
 F0055 §0) are a case in point. int8 w8a8/w8g64 has no landed MATH500 avg@64 raw at 7.2B
 (only the compression-rate number in §2), so it's omitted from the frontier rather than
 stood in for with a different metric. The ladder chart is the bar-form version of this
-whole section: two 1.5B cells (int4-sym 14.98%, int4-asym 21.99% — both quoted in prose
-above and in F0043) have no landed raw JSON, so those bars are left empty and marked "no
-raw landed" rather than back-filled from the prose numbers.
+whole section, and its two 1.5B int4 cells (int4-sym 14.98%, int4-asym 21.99% — both quoted in
+prose above and in F0043) are now backed by landed raws: their MATH500 avg@64 JSON landed
+2026-07-14 at `bench/results/math500_avg64_1.5b_{sym,asym}.json` (`rollout_accuracy` 0.1498 /
+0.2199, matching the prose exactly), so those bars are drawn from committed raws, not back-filled
+from the prose numbers.
 
 ![Accuracy vs. speed frontier, RWKV-7 7.2B](assets/plots/f3_accuracy_speed_frontier.svg)
 
@@ -1488,7 +1490,12 @@ keys grouped into embedding / lm_head / vision / MTP / body:
 
 The decode-active gap (1.091×, 1.039×) is far smaller than the total-size gap (1.489×, 1.341×):
 most of the headline size difference is vocabulary (Qwen3.5 V=248,320 vs RWKV-7 V=65,536) plus
-the vision/MTP weights idle in this comparison. Re-reading §13.1's same-precision bf16 headline
+the vision/MTP weights idle in this comparison. That decode-active, non-embedding count is
+exactly the *active-parameter* (activation-parameter) figure a size-fair speed comparison must
+normalize by: the ×1.091/×1.039 rescaling just below re-weights the raw speed ratio by it, so the
+size-adjusted verdicts — and the logits-inclusive alternative that follows — already *are* the
+activation-parameter-normalized answer, not a raw ratio left to stand on its own. Re-reading
+§13.1's same-precision bf16 headline
 numbers as size-adjusted throughput (tok/s × non-emb params, B·tok/s — each generated token
 applies every decode-active parameter once, so this is proportional to sustained bytes/s at
 small batch and FLOP/s at large batch):
@@ -1510,7 +1517,16 @@ the denominator too (adds 0.134B/0.268B for RWKV-7 but 0.509B/1.017B for Qwen3.5
 vocabulary means 3.8× the logits matrix, and tying reduces memory, not per-step traffic) flips
 the 1.5B/2B normalized peak to Qwen3.5 +10.8%, while the 7.2B/9B peak stays RWKV-7 +25.5%. So
 the small tier's per-param peak verdict is accounting-sensitive; the 7.2B/9B one is robust
-under both accountings. Raw, unnormalized numbers remain this section's primary claims — this
+under both accountings. At the opposite extreme sits the conservative floor — the crudest
+accounting, the full *total*-parameter ratio with the embedding and the idle vision/MTP weights
+left in. It over-penalizes RWKV-7 by construction: the vocabulary embedding is a per-token
+row-gather (a lookup), not a per-step matmul, and the vision/MTP weights never execute in a
+text-only benchmark, yet both swell the denominator. The landed total ratios are 1.489× (2B/1.5B)
+and 1.341× (9B/7.2B) — the round "2B/1.5B" and "9B/7.2B" name ratios, 1.333× and 1.25×, are looser
+still — so the 1.5B/2B peak (raw +21.9%, i.e. 1.219× RWKV÷Qwen) does *not* clear its total-parameter
+bar: on this crudest reading Qwen3.5 takes the small tier per total parameter. The 7.2B/9B peak
+(raw +43.7%, 1.437×) does clear its 1.341× bar, so it stays RWKV-7's even here. Raw,
+unnormalized numbers remain this section's primary claims — this
 block is the size-fairness cross-check, not a replacement.
 
 Weights: same engine (sglang main, native `qwen3_5.py` support, no fork needed), same
