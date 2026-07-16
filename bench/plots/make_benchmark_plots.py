@@ -253,14 +253,15 @@ LABELS = {
     "no_raw_landed": {"en": "no raw\nlanded", "zh": "原始件\n未落地"},
     "fp16_baseline": {"en": "fp16 baseline", "zh": "fp16 基线"},
     "f4_footnote": {
-        "en": "1.5B int4-sym/asym (documented as 14.98%/21.99% in §2/F0043) have no landed raw — "
-              "omitted, not fabricated.\nMATH500 avg@64 bars mix RTX 5090 and RTX 3090 runs; this project's "
-              "own §2 cross-check found the ruler\nagrees within ±0.27pt across cards at matched "
-              "config, i.e. card-invariant within this protocol's noise.",
-        "zh": "1.5B int4-sym/asym(§2/F0043 中记录为 14.98%/21.99%)没有落地的原始件 — "
-              "留空,不回填。\nMATH500 avg@64 的柱子混合了 RTX 5090 与 RTX 3090 的跑数;本项目 §2 "
-              "自己的交叉核对发现\n这把尺在匹配配置下跨卡差异在 ±0.27pt 以内,即在这套协议的噪声"
-              "范围内卡间不变。",
+        "en": "1.5B int4-sym/asym bars are drawn from landed raws "
+              "(math500_avg64_1.5b_{sym,asym}.json = 14.98%/21.99%, F0043).\nMATH500 avg@64 bars mix "
+              "RTX 5090 and RTX 3090 runs; this project's own §2 cross-check found the ruler\nagrees "
+              "within ±0.27pt across cards at matched config, i.e. card-invariant within this "
+              "protocol's noise.",
+        "zh": "1.5B int4-sym/asym 两根柱子由已落地的原始件画出 "
+              "(math500_avg64_1.5b_{sym,asym}.json = 14.98%/21.99%,F0043)。\nMATH500 avg@64 的柱子"
+              "混合了 RTX 5090 与 RTX 3090 的跑数;本项目 §2 自己的交叉核对发现\n这把尺在匹配配置下"
+              "跨卡差异在 ±0.27pt 以内,即在这套协议的噪声范围内卡间不变。",
     },
 
     # F5

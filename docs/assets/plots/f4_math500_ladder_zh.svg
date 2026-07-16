@@ -417,7 +417,7 @@ L 512.106 394.724148
    </g>
   </g>
   <g id="text_41">
-   <text style="font-style: italic; font-size: 7.4px; font-family: 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Heiti SC', 'DejaVu Sans', sans-serif; fill: #898781" transform="translate(7.632 10.882)">1.5B int4-sym/asym(§2/F0043 中记录为 14.98%/21.99%)没有落地的原始件 — 留空,不回填。</text>
+   <text style="font-style: italic; font-size: 7.4px; font-family: 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Heiti SC', 'DejaVu Sans', sans-serif; fill: #898781" transform="translate(7.632 10.882)">1.5B int4-sym/asym 两根柱子由已落地的原始件画出 (math500_avg64_1.5b_{sym,asym}.json = 14.98%/21.99%,F0043)。</text>
    <text style="font-style: italic; font-size: 7.4px; font-family: 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Heiti SC', 'DejaVu Sans', sans-serif; fill: #898781" transform="translate(7.632 22.654937)">MATH500 avg@64 的柱子混合了 RTX 5090 与 RTX 3090 的跑数;本项目 §2 自己的交叉核对发现</text>
    <text style="font-style: italic; font-size: 7.4px; font-family: 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Heiti SC', 'DejaVu Sans', sans-serif; fill: #898781" transform="translate(7.632 34.414)">这把尺在匹配配置下跨卡差异在 ±0.27pt 以内,即在这套协议的噪声范围内卡间不变。</text>
   </g>

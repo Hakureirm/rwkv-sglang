@@ -417,7 +417,7 @@ L 518.181 393.784121
    </g>
   </g>
   <g id="text_41">
-   <text style="font-style: italic; font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; fill: #898781" transform="translate(7.632 8.883566)">1.5B int4-sym/asym (documented as 14.98%/21.99% in §2/F0043) have no landed raw — omitted, not fabricated.</text>
+   <text style="font-style: italic; font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; fill: #898781" transform="translate(7.632 8.883566)">1.5B int4-sym/asym bars are drawn from landed raws (math500_avg64_1.5b_{sym,asym}.json = 14.98%/21.99%, F0043).</text>
    <text style="font-style: italic; font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; fill: #898781" transform="translate(7.632 17.76559)">MATH500 avg@64 bars mix RTX 5090 and RTX 3090 runs; this project's own §2 cross-check found the ruler</text>
    <text style="font-style: italic; font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; fill: #898781" transform="translate(7.632 26.647613)">agrees within ±0.27pt across cards at matched config, i.e. card-invariant within this protocol's noise.</text>
   </g>
