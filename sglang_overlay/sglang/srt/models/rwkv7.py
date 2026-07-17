@@ -898,7 +898,8 @@ class Rwkv7Attention(nn.Module):
                     import sys
                     _MEGA_ANNOUNCED = True
                     print("[rwkv7] #50 Stage-A grouped r/k/v GEMV ENABLED "
-                          "(fp16 bsz1 decode; sm120 PDL overlap inert on this arch)",
+                          "(fp16 bsz1 decode; PDL chain armed iff RWKV_PDL=1 "
+                          "on sm90+, see [rwkv7_pdl] banner)",
                           file=sys.stderr, flush=True)
                 y3 = mega.gemv_rkv_m1(xr, xk, xv, wr, wk, wv)  # [3, H]
                 r, k, v = y3[0:1], y3[1:2], y3[2:3]

@@ -30,9 +30,46 @@ All kernels are cuda-graph safe: static shapes, no host syncs, output into
 caller-allocated buffers.
 """
 
+import os
+
 import torch
 import triton
 import triton.language as tl
+
+# --- PDL (task #50 sm120 chain): join the two bsz1 triton glue kernels into
+# the griddepcontrol chain (the C++ kernels around them are wired via
+# rwkv7_pdl.cuh). gdc_wait/gdc_launch_dependents are triton sm90+ intrinsics;
+# USE_PDL is a tl.constexpr so unarmed compilations contain NO griddepcontrol
+# instructions (sm86 compat), and launch_pdl=True sets PROGRAMMATIC_STREAM_
+# SERIALIZATION on the launch (triton nvidia driver). Armed only when
+# RWKV_PDL=1, cc>=9.0, and (if set) RWKV_PDL_SCOPE contains "tri".
+# Scheduling-only: outputs byte-identical (bench/test_lora_gates.py + the e2e
+# greedy gates, armed AND unarmed).
+_PDL_TRITON = None
+
+
+def _pdl_triton() -> bool:
+    global _PDL_TRITON
+    if _PDL_TRITON is None:
+        on = os.environ.get("RWKV_PDL", "0") == "1"
+        if on:
+            scope = os.environ.get("RWKV_PDL_SCOPE", "")
+            if scope and "tri" not in scope:
+                on = False
+        if on:
+            try:
+                from triton.language.extra.cuda import gdc_wait  # noqa: F401
+
+                on = torch.cuda.get_device_capability()[0] >= 9
+            except Exception:
+                on = False
+        _PDL_TRITON = bool(on)
+        if _PDL_TRITON:
+            import sys
+
+            print("[rwkv7_pdl] triton glue joined the PDL chain "
+                  "(kk_kmix + lora_gates)", file=sys.stderr, flush=True)
+    return _PDL_TRITON
 
 
 # ----------------------------------------------------------------------------
@@ -91,6 +128,7 @@ def _kk_kmix_kernel(
     kk_out_ptr, knew_out_ptr,
     T, H, NH,
     BK: tl.constexpr,
+    USE_PDL: tl.constexpr = False,
 ):
     t = tl.program_id(0)
     h = tl.program_id(1)
@@ -98,6 +136,9 @@ def _kk_kmix_kernel(
     HD = H // NH
     mask = j < HD
     DT = kk_out_ptr.dtype.element_ty
+
+    if USE_PDL:  # k/a are the predecessors' outputs; wait before first load
+        tl.extra.cuda.gdc_wait()
 
     base = t * H + h * HD + j
     pbase = h * HD + j
@@ -126,6 +167,8 @@ def _kk_kmix_kernel(
 
     tl.store(kk_out_ptr + base, kk_n, mask=mask)
     tl.store(knew_out_ptr + base, knew, mask=mask)
+    if USE_PDL:  # let the WKV stage schedule early
+        tl.extra.cuda.gdc_launch_dependents()
 
 
 def fused_kk_kmix(k, a, kk_param, ka_param, num_heads):
@@ -142,9 +185,11 @@ def fused_kk_kmix(k, a, kk_param, ka_param, num_heads):
     kk_out = torch.empty(T, H, dtype=k.dtype, device=k.device)
     knew_out = torch.empty(T, H, dtype=k.dtype, device=k.device)
     grid = (T, num_heads)
+    use_pdl = _pdl_triton()
     _kk_kmix_kernel[grid](
         k, a, kk_param.reshape(-1), ka_param.reshape(-1),
-        kk_out, knew_out, T, H, num_heads, BK=BK, enable_fp_fusion=False,
+        kk_out, knew_out, T, H, num_heads, BK=BK, USE_PDL=use_pdl,
+        enable_fp_fusion=False, launch_pdl=use_pdl,
     )
     return kk_out.view(T, num_heads, HD), knew_out
 
@@ -237,11 +282,15 @@ def _lora_gates_kernel(
     H,
     HAS_V: tl.constexpr,
     BLOCK: tl.constexpr,
+    USE_PDL: tl.constexpr = False,
 ):
     hb = tl.program_id(0)
     offs = hb * BLOCK + tl.arange(0, BLOCK)
     mask = offs < H
     DT = wlog_ptr.dtype.element_ty
+
+    if USE_PDL:  # lo/v are the predecessors' outputs; wait before first load
+        tl.extra.cuda.gdc_wait()
 
     # sigmoid(x) computed as torch does it: 1/(1+exp(-x)) in fp32, rounded to DT.
     lo0 = tl.load(lo_ptr + offs, mask=mask, other=0.0).to(tl.float32)
@@ -263,6 +312,8 @@ def _lora_gates_kernel(
         prod = (diff * s3).to(DT).to(tl.float32)
         vnew = (v + prod).to(DT)
         tl.store(vout_ptr + offs, vnew, mask=mask)
+    if USE_PDL:  # let kk_kmix schedule early
+        tl.extra.cuda.gdc_launch_dependents()
 
 
 _INV_SQRT_E = 0.6065306597126334  # e^-0.5, == models/rwkv7.py:_INV_SQRT_E
@@ -289,9 +340,11 @@ def fused_lora_gates(lo, v, v_first, has_v):
         v_out = v
     BLOCK = 1024
     grid = (triton.cdiv(H, BLOCK),)
+    use_pdl = _pdl_triton()
     _lora_gates_kernel[grid](
         lo, vflat, vf, w_log, a, (v_out if has_v else w_log),
-        _INV_SQRT_E, H, HAS_V=has_v, BLOCK=BLOCK, enable_fp_fusion=False,
+        _INV_SQRT_E, H, HAS_V=has_v, BLOCK=BLOCK, USE_PDL=use_pdl,
+        enable_fp_fusion=False, launch_pdl=use_pdl,
     )
     return w_log, a, v_out
 
