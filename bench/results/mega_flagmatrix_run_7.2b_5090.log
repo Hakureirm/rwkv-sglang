@@ -1,0 +1,21 @@
+=== LEG A (RWKV_MEGA=0 RWKV_WKV_CUDA=0 RWKV_PDL=0) ===
+LEG A: smoke EXACT
+PEAK: 136.9 tok/s @ concurrency=1
+wrote /data/hakureirm/rwkv-sglang/logs/mega/clean/c1_72b_A.json
+=== LEG D (RWKV_MEGA=1 RWKV_WKV_CUDA=1 RWKV_PDL=1) ===
+bench/mega_flag_matrix.sh: line 46:    52 Killed                  env MODEL="$MODEL" PYTHON=python3 PORT="$PORT" MEMFRAC=0.85 CGMAXBS=32 RWKV_STATE_FP16=1 "$@" bash scripts/serve.sh -- --max-running-requests 32 > "$LOG" 2>&1
+LEG D: smoke EXACT
+PEAK: 137.8 tok/s @ concurrency=1
+wrote /data/hakureirm/rwkv-sglang/logs/mega/clean/c1_72b_D.json
+=== LEG B (RWKV_MEGA=1 RWKV_WKV_CUDA=0 RWKV_PDL=0) ===
+bench/mega_flag_matrix.sh: line 46:   393 Killed                  env MODEL="$MODEL" PYTHON=python3 PORT="$PORT" MEMFRAC=0.85 CGMAXBS=32 RWKV_STATE_FP16=1 "$@" bash scripts/serve.sh -- --max-running-requests 32 > "$LOG" 2>&1
+LEG B: smoke EXACT
+PEAK: 138.1 tok/s @ concurrency=1
+wrote /data/hakureirm/rwkv-sglang/logs/mega/clean/c1_72b_B.json
+=== LEG C (RWKV_MEGA=1 RWKV_WKV_CUDA=1 RWKV_PDL=0) ===
+bench/mega_flag_matrix.sh: line 46:   704 Killed                  env MODEL="$MODEL" PYTHON=python3 PORT="$PORT" MEMFRAC=0.85 CGMAXBS=32 RWKV_STATE_FP16=1 "$@" bash scripts/serve.sh -- --max-running-requests 32 > "$LOG" 2>&1
+LEG C: smoke EXACT
+PEAK: 137.8 tok/s @ concurrency=1
+wrote /data/hakureirm/rwkv-sglang/logs/mega/clean/c1_72b_C.json
+MATRIX DONE -> /data/hakureirm/rwkv-sglang/logs/mega/clean
+bench/mega_flag_matrix.sh: line 46:  1012 Killed                  env MODEL="$MODEL" PYTHON=python3 PORT="$PORT" MEMFRAC=0.85 CGMAXBS=32 RWKV_STATE_FP16=1 "$@" bash scripts/serve.sh -- --max-running-requests 32 > "$LOG" 2>&1

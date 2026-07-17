@@ -1,0 +1,5 @@
+ninja: no work to do.
+[260713] ready L=32 C=4096 H=64 V=65536 executor=body21/c7040/w896 rankout=A16-W8-G4-V16-vtree12-wload8x2 wkv=halfwarp8-late-pdl ln1=cluster8 cmix=kv4-split4 head=t256-k2-mode26 load_s=66.304
+CONFIG token=12345 source=v3a_synthetic:index=0 graph=1 warmup=8 iters=8 rounds=5
+SMOKE top_ids=[12286, 19137, 13582, 10774, 10853] top_vals=[6.1992, 5.3359, 4.8047, 4.5391, 4.4688]
+RESULT p10_ms=6.411264 p50_ms=6.420592 p90_ms=6.431552 tok_s_p50=155.75

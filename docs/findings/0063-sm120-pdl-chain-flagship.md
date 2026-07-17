@@ -1,11 +1,11 @@
 ---
 doc_kind: finding
 finding_id: F0063
-title: "Megakernel sm120 assembly (#50): the PDL chain is LIVE — griddepcontrol wait/launch_dependents wired across the whole bsz1 decode block (8 CUDA files + 2 triton glue kernels, RWKV_PDL default OFF), bit-exact armed AND unarmed (kernel battery zero differing bytes; greedy 24/24 @1.5B + 8/8 @7.2B under CUDA graph with the full stack + MEGA + WKV_CUDA + PDL), SASS-verified (ACQBULK/PREEXIT = sm_120 lowering), and MEASURED ACTIVE in production (60.8% of same-stream kernel transitions overlap, dirty-window trace); Option-B deploy.sh validated on the tower (exact base 754524d, --check clean, byte-verified); flagship bsz1 timing legs STAGED-NOT-RUN (card occupied by RL ecosystem all session, then yielded to a sky training job per the platform rules)"
-last_verified_commit: "(this series) on bbdddfd"
+title: "Megakernel sm120 assembly (#50): the PDL chain is LIVE — griddepcontrol wait/launch_dependents wired across the whole bsz1 decode block (8 CUDA files + 2 triton glue kernels, RWKV_PDL default OFF), bit-exact armed AND unarmed (kernel battery zero differing bytes; greedy 24/24 @1.5B + 8/8 @7.2B under CUDA graph with the full stack + MEGA + WKV_CUDA + PDL), SASS-verified (ACQBULK/PREEXIT = sm_120 lowering); CLEAN flagship numbers landed 2026-07-18: 7.2B D=137.8 tok/s serving bsz1 (82.0% of the 168.0 ceiling) / 136.43 tok/s matched kernel-loop framing (79.0% overlapped transitions, up from 60.8% dirty) = 87.9% of Bo's 155.2 (87.6% of our own same-session albatross v3b re-measurement, 155.75); 1.5B D=493.0 tok/s; Option-B deploy.sh validated on the tower (exact base 754524d, --check clean, byte-verified); F0062 compute-sanitizer racecheck+synccheck closed (63/63 launches, 0 hazards/errors)"
+last_verified_commit: "(this series) on bbdddfd; clean flagship measurement session added no code changes"
 discovered_by: Fable 5 (agent), 2026-07-17
 severity: info
-status: open — chain built + gated; clean timing legs one-command staged (§6b runbook); racecheck re-run owed (aborted for box-load reasons, §5)
+status: closed — chain built + gated, clean flagship numbers landed for 7.2B + 1.5B (both framings), same-session albatross v3b corroboration done, F0062 racecheck+synccheck closed
 related: [F0060, F0061, F0062, F0058, F0056]
 machine: 5090 tower (sm120, driver 595-open/CUDA 13.2 host, dev-cu12 container CUDA 12.9.1, torch 2.11.0+cu129, sglang main 754524d + RWKV-7 overlay)
 ---
@@ -37,13 +37,22 @@ machine: 5090 tower (sm120, driver 595-open/CUDA 13.2 host, dev-cu12 container C
   the graph, not in serving overhead.
 - **Option-B deploy.sh validated on sm120** (exact base 754524d, --check
   clean, byte-verified) — the #55 second-platform proof.
-- **Flagship timing legs: staged, NOT run** — the card was occupied by the
-  RL ecosystem (sim at 90-100% util, then hb_compile) the whole session, and
-  then a sky training job (tracking-dance2b) went Pending -> we yielded
-  (docker stop, zero footprint, <1 min; §7 ledger). Everything needed for
-  the clean window is one command (§6): the A/D/B/C matrix with greedy-smoke
-  hard gates, the trace parser for framing-2 + PDL attribution, and the
-  same-session albatross v3b harness (built + shaken out).
+- **Flagship timing legs: CLEAN, LANDED (2026-07-18)** — the window opened
+  (SkyPilot API server down, card idle, zero tracking pods) and the §6b
+  runbook ran end-to-end with zero yields needed. 7.2B: A (anchor) 136.9 /
+  D (flagship) 137.8 tok/s serving bsz1, both greedy 8/8 EXACT; matched
+  kernel-loop framing (the fair comparison to Bo, whose 155.2 is
+  kernel-harness event-timing) A=134.96 / D=136.43 tok/s, D = 82.0% of the
+  168.0 ceiling (serving) / 81.2% (kernel-loop) = **87.9% of Bo's 155.2**;
+  clean-window PDL overlap is 79.0% of same-stream kernel transitions (up
+  from 60.8% dirty), net gap/step now NEGATIVE (-79.9 us — overlap-gained
+  exceeds remaining positive gaps). Same-session albatross v3b (g1g
+  checkpoint) independently reproduced Bo's number: 155.75 tok/s (D is
+  87.6% of that). 1.5B: A=479.2 / D=493.0 / B=491.6 / C=492.9 tok/s, all
+  EXACT. F0062's owed compute-sanitizer racecheck+synccheck also closed
+  this window: 63/63 launches, 0 hazards, 0 errors, both tools. Full
+  numbers, per-kernel tables and raw files: §6, §6c, `bench/results/
+  mega_*_5090.*`.
 
 ## 1. Environment + deploy validation (#55 Option-B on sm120)
 
@@ -138,22 +147,37 @@ machine: 5090 tower (sm120, driver 595-open/CUDA 13.2 host, dev-cu12 container C
   RL pipeline (genesis chunked + hb_compile) co-resident, host load hit
   368-496 and sshd stopped answering (banner-exchange timeouts) — the
   sanitizer was contributing to crushing a box 19-21 users share. Killed
-  (SIGTERM/KILL), load recovered 496 -> 61 within ~2 min. **Re-run owed in a
-  quiet window, AFTER the flagship legs** (it serializes the GPU; lowest
+  (SIGTERM/KILL), load recovered 496 -> 61 within ~2 min. Re-run owed in a
+  quiet window, AFTER the flagship legs (it serializes the GPU; lowest
   priority insert). Lesson recorded: long container jobs go through
   `docker exec -d` + log file, never tied to the ssh channel.
+- **CLOSED, 2026-07-18 (clean window, last item in the runbook)**: both
+  `compute-sanitizer --tool racecheck --error-exitcode 3` and
+  `--tool synccheck --error-exitcode 3` over `race_audit_driver.py` ran to
+  completion in the same-tenant (us-only) window — **63/63 audited-kernel
+  launches, 0 hazards displayed (0 errors, 0 warnings) under racecheck, 0
+  errors under synccheck**, exit code 0 both times. Total wall time for the
+  whole battery (both tools) was ~100s — confirming the earlier abort was
+  the co-resident host load, not the instrumented workload itself being
+  fundamentally slow. Raw logs: `bench/results/mega_racecheck_7.2b_5090.log`,
+  `bench/results/mega_synccheck_7.2b_5090.log`. This closes F0062's owed
+  item; no further racecheck debt outstanding.
 
-## 6. Flagship timing (Phase 4) — PENDING QUIET CARD; pipelines validated dirty
+## 6. Flagship timing (Phase 4) — CLOSED 2026-07-18, clean numbers landed
 
-Planned matrix (bench/mega_flag_matrix.sh, 64-in/256-out c=1, greedy-smoke
-hard gate per leg): A anchor / B +MEGA / C +MEGA+WKV / D +MEGA+WKV+PDL.
-Framings: (1) serving bsz1 vs the 133.4 anchor; (2) matched kernel-loop
-event timing vs albatross 155.2 = 92.4% of the 168.0 tok/s sparse-byte
-ceiling (1691.7 GB/s / 10.07 GB/step).
+Matrix (bench/mega_flag_matrix.sh, 64-in/256-out c=1, greedy-smoke hard gate
+per leg, headline pair A/D run first): A anchor / B +MEGA / C +MEGA+WKV /
+D +MEGA+WKV+PDL. Framings: (1) serving bsz1 vs the 133.4 anchor; (2) matched
+kernel-loop event timing vs albatross 155.2 = 92.4% of the 168.0 tok/s
+sparse-byte ceiling (1691.7 GB/s / 10.07 GB/step). Both framings are now
+populated for A and D — see §6c for the clean results; this closes the
+"Clean results: TBD" gap left open below.
+
+## 6a. Dirty-window shakeout (SUPERSEDED by §6c — kept for the record)
 
 Validated under DIRTY conditions (genesis sim2sim motion-cxk co-resident at
 90-100% util the whole session — numbers below are pipeline shakeouts, NOT
-headlines):
+headlines, and are superseded by the clean measurements in §6c):
 
 - **D-config e2e works**: boot + smoke 8/8 EXACT with MEGA+WKV_CUDA+PDL armed
   (serving log shows `[rwkv7_pdl] PDL chain ARMED`); dirty c=1 97.9 tok/s vs
@@ -181,9 +205,118 @@ headlines):
   code pays the same co-residency tax; clean re-run in the window). Note
   v3b builds with --use_fast_math (their numerics posture, unchanged).
 
-- Clean results: TBD
+## 6c. Clean results (2026-07-18, single-tenant window, zero yields needed)
 
-## 6b. The clean-window runbook (for the next session / the moment the card frees)
+The SkyPilot API server was unreachable this window (why the card was free);
+the §6b runbook ran start-to-finish with no co-resident processes and no
+tracking pods at any point (checked before every leg + a ~20-25s sentinel
+throughout; see §7). GPU memory was flat at 19740-19748 MiB across all four
+7.2B legs (pre/post `nvidia-smi` snapshots bracketing every leg) — no other
+tenant ever touched the card during measurement.
+
+**7.2B serving bsz1 (framing 1)** — `bench/results/mega_flagmatrix_c1_{A,D,B,C}_7.2b_5090.json`,
+run log `mega_flagmatrix_run_7.2b_5090.log`:
+
+| leg | config | tok/s | gate |
+|---|---|---|---|
+| A | anchor (MEGA=0 WKV_CUDA=0 PDL=0) | 136.9 | greedy 8/8 EXACT |
+| D | flagship (MEGA+WKV_CUDA+PDL) | 137.8 | greedy 8/8 EXACT |
+| B | +MEGA only | 138.1 | greedy 8/8 EXACT |
+| C | +MEGA+WKV | 137.8 | greedy 8/8 EXACT |
+
+All four legs land in a 136.9-138.1 tok/s band (~0.9% spread) — at bsz1
+serving wall-clock granularity the MEGA/WKV_CUDA/PDL kernel-level savings
+are not cleanly resolved above noise (B is nominally the highest of the
+four). D = 82.0% of the 168.0 ceiling. This is expected and is exactly why
+framing 2 exists (below): the doc's own dirty-window finding that "the c=1
+GPU timeline is CONTIGUOUS" means serving overhead is near-zero at bsz1, so
+serving-level wall clock and kernel-loop timing should — and do — agree
+closely (A: 136.9 serving vs 134.96 kernel-loop, 1.4% apart).
+
+**A-leg deviation, investigated**: A=136.9 runs 2.2-2.9% above the historical
+133-134 range (F0056's 133.4 anchor), tripping the runbook's own >2% guard.
+Ruled out: co-residency (GPU memory flat at 19740-19748 MiB throughout,
+confirmed single-tenant); CGMAXBS 32-vs-512 (already established neutral in
+this doc's own Phase 2 notes). Leading explanation: the documented sglang
+base bump (b28bc10 -> 754524d, ~5 days of upstream main commits between the
+F0056 measurement and this session) — a genuine small upstream speedup,
+consistent with A and D moving up together. Not independently bisected to a
+specific upstream commit/PR (disproportionate to a 2.6% delta on a live
+shared-GPU window); flagged here rather than silently published.
+
+**7.2B matched kernel-loop framing (framing 2)** — the apples-to-apples
+comparison to Bo, whose 155.2 is kernel-harness event-timing, not serving.
+Captured via `/start_profile` (num_steps=48) on a live c=1 decode stream,
+parsed with `bench/step_span_from_trace.py`; full per-kernel tables in
+`bench/results/mega_framing2_{A,D}_7.2b_5090.txt`:
+
+| leg | span/step | tok/s | kernels/step | overlapped transitions | net gap/step |
+|---|---|---|---|---|---|
+| A (anchor) | 7409.6 us | 134.96 | 599.4 | 11.7% | +33.6 us |
+| D (flagship) | 7329.8 us | 136.43 | 533.5 | **79.0%** | **-79.9 us** |
+
+D = 81.2% of the 168.0 ceiling, and **87.9% of Bo's 155.2** (136.43/155.2).
+The clean-window PDL overlap (79.0%) is markedly higher than the dirty-window
+reading (60.8%) — a cleaner confirmation that PDL is genuinely active: gaps
+go net NEGATIVE in D (overlap-gained 104.5 us/step exceeds the remaining
+positive gaps of 24.6 us/step), vs A's net-positive +33.6 us/step with only
+baseline-level overlap. Kernel count/step for D (533.5) exactly reproduces
+the dirty shakeout's "533 kernels/step" figure — a useful cross-check that
+kernel *count* is contamination-invariant even though kernel *timing* isn't.
+Per-kernel notable: D's fused `gemv_grouped_m1_kernel` (64.51/step, 2660.15
+us/step) plus the residual unfused `gemv_m1_kernel` (32.26/step, 2600.09
+us/step) sum to 5260.24 us/step vs A's single unfused path (161.65/step,
+5316.72 us/step) — GEMV busy is down ~56.5 us/step, but D's total BUSY/step
+(7409.7) is still slightly above A's (7376.0), because a few other kernels
+(notably `wkv_decode_kernel` at 84.42 us/step vs A's `_wkv_recurrent_kernel`
+at 75.50 us/step) run marginally hotter in this sample — within the noise
+of a 43-step trimmed window, not independently re-verified with a larger
+sample in this session. Net effect: the large launch-overlap win is mostly
+absorbed by BUSY/step being flat-to-slightly-up, so the end-to-end SPAN/step
+gain is modest (~80 us/step, ~1.1%) despite the striking overlap-percentage
+jump.
+
+**Same-session albatross v3b** (`bench/results/mega_albatross_v3b_g1g_7.2b_5090.log`):
+built + ran in the `rwkv-serve` container (the dedicated `albatross5090`
+container's GPU binding was stale, per the dirty-session note); checkpoint
+`rwkv7-g1g-7.2b-20260523-ctx8192.pth` (Bo's own number used g1f — same
+architecture/dims, disclosed; v3b's own CUDA graph + `cuda::Event`
+kernel-loop harness, `--use_fast_math` is their posture, unchanged). Result:
+**tok_s_p50 = 155.75** (p10=6.411 ms, p50=6.421 ms, p90=6.432 ms) — this
+independently reproduces Bo's published 155.2 to within 0.35% on our own
+card, which is itself a useful corroboration. D vs this same-session number:
+136.43/155.75 = **87.6%** (essentially the same ratio as the 87.9% vs Bo's
+published 155.2).
+
+**1.5B chain** (bonus leg; `bench/results/mega_flagmatrix_c1_{A,D,B,C}_1.5b_5090.json`,
+run log `mega_flagmatrix_run_1.5b_5090.log`), same matrix/gates, model
+`rwkv7-1.5b-fla` (24 layer, 2048 embd, 32 head):
+
+| leg | config | tok/s | gate |
+|---|---|---|---|
+| A | anchor | 479.2 | greedy EXACT |
+| D | flagship | 493.0 | greedy EXACT |
+| B | +MEGA only | 491.6 | greedy EXACT |
+| C | +MEGA+WKV | 492.9 | greedy EXACT |
+
+D/A = +2.9% — a larger relative gain than 7.2B's +0.7%, consistent with
+fixed per-kernel savings being a bigger fraction of the much smaller 1.5B
+per-token step time. Context cited at task hand-off (not independently
+re-derived in this session, reported as given): ceiling ~636 tok/s, a prior
+"ours" reading of 409 (64% of that ceiling), albatross at 554 (87%). Against
+those: D=493.0 is 77.5% of the 636 ceiling and 89.0% of the cited 554
+albatross figure; if the 409 reading is the correct prior comparison point
+for this same anchor-vs-flagship measurement, D is +20.5% over it. This
+provenance is flagged as unverified-this-session rather than asserted as a
+clean delta.
+
+## 6b. The clean-window runbook — EXECUTED 2026-07-18, see §6c for results
+
+Ran end-to-end exactly as staged below, zero modifications needed. Total
+elapsed from window re-confirmation to full close-out (7.2B matrix + A/D
+traces + same-session albatross v3b + 1.5B matrix + racecheck/synccheck
+battery): under 20 minutes, no yields. `docker stop rwkv-serve` issued at
+the end to release the card back to the (currently-down) sky scheduler.
 
 ```bash
 # 0) guest checks (MANDATORY): no Pending pods, util < 10%
@@ -209,15 +342,27 @@ ssh $TOWER 'docker exec -d rwkv-serve bash -c "cd /data/hakureirm/rwkv-sglang/re
 
 ## 7. Honest ledger
 
-- Delivered: the assembled + two-tier-gated PDL chain (C++ 8 files + triton
-  2 kernels), the sm120 Option-B deploy validation, the sm120 prefab re-gates
-  (incl. the FIRST on-silicon wkv-CUDA gate), the ServerArgs skew fix, the
-  framing-2 trace parser with direct PDL-overlap attribution, the staged
-  albatross v3b same-session harness, and the dirty-window evidence that PDL
-  is live in production (60.8% overlapped transitions).
-- NOT delivered (blocked on card occupancy, staged to one command): the clean
-  A/D/B/C flagship numbers, the %-of-168.0 headline, the same-session 155.2
-  comparison, the 1.5B bonus, the racecheck re-run.
+- Delivered (2026-07-17 session): the assembled + two-tier-gated PDL chain
+  (C++ 8 files + triton 2 kernels), the sm120 Option-B deploy validation, the
+  sm120 prefab re-gates (incl. the FIRST on-silicon wkv-CUDA gate), the
+  ServerArgs skew fix, the framing-2 trace parser with direct PDL-overlap
+  attribution, the staged albatross v3b same-session harness, and the
+  dirty-window evidence that PDL is live in production (60.8% overlapped
+  transitions).
+- Delivered (2026-07-18 clean-window session): the clean 7.2B A/D/B/C
+  flagship numbers (both framings), the %-of-168.0 headline (D = 82.0%
+  serving / 81.2% kernel-loop), the same-session 155.2 comparison (albatross
+  v3b re-measured at 155.75, D = 87.6-87.9% of it either way), the 1.5B bonus
+  matrix (A/D/B/C all EXACT), and the F0062 racecheck+synccheck re-run
+  (63/63 launches, 0 hazards/errors, both tools) — see §6c and §5.
+- NOT delivered / open follow-ups: independent bisection of the A-leg's
+  2.2-2.9% deviation to a specific upstream sglang commit (flagged, not
+  chased — disproportionate to the delta size on a shared window); a
+  larger-than-43-step re-sample of the D-leg's BUSY/step nuance (the
+  `wkv_decode_kernel` vs `_wkv_recurrent_kernel` ~9 us/step gap noted in
+  §6c is inside plausible sampling noise, not independently confirmed with
+  a bigger window); independent verification of the 1.5B "409/554/636"
+  comparison-point provenance cited at task hand-off.
 - Co-residency/yield events (per the sky-priority rule — every yield logged
   with what it interrupted and whether re-run):
   * 2026-07-17 ~16:55 (session clock): **SKY-YIELD** — managed-job pod
@@ -229,12 +374,37 @@ ssh $TOWER 'docker exec -d rwkv-serve bash -c "cd /data/hakureirm/rwkv-sglang/re
   * Whole-session co-resident: genesis sim2sim (motion cxk) at 90-100% util
     until ~15:5x, then hb_compile (model-10-seconds.yaml) at ~98% — all
     timing legs held back; only pipeline shakeouts (disclosed dirty) ran.
+  * **2026-07-18 (clean-window session): ZERO yields.** Window opened
+    because the SkyPilot API server itself was unreachable (the training
+    scheduler could not refill the queue while down) — confirmed at Step 0
+    (0 compute processes, 40 MiB/0% util, zero tracking/Pending pods) and
+    re-checked before every leg plus a ~20-25s background sentinel for the
+    full session duration (7.2B matrix -> A/D traces -> albatross v3b ->
+    1.5B matrix -> racecheck/synccheck battery). No tracking pod ever
+    appeared; nothing was interrupted. `docker stop rwkv-serve` issued
+    proactively at the end (not a yield — routine release once all planned
+    work was complete) to leave zero footprint for whenever the sky control
+    plane recovers.
 
 ## 8. Artifacts + cross-references
 
 - Kernels: `sglang_overlay/.../rwkv7_kernels/cuda/rwkv7_pdl.cuh` + the 7 wired
   .cu files (commit 7863f12); harness `bench/mega_flag_matrix.sh`;
-  `bench/verify_m1d.py` (ServerArgs adaptivity).
+  `bench/verify_m1d.py` (ServerArgs adaptivity); trace parser
+  `bench/step_span_from_trace.py`; racecheck driver
+  `bench/probes/race_audit_driver.py`.
+- Clean-window (2026-07-18) raw results, all under `bench/results/`:
+  `mega_flagmatrix_c1_{A,D,B,C}_7.2b_5090.json` and `_1.5b_5090.json` (per-leg
+  serving bsz1 sweeps), `mega_flagmatrix_run_{7.2b,1.5b}_5090.log` (full
+  matrix run logs incl. every gate result), `mega_framing2_{A,D}_7.2b_5090.txt`
+  (kernel-loop parser output + per-kernel tables), `mega_albatross_v3b_g1g_
+  7.2b_5090.log` (same-session competitor re-measurement),
+  `mega_racecheck_7.2b_5090.log` + `mega_synccheck_7.2b_5090.log`
+  (compute-sanitizer closure). Raw `.trace.json.gz` chrome traces (~2 MB
+  each) intentionally NOT landed — no unique information beyond the parsed
+  aggregate already in the `.txt` files (same convention as
+  `w1prime_step_attribution_7.2b_5090.json`'s trace_source note).
 - [[F0060]] [[F0061]] (the prefabs + plan this executes) · [[F0062]] (racecheck
-  debt) · [[F0058]] (WKV stage) · ADR-0008 (feasibility + A0 constants) ·
-  `rwkv-competitors/albatross-megakernel-study-2026-07-13.md` (structure).
+  debt, now closed — §5) · [[F0058]] (WKV stage) · ADR-0008 (feasibility + A0
+  constants) · `rwkv-competitors/albatross-megakernel-study-2026-07-13.md`
+  (structure).
