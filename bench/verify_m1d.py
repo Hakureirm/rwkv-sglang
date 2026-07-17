@@ -35,17 +35,28 @@ def main():
     expected = fx["greedy_tokens"]
     n = len(expected)
 
-    import sglang as sgl
+    import dataclasses
 
-    engine = sgl.Engine(
+    import sglang as sgl
+    from sglang.srt.server_args import ServerArgs
+
+    # Version-adaptive cuda-graph kwargs: sglang main (>= ~754524d) replaced the
+    # boolean disable_piecewise_cuda_graph with per-phase backends;
+    # cuda_graph_backend_prefill="disabled" is the legacy flag's documented mapping.
+    sa_fields = {f.name for f in dataclasses.fields(ServerArgs)}
+    kw = dict(
         model_path=args.model,
         skip_tokenizer_init=True,
         disable_cuda_graph=not args.cuda_graph,
-        disable_piecewise_cuda_graph=True,
         dtype=args.dtype,
         tp_size=1,
         mem_fraction_static=args.mem_fraction,
     )
+    if "disable_piecewise_cuda_graph" in sa_fields:
+        kw["disable_piecewise_cuda_graph"] = True
+    elif "cuda_graph_backend_prefill" in sa_fields:
+        kw["cuda_graph_backend_prefill"] = "disabled"
+    engine = sgl.Engine(**kw)
     out = engine.generate(
         input_ids=[prompt_tokens],
         sampling_params={"temperature": 0.0, "max_new_tokens": n},

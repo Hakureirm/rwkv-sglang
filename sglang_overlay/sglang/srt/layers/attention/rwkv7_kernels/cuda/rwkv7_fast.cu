@@ -26,6 +26,8 @@
 #include <cuda_fp16.h>
 #include <vector>
 
+#include "rwkv7_pdl.cuh"  // PDL chain (task #50 sm120 step); no-op unarmed
+
 using dtype = at::Half;
 
 __device__ __forceinline__ float warp_sum(float x) {
@@ -47,6 +49,9 @@ __global__ __launch_bounds__(Threads, 1) void gemv_m1_kernel(
     const dtype* __restrict__ weight,   // [N, K]
     dtype* __restrict__ y) {
   const int n0 = blockIdx.x * OutTile;
+  // PDL: x comes from the stream predecessor; wait for its stores (no-op when
+  // launched plain / below sm_90 — see rwkv7_pdl.cuh).
+  rwkv7_pdl_wait();
   float acc[OutTile];
 #pragma unroll
   for (int j = 0; j < OutTile; ++j) acc[j] = 0.0f;
@@ -82,6 +87,7 @@ __global__ __launch_bounds__(Threads, 1) void gemv_m1_kernel(
       y[n0 + j] = __float2half_rn(sum);
     }
   }
+  rwkv7_pdl_launch_dependents();  // let the next PDL stage schedule early
 }
 
 at::Tensor gemv_m1(at::Tensor x, at::Tensor weight) {
@@ -94,12 +100,17 @@ at::Tensor gemv_m1(at::Tensor x, at::Tensor weight) {
   if (N == 0) return y;
   if (K == 0) return y.zero_();  // empty reduction = 0, not uninitialized memory
   auto stream = at::cuda::getCurrentCUDAStream();
+  const bool pdl = rwkv7_pdl_enabled("fast");
   if ((N % 2) == 0) {
-    gemv_m1_kernel<128, 2><<<N / 2, 128, 0, stream>>>(
-        K, N, x.data_ptr<dtype>(), weight.data_ptr<dtype>(), y.data_ptr<dtype>());
+    rwkv7_launch_maybe_pdl(pdl, gemv_m1_kernel<128, 2>,
+        dim3(static_cast<unsigned>(N / 2)), dim3(128), 0, stream.stream(),
+        static_cast<int>(K), static_cast<int>(N), x.data_ptr<dtype>(),
+        weight.data_ptr<dtype>(), y.data_ptr<dtype>());
   } else {
-    gemv_m1_kernel<128, 1><<<N, 128, 0, stream>>>(
-        K, N, x.data_ptr<dtype>(), weight.data_ptr<dtype>(), y.data_ptr<dtype>());
+    rwkv7_launch_maybe_pdl(pdl, gemv_m1_kernel<128, 1>,
+        dim3(static_cast<unsigned>(N)), dim3(128), 0, stream.stream(),
+        static_cast<int>(K), static_cast<int>(N), x.data_ptr<dtype>(),
+        weight.data_ptr<dtype>(), y.data_ptr<dtype>());
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return y;
@@ -114,7 +125,8 @@ at::Tensor gemv_m1(at::Tensor x, at::Tensor weight) {
 // (guaranteed by the caller). cuda-graph safe (static shapes, no host sync).
 // ---------------------------------------------------------------------------
 #define RWKV7_GEMV_LAUNCH(T, OT)                                             \
-  gemv_m1_kernel<T, OT><<<static_cast<int>(N) / (OT), (T), 0, stream>>>(     \
+  rwkv7_launch_maybe_pdl(pdl, gemv_m1_kernel<T, OT>,                         \
+      dim3(static_cast<unsigned>(N / (OT))), dim3(T), 0, stream.stream(),    \
       static_cast<int>(K), static_cast<int>(N), x.data_ptr<dtype>(),        \
       weight.data_ptr<dtype>(), y.data_ptr<dtype>())
 
@@ -130,6 +142,7 @@ at::Tensor gemv_m1_cfg(at::Tensor x, at::Tensor weight, int64_t threads,
   if (N == 0) return y;
   if (K == 0) return y.zero_();  // empty reduction = 0, not uninitialized memory
   auto stream = at::cuda::getCurrentCUDAStream();
+  const bool pdl = rwkv7_pdl_enabled("fast");
   // key = threads*100 + out_tile: out_tile < 100, so no (threads,out_tile)
   // aliasing (threads*10+out_tile collided, e.g. (63,11) -> (64,1)).
   switch (threads * 100 + out_tile) {
@@ -180,6 +193,7 @@ __global__ __launch_bounds__(Threads, 1) void gemv_m1_sqrelu_kernel(
     const dtype* __restrict__ weight,   // [N, K]
     dtype* __restrict__ y) {
   const int n0 = blockIdx.x * OutTile;
+  rwkv7_pdl_wait();  // x from the ffn shift_lerp1 predecessor (no-op unarmed)
   float acc[OutTile];
 #pragma unroll
   for (int j = 0; j < OutTile; ++j) acc[j] = 0.0f;
@@ -222,10 +236,12 @@ __global__ __launch_bounds__(Threads, 1) void gemv_m1_sqrelu_kernel(
       y[n0 + j] = __float2half_rn(r * r);
     }
   }
+  rwkv7_pdl_launch_dependents();  // sparse_cmix / ffn.value schedules early
 }
 
 #define RWKV7_SQRELU_LAUNCH(T, OT)                                            \
-  gemv_m1_sqrelu_kernel<T, OT><<<static_cast<int>(N) / (OT), (T), 0, stream>>>(\
+  rwkv7_launch_maybe_pdl(pdl, gemv_m1_sqrelu_kernel<T, OT>,                   \
+      dim3(static_cast<unsigned>(N / (OT))), dim3(T), 0, stream.stream(),     \
       static_cast<int>(K), static_cast<int>(N), x.data_ptr<dtype>(),          \
       weight.data_ptr<dtype>(), y.data_ptr<dtype>())
 
@@ -241,6 +257,7 @@ at::Tensor gemv_m1_sqrelu_cfg(at::Tensor x, at::Tensor weight, int64_t threads,
   if (N == 0) return y;
   if (K == 0) return y.zero_();  // empty reduction -> relu(0)^2 == 0
   auto stream = at::cuda::getCurrentCUDAStream();
+  const bool pdl = rwkv7_pdl_enabled("fast");
   switch (threads * 100 + out_tile) {
     case 64 * 100 + 1:  RWKV7_SQRELU_LAUNCH(64, 1);  break;
     case 64 * 100 + 2:  RWKV7_SQRELU_LAUNCH(64, 2);  break;

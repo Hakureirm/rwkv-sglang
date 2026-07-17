@@ -36,6 +36,8 @@
 #include <torch/library.h>   // TORCH_LIBRARY / TORCH_LIBRARY_IMPL
 #include <cuda_fp16.h>
 
+#include "rwkv7_pdl.cuh"  // PDL chain (task #50 sm120 step); no-op unarmed
+
 using dtype = at::Half;
 
 __device__ __forceinline__ float warp_sum(float x) {
@@ -70,6 +72,7 @@ __global__ __launch_bounds__(Threads, 1) void lora_stage1_kernel(
   }
   const dtype* x = xs + static_cast<int64_t>(chain) * H;
   const dtype* w = d_cat + static_cast<int64_t>(r) * H;
+  rwkv7_pdl_wait();  // xs from shift_lerp6 predecessor (no-op unarmed)
   float acc = 0.0f;
   for (int k = threadIdx.x << 2; k < H; k += Threads << 2) {
     const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(x + k));
@@ -99,6 +102,7 @@ __global__ __launch_bounds__(Threads, 1) void lora_stage1_kernel(
     else if (act == 2) t = 1.0f / (1.0f + expf(-t));
     h[r] = __half2float(__float2half_rn(t));
   }
+  rwkv7_pdl_launch_dependents();  // stage2 schedules early (PDL, no-op unarmed)
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +121,7 @@ __global__ __launch_bounds__(Warps * 32, 1) void lora_stage2_kernel(
     const float* __restrict__ h,         // [R_total]
     dtype* __restrict__ y) {             // [C, H]
   extern __shared__ float hs[];  // R_total floats
+  rwkv7_pdl_wait();  // h is stage1's output; wait before staging (no-op unarmed)
   for (int i = threadIdx.x; i < Rtot; i += Warps * 32) hs[i] = h[i];
   __syncthreads();
   const int gw = blockIdx.x * Warps + (threadIdx.x >> 5);
@@ -144,6 +149,7 @@ __global__ __launch_bounds__(Warps * 32, 1) void lora_stage2_kernel(
   if (lane == 0) {
     y[gw] = __float2half_rn(acc + __half2float(bias_cat[gw]));
   }
+  rwkv7_pdl_launch_dependents();  // next stage schedules early (no-op unarmed)
 }
 
 at::Tensor lora4_m1(at::Tensor xs, at::Tensor d_cat, at::Tensor u_cat,
@@ -168,20 +174,25 @@ at::Tensor lora4_m1(at::Tensor xs, at::Tensor d_cat, at::Tensor u_cat,
   auto h = at::empty({Rtot}, xs.options().dtype(at::kFloat));
   auto y = at::empty({C, H}, xs.options());
   auto stream = at::cuda::getCurrentCUDAStream();
+  const bool pdl = rwkv7_pdl_enabled("lora");
   constexpr int kThreads = 128;
-  lora_stage1_kernel<kThreads><<<Rtot, kThreads, 0, stream>>>(
+  rwkv7_launch_maybe_pdl(pdl, lora_stage1_kernel<kThreads>,
+      dim3(static_cast<unsigned>(Rtot)), dim3(kThreads), 0, stream.stream(),
       static_cast<int>(H), static_cast<int>(C),
-      xs.data_ptr<dtype>(), d_cat.data_ptr<dtype>(), meta.data_ptr<int>(),
-      h.data_ptr<float>());
+      xs.data_ptr<dtype>(), d_cat.data_ptr<dtype>(),
+      static_cast<const int*>(meta.data_ptr<int>()), h.data_ptr<float>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   constexpr int kWarps = 8;
   const int64_t total = C * H;
   const int64_t blocks = (total + kWarps - 1) / kWarps;
   const size_t smem = static_cast<size_t>(Rtot) * sizeof(float);
-  lora_stage2_kernel<kWarps><<<blocks, kWarps * 32, smem, stream>>>(
+  rwkv7_launch_maybe_pdl(pdl, lora_stage2_kernel<kWarps>,
+      dim3(static_cast<unsigned>(blocks)), dim3(kWarps * 32), smem,
+      stream.stream(),
       static_cast<int>(H), static_cast<int>(C), static_cast<int>(Rtot),
-      u_cat.data_ptr<dtype>(), bias_cat.data_ptr<dtype>(), meta.data_ptr<int>(),
-      h.data_ptr<float>(), y.data_ptr<dtype>());
+      u_cat.data_ptr<dtype>(), bias_cat.data_ptr<dtype>(),
+      static_cast<const int*>(meta.data_ptr<int>()),
+      static_cast<const float*>(h.data_ptr<float>()), y.data_ptr<dtype>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return y;
 }

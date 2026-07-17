@@ -39,6 +39,8 @@
 #include <torch/library.h>
 #include <cuda_fp16.h>
 
+#include "rwkv7_pdl.cuh"  // PDL chain (task #50 sm120 step); no-op unarmed
+
 using dtype = at::Half;
 
 // The conv token-shift state is fp32 (rwkv7_backend.py). token_shift stores
@@ -75,6 +77,7 @@ __global__ __launch_bounds__(Threads, 2) void shift_lerp6_kernel(
   }
   const dtype* xr = normed + static_cast<int64_t>(t) * H;
   float* cr = conv + static_cast<int64_t>(ci) * H;
+  rwkv7_pdl_wait();  // normed is the predecessor LN's output (no-op unarmed)
   {
     const float x = static_cast<float>(xr[k]);
     const float sh = __half2float(__float2half_rn(cr[k]));  // prev.to(fp16) BEFORE scatter
@@ -87,6 +90,7 @@ __global__ __launch_bounds__(Threads, 2) void shift_lerp6_kernel(
       out[static_cast<int64_t>(j) * T * H + obase + k] = __float2half_rn(x + prod);
     }
   }
+  rwkv7_pdl_launch_dependents();  // r/k/v GEMV stage schedules early
 }
 
 // ffn entry: xk[T,H] = lerp1(normed, prev, x_k);  conv[ci] <- normed.
@@ -109,6 +113,7 @@ __global__ __launch_bounds__(Threads, 2) void shift_lerp1_kernel(
   }
   const dtype* xr = normed + static_cast<int64_t>(t) * H;
   float* cr = conv + static_cast<int64_t>(ci) * H;
+  rwkv7_pdl_wait();  // normed is the predecessor LN's output (no-op unarmed)
   {
     const float x = static_cast<float>(xr[k]);
     const float sh = __half2float(__float2half_rn(cr[k]));
@@ -118,6 +123,7 @@ __global__ __launch_bounds__(Threads, 2) void shift_lerp1_kernel(
     const float prod = __half2float(__float2half_rn(m * d));
     orow[k] = __float2half_rn(x + prod);
   }
+  rwkv7_pdl_launch_dependents();  // ffn.key GEMV schedules early
 }
 
 at::Tensor shift_lerp6(at::Tensor normed, at::Tensor mix6,
@@ -139,10 +145,12 @@ at::Tensor shift_lerp6(at::Tensor normed, at::Tensor mix6,
   constexpr int kThreads = 256;
   const dim3 grid6(static_cast<unsigned>(T),
                    static_cast<unsigned>((H + kThreads - 1) / kThreads));
-  shift_lerp6_kernel<kThreads><<<grid6, kThreads, 0, stream>>>(
+  rwkv7_launch_maybe_pdl(rwkv7_pdl_enabled("glue"), shift_lerp6_kernel<kThreads>,
+      grid6, dim3(kThreads), 0, stream.stream(),
       static_cast<int>(T), static_cast<int>(H), static_cast<int>(conv.size(0)),
-      normed.data_ptr<dtype>(),
-      mix6.data_ptr<dtype>(), cache_indices.data_ptr<int>(),
+      static_cast<const dtype*>(normed.data_ptr<dtype>()),
+      static_cast<const dtype*>(mix6.data_ptr<dtype>()),
+      static_cast<const int*>(cache_indices.data_ptr<int>()),
       conv.data_ptr<float>(), out.data_ptr<dtype>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return out;
@@ -166,10 +174,12 @@ at::Tensor shift_lerp1(at::Tensor normed, at::Tensor x_k,
   constexpr int kThreads = 256;
   const dim3 grid1(static_cast<unsigned>(T),
                    static_cast<unsigned>((H + kThreads - 1) / kThreads));
-  shift_lerp1_kernel<kThreads><<<grid1, kThreads, 0, stream>>>(
+  rwkv7_launch_maybe_pdl(rwkv7_pdl_enabled("glue"), shift_lerp1_kernel<kThreads>,
+      grid1, dim3(kThreads), 0, stream.stream(),
       static_cast<int>(T), static_cast<int>(H), static_cast<int>(conv.size(0)),
-      normed.data_ptr<dtype>(),
-      x_k.data_ptr<dtype>(), cache_indices.data_ptr<int>(),
+      static_cast<const dtype*>(normed.data_ptr<dtype>()),
+      static_cast<const dtype*>(x_k.data_ptr<dtype>()),
+      static_cast<const int*>(cache_indices.data_ptr<int>()),
       conv.data_ptr<float>(), out.data_ptr<dtype>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return out;

@@ -64,6 +64,8 @@
 #include <optional>
 #include <tuple>
 
+#include "rwkv7_pdl.cuh"  // PDL chain (task #50 sm120 step); no-op unarmed
+
 using dtype = at::Half;
 
 namespace {
@@ -181,6 +183,7 @@ __global__ void add_ln_kernel(int N, float eps,
   const int numx = blockDim.x * blockDim.y;
   const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
   const int n_vec = N / kVec;
+  rwkv7_pdl_wait();  // x/delta from the predecessor block (no-op unarmed)
 
   // residual add: float add of two halves is EXACT; one rn round to fp16 ==
   // torch's elementwise add kernel. Keep this thread's x_new chunks in
@@ -219,6 +222,7 @@ __global__ void add_ln_kernel(int N, float eps,
     }
     yv[i] = out;
   }
+  rwkv7_pdl_launch_dependents();  // shift_lerp stage schedules early
 }
 
 // ---- torch GroupNorm RowwiseMoments Welford (WelfordOps: true division) ----
@@ -281,6 +285,7 @@ __global__ void gn_gatecorr_kernel(int D, float eps /* fp16-rounded by host */,
   const int h = static_cast<int>(tg % NH);
   const int64_t rowbase = tg * D;  // == (t*NH + h) * D = t*H + h*D
   const int64_t pbase = static_cast<int64_t>(h) * D;
+  rwkv7_pdl_wait();  // o is the WKV stage's output (no-op unarmed)
 
   // --- RowwiseMoments over o[rowbase : rowbase+D] (torch order: j += 32) ---
   WelfordGN val{0.f, 0.f, 0, 0.f};
@@ -342,6 +347,7 @@ __global__ void gn_gatecorr_kernel(int D, float eps /* fp16-rounded by host */,
       out[idx] = __float2half_rn(oo * __half2float(g[idx]));
     }
   }
+  rwkv7_pdl_launch_dependents();  // o_proj GEMV schedules early
 }
 
 // y = relu(x)^2 in ONE kernel (their `relu_square` analog). The reference is
@@ -473,11 +479,14 @@ std::tuple<at::Tensor, at::Tensor> add_ln(at::Tensor x, at::Tensor delta,
   auto stream = at::cuda::getCurrentCUDAStream();
   const dim3 threads(32, 4, 1);
   const int nshared = threads.y > 1 ? threads.y * 3 / 2 * sizeof(float) : 0;
-  add_ln_kernel<kMaxVecPerThread>
-      <<<static_cast<unsigned>(T), threads, nshared, stream>>>(
-          static_cast<int>(N), static_cast<float>(eps), x.data_ptr<dtype>(),
-          delta.data_ptr<dtype>(), gamma.data_ptr<dtype>(),
-          beta.data_ptr<dtype>(), x_new.data_ptr<dtype>(), y.data_ptr<dtype>());
+  rwkv7_launch_maybe_pdl(rwkv7_pdl_enabled("ln"), add_ln_kernel<kMaxVecPerThread>,
+      dim3(static_cast<unsigned>(T)), threads, nshared, stream.stream(),
+      static_cast<int>(N), static_cast<float>(eps),
+      static_cast<const dtype*>(x.data_ptr<dtype>()),
+      static_cast<const dtype*>(delta.data_ptr<dtype>()),
+      static_cast<const dtype*>(gamma.data_ptr<dtype>()),
+      static_cast<const dtype*>(beta.data_ptr<dtype>()),
+      x_new.data_ptr<dtype>(), y.data_ptr<dtype>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return {x_new, y};
 }
@@ -508,11 +517,17 @@ at::Tensor gn_gatecorr(at::Tensor o, at::Tensor r, at::Tensor k, at::Tensor rk,
   // torch rounds the GroupNorm eps through the input dtype (fp16) first.
   const float eps_h = __half2float(__float2half_rn(static_cast<float>(eps)));
   auto stream = at::cuda::getCurrentCUDAStream();
-  gn_gatecorr_kernel<<<static_cast<unsigned>(T * nh), 32, 0, stream>>>(
-      static_cast<int>(D), eps_h, static_cast<int>(nh), o.data_ptr<dtype>(),
-      r.data_ptr<dtype>(), k.data_ptr<dtype>(), rk.data_ptr<dtype>(),
-      v.data_ptr<dtype>(), g.data_ptr<dtype>(), gamma.data_ptr<dtype>(),
-      beta.data_ptr<dtype>(), out.data_ptr<dtype>());
+  rwkv7_launch_maybe_pdl(rwkv7_pdl_enabled("ln"), gn_gatecorr_kernel,
+      dim3(static_cast<unsigned>(T * nh)), dim3(32), 0, stream.stream(),
+      static_cast<int>(D), eps_h, static_cast<int>(nh),
+      static_cast<const dtype*>(o.data_ptr<dtype>()),
+      static_cast<const dtype*>(r.data_ptr<dtype>()),
+      static_cast<const dtype*>(k.data_ptr<dtype>()),
+      static_cast<const dtype*>(rk.data_ptr<dtype>()),
+      static_cast<const dtype*>(v.data_ptr<dtype>()),
+      static_cast<const dtype*>(g.data_ptr<dtype>()),
+      static_cast<const dtype*>(gamma.data_ptr<dtype>()),
+      static_cast<const dtype*>(beta.data_ptr<dtype>()), out.data_ptr<dtype>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return out;
 }

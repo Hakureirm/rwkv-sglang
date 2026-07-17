@@ -49,6 +49,8 @@
 #include <cuda_fp16.h>
 #include <torch/library.h>
 
+#include "rwkv7_pdl.cuh"  // wait/launch_dependents + armed launch (sm120 step)
+
 namespace {
 
 using dtype = at::Half;
@@ -62,16 +64,6 @@ __device__ __forceinline__ float warp_sum(float x) {
     x += __shfl_down_sync(0xffffffffu, x, offset);
   }
   return x;
-}
-
-// PDL forward-signal: tell the runtime the dependent (next PDL stage) may begin
-// its prologue (weight-load) before this kernel's tail retires — hides the
-// kernel-to-kernel gap that otherwise stalls weight streaming ~13x/layer even
-// inside a captured graph. sm_90+ only; inert (compiled out) on sm_86.
-__device__ __forceinline__ void pdl_launch_dependents() {
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
-  asm volatile("griddepcontrol.launch_dependents;");
-#endif
 }
 
 // gemv_grouped_m1: y_all[G,N], y_all[p] = x_p @ W_p[N,K]^T, p = blockIdx.y.
@@ -99,6 +91,9 @@ __global__ __launch_bounds__(Threads, 1) void gemv_grouped_m1_kernel(
   dtype* __restrict__ y = y_all + static_cast<int64_t>(proj) * N;
 
   const int n0 = blockIdx.x * OutTile;
+  // PDL: x is produced by the stream predecessor (shift_lerp6 / gn_gatecorr);
+  // block until its stores are visible. No-op on a plain launch / sm<90.
+  rwkv7_pdl_wait();
   float acc[OutTile];
 #pragma unroll
   for (int j = 0; j < OutTile; ++j) acc[j] = 0.0f;
@@ -134,13 +129,14 @@ __global__ __launch_bounds__(Threads, 1) void gemv_grouped_m1_kernel(
       y[n0 + j] = __float2half_rn(sum);
     }
   }
-  pdl_launch_dependents();  // sm_90+ only; inert on sm_86 (see header)
+  rwkv7_pdl_launch_dependents();  // sm_90+ only; inert on sm_86 (see header)
 }
 
 #define RWKV7_GROUPED_LAUNCH(T, OT)                                            \
-  gemv_grouped_m1_kernel<T, OT><<<dim3(static_cast<int>(N) / (OT),            \
-                                       static_cast<int>(G)),                   \
-                                  (T), 0, stream>>>(                           \
+  rwkv7_launch_maybe_pdl(                                                      \
+      pdl, gemv_grouped_m1_kernel<T, OT>,                                      \
+      dim3(static_cast<unsigned>(N / (OT)), static_cast<unsigned>(G)),         \
+      dim3(T), 0, stream.stream(),                                             \
       static_cast<int>(K), static_cast<int>(N),                               \
       xs[0], xs[1], xs[2], xs[3], ws[0], ws[1], ws[2], ws[3],                 \
       y_all.data_ptr<dtype>())
@@ -161,6 +157,7 @@ at::Tensor gemv_grouped_launch(const dtype* const xs[kMaxRoles],
   if (N == 0) return y_all;
   if (K == 0) return y_all.zero_();
   auto stream = at::cuda::getCurrentCUDAStream();
+  const bool pdl = rwkv7_pdl_enabled("mega");
   switch (threads * 100 + out_tile) {
     case 64 * 100 + 1:  RWKV7_GROUPED_LAUNCH(64, 1);  break;
     case 64 * 100 + 2:  RWKV7_GROUPED_LAUNCH(64, 2);  break;

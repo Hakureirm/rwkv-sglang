@@ -28,6 +28,8 @@
 #include <torch/library.h>
 #include <cuda_fp16.h>
 
+#include "rwkv7_pdl.cuh"  // PDL chain (task #50 sm120 step); no-op unarmed
+
 namespace {
 constexpr int FFN_TILE = 128;   // inter rows per block-tile
 constexpr int C_TILE = 256;     // output (H) cols per block-tile
@@ -53,6 +55,7 @@ __global__ __launch_bounds__(THREADS, 4) void sparse_cmix_f32acc_kernel(
   const int lane = tid & 31;
   const int warp = tid >> 5;
   const int start_f = fb * FFN_TILE;
+  rwkv7_pdl_wait();  // preact is the ffn.key GEMV's output (no-op unarmed)
 
   // relu(k)^2 for this tile's FFN_TILE rows (THREADS == FFN_TILE, one row per thread)
   const float v = fmaxf(__half2float(preact[start_f + tid]), 0.0f);
@@ -90,6 +93,7 @@ __global__ __launch_bounds__(THREADS, 4) void sparse_cmix_f32acc_kernel(
   // combine partials across the inter-tiles (fb) in fp32
   atomicAdd(&out_f32[c0], acc0);
   atomicAdd(&out_f32[c0 + 1], acc1);
+  rwkv7_pdl_launch_dependents();  // next stage schedules early (no-op unarmed)
 }
 
 // out[1,H] = tiled_value_weight @ relu(preact)^2 , fp32-accumulate, fp16 output.
@@ -105,7 +109,8 @@ at::Tensor sparse_cmix(at::Tensor preact, at::Tensor wt, int64_t H) {
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 grid(static_cast<unsigned>(inter / FFN_TILE), static_cast<unsigned>(H / C_TILE));
   // torch only instantiates data_ptr<> for its scalar types (at::Half), not __half.
-  sparse_cmix_f32acc_kernel<<<grid, THREADS, 0, stream>>>(
+  rwkv7_launch_maybe_pdl(rwkv7_pdl_enabled("sparse"), sparse_cmix_f32acc_kernel,
+      grid, dim3(THREADS), 0, stream.stream(),
       static_cast<int>(H),
       reinterpret_cast<const half*>(pc.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(wc.data_ptr<at::Half>()),

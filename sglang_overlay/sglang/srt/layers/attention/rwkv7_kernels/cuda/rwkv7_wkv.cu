@@ -76,6 +76,8 @@
 #include <torch/library.h>
 #include <cuda_fp16.h>
 
+#include "rwkv7_pdl.cuh"  // PDL chain (task #50 sm120 step); no-op unarmed
+
 namespace {
 
 constexpr int D = 64;              // head_dim == K == V
@@ -200,6 +202,10 @@ __global__ __launch_bounds__(kThreads) void wkv_decode_kernel(
   }
 
   // ---- stage gate vectors (one element per thread), precomputed to f32 ----
+  // PDL: the state cp.async above touches only this kernel's own pool (safe
+  // pre-wait -> it overlaps the producer's tail); the gate vectors r/w/k/v/kk/a
+  // ARE the predecessors' outputs, so wait here. No-op unarmed / sm<90.
+  rwkv7_pdl_wait();
   const int64_t vecbase = static_cast<int64_t>(nh) * D;
   const float vv = __half2float(v[vecbase + t]);
   {
@@ -293,6 +299,10 @@ __global__ __launch_bounds__(kThreads) void wkv_decode_kernel(
     o_acc = (W[0] + W[2]) + (W[1] + W[3]);
   }
   o[vecbase + t] = __float2half_rn(o_acc);
+  // PDL: o (the only tensor the next stage consumes) is stored; let the
+  // dependent schedule now — its own wait still spans our state store below
+  // (wait releases only at full grid completion). No-op unarmed / sm<90.
+  rwkv7_pdl_launch_dependents();
 
   // ---- back-loaded bulk state store (skipped for pad slots) ----
   __syncthreads();
@@ -336,9 +346,11 @@ at::Tensor wkv_decode(at::Tensor r, at::Tensor w, at::Tensor k, at::Tensor v,
   const dim3 grid(static_cast<unsigned>(B * H));
   const int n_slots = static_cast<int>(pool.size(0));
   const float fscale = static_cast<float>(scale);
+  const bool pdl = rwkv7_pdl_enabled("wkv");
   if (pool.scalar_type() == at::kHalf) {
     const size_t smem = D * D * sizeof(__half) + 5 * D * sizeof(float);
-    wkv_decode_kernel<__half><<<grid, kThreads, smem, stream>>>(
+    rwkv7_launch_maybe_pdl(pdl, wkv_decode_kernel<__half>,
+        grid, dim3(kThreads), smem, stream.stream(),
         reinterpret_cast<const __half*>(r.data_ptr()),
         reinterpret_cast<const __half*>(w.data_ptr()),
         reinterpret_cast<const __half*>(k.data_ptr()),
@@ -346,11 +358,13 @@ at::Tensor wkv_decode(at::Tensor r, at::Tensor w, at::Tensor k, at::Tensor v,
         reinterpret_cast<const __half*>(kk.data_ptr()),
         reinterpret_cast<const __half*>(a.data_ptr()),
         reinterpret_cast<__half*>(o.data_ptr()),
-        reinterpret_cast<__half*>(pool.data_ptr()), ci.data_ptr<int>(),
+        reinterpret_cast<__half*>(pool.data_ptr()),
+        static_cast<const int*>(ci.data_ptr<int>()),
         h_shift, n_slots, fscale);
   } else {
     const size_t smem = D * D * sizeof(float) + 5 * D * sizeof(float);
-    wkv_decode_kernel<float><<<grid, kThreads, smem, stream>>>(
+    rwkv7_launch_maybe_pdl(pdl, wkv_decode_kernel<float>,
+        grid, dim3(kThreads), smem, stream.stream(),
         reinterpret_cast<const __half*>(r.data_ptr()),
         reinterpret_cast<const __half*>(w.data_ptr()),
         reinterpret_cast<const __half*>(k.data_ptr()),
@@ -358,7 +372,8 @@ at::Tensor wkv_decode(at::Tensor r, at::Tensor w, at::Tensor k, at::Tensor v,
         reinterpret_cast<const __half*>(kk.data_ptr()),
         reinterpret_cast<const __half*>(a.data_ptr()),
         reinterpret_cast<__half*>(o.data_ptr()),
-        pool.data_ptr<float>(), ci.data_ptr<int>(),
+        pool.data_ptr<float>(),
+        static_cast<const int*>(ci.data_ptr<int>()),
         h_shift, n_slots, fscale);
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
