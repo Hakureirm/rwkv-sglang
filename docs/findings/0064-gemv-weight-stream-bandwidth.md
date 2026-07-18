@@ -173,6 +173,25 @@ sqrelu via `test_sqrelu_gate.py`; (d) greedy `verify_m1d` 1.5B + 7.2B. All
 co-resident-safe (correctness is contamination-invariant) — pre-gated so the clean
 window is pure measurement.
 
+**Round-2 gate results — ALL GREEN (2026-07-19, tower, co-resident):** deployed
+via deploy.sh into the serving container (post-deploy md5 byte-identical);
+scope-check clean (exactly 2 hunks: the two M==1 kernel bodies, header and
+gemv_mb byte-identical). Both V1 and V2: `test_mega_rkv` transitive gate PASS
+zero differing bytes (incl. the Stage-A2 o/rkvo bonus gate); **DIRECT golden
+90/90 PASS** (5 shapes × up to 9 configs × 3 scales × 2 seeds, captured from an
+isolated build of the preserved `.pre-r2.bak` — the strong proof, not just
+transitive); `test_sqrelu_gate` 427/427; `verify_m1d` full-stack cuda-graph
+1.5B **24/24** + 7.2B **8/8** EXACT. SASS: gemv_m1<256,4> went 30× 32-bit
+`LDG.E.CONSTANT` (paired +0x0/+0x4) → **15× `LDG.E.64.CONSTANT`** (V1, matching
+grouped's own count) → 43 loads hoisted across chunk-pair strides before the
+FMA block (V2). Zero failures anywhere. Method notes for reproducers:
+`TORCH_LIBRARY(rwkv7_fast,...)` is hardcoded, so a golden-capture build cannot
+coexist in-process with the live extension — capture from an isolated scratch
+build; this torch install ignores `NVCC_APPEND_FLAGS`, so V2 was injected via a
+scoped `sitecustomize.py` shim on `cpp_extension.load` (inert by default,
+verified via build.ninja to touch only `rwkv7_fast`). Audit artifacts in
+`tmp/` on the tower (golden .pt, SASS dumps, capture/compare scripts).
+
 **lm_head candidate KILLED by arithmetic** (correcting the table's earlier
 "swap for our GEMV?" note): 7.2B lm_head = vocab 65536 × hidden 4096 × fp16 =
 536.9 MB/step; the physical floor at 1691.7 GB/s is ~317 us. cuBLAS gemvx
