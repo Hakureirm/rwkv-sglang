@@ -55,20 +55,80 @@ __global__ __launch_bounds__(Threads, 1) void gemv_m1_kernel(
   float acc[OutTile];
 #pragma unroll
   for (int j = 0; j < OutTile; ++j) acc[j] = 0.0f;
-  for (int k = threadIdx.x << 2; k < K; k += Threads << 2) {
-    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(x + k));
-    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(x + k + 2));
+  // F0064 round-2: the SAME bit-exact weight-stream BW rewrite as
+  // rwkv7_mega.cu::gemv_grouped_m1 (V1 = one 64-bit int2 load per 4-half chunk
+  // replacing two strided 32-bit __half2 loads; V2 = RWKV7_GEMV_KUNROLL2 K-unroll
+  // x2 load-hoist). Applied to both M==1 GEMV kernels here (gemv_m1_kernel +
+  // gemv_m1_sqrelu_kernel); gemv_m1_kernel alone is ~35% of the bsz1 7.2B
+  // BUSY/step (F0064 §4 ranking) — the other half of the GEMV budget beside
+  // gemv_grouped_m1. EXACT same Threads*4 partition + per-acc FMA order =>
+  // byte-identical to the pre-F0064 kernels (sqrelu's post-loop activation is
+  // unchanged). Gate (F0064 §6): transitive via test_mega_rkv (grouped_v1,
+  // pinned == old gemv_m1 in round-1, must still torch.equal the new gemv_m1) +
+  // a direct golden capture; sqrelu via test_sqrelu_gate.
+  const int kstride = Threads << 2;
+#if defined(RWKV7_GEMV_KUNROLL2)
+  int k = threadIdx.x << 2;
+  for (; k + kstride < K; k += kstride << 1) {
+    const int2 xp0 = *reinterpret_cast<const int2*>(x + k);
+    const int2 xp1 = *reinterpret_cast<const int2*>(x + k + kstride);
+    const float2 xa0 = __half22float2(*reinterpret_cast<const __half2*>(&xp0.x));
+    const float2 xb0 = __half22float2(*reinterpret_cast<const __half2*>(&xp0.y));
+    const float2 xa1 = __half22float2(*reinterpret_cast<const __half2*>(&xp1.x));
+    const float2 xb1 = __half22float2(*reinterpret_cast<const __half2*>(&xp1.y));
 #pragma unroll
     for (int j = 0; j < OutTile; ++j) {
       const dtype* wj = weight + static_cast<int64_t>(n0 + j) * K + k;
-      const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(wj));
-      const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(wj + 2));
+      const int2 wp0 = *reinterpret_cast<const int2*>(wj);
+      const int2 wp1 = *reinterpret_cast<const int2*>(wj + kstride);
+      const float2 wa0 = __half22float2(*reinterpret_cast<const __half2*>(&wp0.x));
+      const float2 wb0 = __half22float2(*reinterpret_cast<const __half2*>(&wp0.y));
+      const float2 wa1 = __half22float2(*reinterpret_cast<const __half2*>(&wp1.x));
+      const float2 wb1 = __half22float2(*reinterpret_cast<const __half2*>(&wp1.y));
+      acc[j] = fmaf(xa0.x, wa0.x, acc[j]);
+      acc[j] = fmaf(xa0.y, wa0.y, acc[j]);
+      acc[j] = fmaf(xb0.x, wb0.x, acc[j]);
+      acc[j] = fmaf(xb0.y, wb0.y, acc[j]);
+      acc[j] = fmaf(xa1.x, wa1.x, acc[j]);
+      acc[j] = fmaf(xa1.y, wa1.y, acc[j]);
+      acc[j] = fmaf(xb1.x, wb1.x, acc[j]);
+      acc[j] = fmaf(xb1.y, wb1.y, acc[j]);
+    }
+  }
+  for (; k < K; k += kstride) {  // tail: 0 or 1 remaining chunk (V1 body)
+    const int2 xp = *reinterpret_cast<const int2*>(x + k);
+    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(&xp.x));
+    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(&xp.y));
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      const dtype* wj = weight + static_cast<int64_t>(n0 + j) * K + k;
+      const int2 wp = *reinterpret_cast<const int2*>(wj);
+      const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(&wp.x));
+      const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(&wp.y));
       acc[j] = fmaf(x0.x, w0.x, acc[j]);
       acc[j] = fmaf(x0.y, w0.y, acc[j]);
       acc[j] = fmaf(x1.x, w1.x, acc[j]);
       acc[j] = fmaf(x1.y, w1.y, acc[j]);
     }
   }
+#else
+  for (int k = threadIdx.x << 2; k < K; k += kstride) {
+    const int2 xp = *reinterpret_cast<const int2*>(x + k);
+    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(&xp.x));
+    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(&xp.y));
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      const dtype* wj = weight + static_cast<int64_t>(n0 + j) * K + k;
+      const int2 wp = *reinterpret_cast<const int2*>(wj);
+      const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(&wp.x));
+      const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(&wp.y));
+      acc[j] = fmaf(x0.x, w0.x, acc[j]);
+      acc[j] = fmaf(x0.y, w0.y, acc[j]);
+      acc[j] = fmaf(x1.x, w1.x, acc[j]);
+      acc[j] = fmaf(x1.y, w1.y, acc[j]);
+    }
+  }
+#endif
   __shared__ float partial[Threads / 32][OutTile];
   const int lane = threadIdx.x & 31;
   const int warp = threadIdx.x >> 5;
@@ -197,20 +257,80 @@ __global__ __launch_bounds__(Threads, 1) void gemv_m1_sqrelu_kernel(
   float acc[OutTile];
 #pragma unroll
   for (int j = 0; j < OutTile; ++j) acc[j] = 0.0f;
-  for (int k = threadIdx.x << 2; k < K; k += Threads << 2) {
-    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(x + k));
-    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(x + k + 2));
+  // F0064 round-2: the SAME bit-exact weight-stream BW rewrite as
+  // rwkv7_mega.cu::gemv_grouped_m1 (V1 = one 64-bit int2 load per 4-half chunk
+  // replacing two strided 32-bit __half2 loads; V2 = RWKV7_GEMV_KUNROLL2 K-unroll
+  // x2 load-hoist). Applied to both M==1 GEMV kernels here (gemv_m1_kernel +
+  // gemv_m1_sqrelu_kernel); gemv_m1_kernel alone is ~35% of the bsz1 7.2B
+  // BUSY/step (F0064 §4 ranking) — the other half of the GEMV budget beside
+  // gemv_grouped_m1. EXACT same Threads*4 partition + per-acc FMA order =>
+  // byte-identical to the pre-F0064 kernels (sqrelu's post-loop activation is
+  // unchanged). Gate (F0064 §6): transitive via test_mega_rkv (grouped_v1,
+  // pinned == old gemv_m1 in round-1, must still torch.equal the new gemv_m1) +
+  // a direct golden capture; sqrelu via test_sqrelu_gate.
+  const int kstride = Threads << 2;
+#if defined(RWKV7_GEMV_KUNROLL2)
+  int k = threadIdx.x << 2;
+  for (; k + kstride < K; k += kstride << 1) {
+    const int2 xp0 = *reinterpret_cast<const int2*>(x + k);
+    const int2 xp1 = *reinterpret_cast<const int2*>(x + k + kstride);
+    const float2 xa0 = __half22float2(*reinterpret_cast<const __half2*>(&xp0.x));
+    const float2 xb0 = __half22float2(*reinterpret_cast<const __half2*>(&xp0.y));
+    const float2 xa1 = __half22float2(*reinterpret_cast<const __half2*>(&xp1.x));
+    const float2 xb1 = __half22float2(*reinterpret_cast<const __half2*>(&xp1.y));
 #pragma unroll
     for (int j = 0; j < OutTile; ++j) {
       const dtype* wj = weight + static_cast<int64_t>(n0 + j) * K + k;
-      const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(wj));
-      const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(wj + 2));
+      const int2 wp0 = *reinterpret_cast<const int2*>(wj);
+      const int2 wp1 = *reinterpret_cast<const int2*>(wj + kstride);
+      const float2 wa0 = __half22float2(*reinterpret_cast<const __half2*>(&wp0.x));
+      const float2 wb0 = __half22float2(*reinterpret_cast<const __half2*>(&wp0.y));
+      const float2 wa1 = __half22float2(*reinterpret_cast<const __half2*>(&wp1.x));
+      const float2 wb1 = __half22float2(*reinterpret_cast<const __half2*>(&wp1.y));
+      acc[j] = fmaf(xa0.x, wa0.x, acc[j]);
+      acc[j] = fmaf(xa0.y, wa0.y, acc[j]);
+      acc[j] = fmaf(xb0.x, wb0.x, acc[j]);
+      acc[j] = fmaf(xb0.y, wb0.y, acc[j]);
+      acc[j] = fmaf(xa1.x, wa1.x, acc[j]);
+      acc[j] = fmaf(xa1.y, wa1.y, acc[j]);
+      acc[j] = fmaf(xb1.x, wb1.x, acc[j]);
+      acc[j] = fmaf(xb1.y, wb1.y, acc[j]);
+    }
+  }
+  for (; k < K; k += kstride) {  // tail: 0 or 1 remaining chunk (V1 body)
+    const int2 xp = *reinterpret_cast<const int2*>(x + k);
+    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(&xp.x));
+    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(&xp.y));
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      const dtype* wj = weight + static_cast<int64_t>(n0 + j) * K + k;
+      const int2 wp = *reinterpret_cast<const int2*>(wj);
+      const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(&wp.x));
+      const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(&wp.y));
       acc[j] = fmaf(x0.x, w0.x, acc[j]);
       acc[j] = fmaf(x0.y, w0.y, acc[j]);
       acc[j] = fmaf(x1.x, w1.x, acc[j]);
       acc[j] = fmaf(x1.y, w1.y, acc[j]);
     }
   }
+#else
+  for (int k = threadIdx.x << 2; k < K; k += kstride) {
+    const int2 xp = *reinterpret_cast<const int2*>(x + k);
+    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(&xp.x));
+    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(&xp.y));
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      const dtype* wj = weight + static_cast<int64_t>(n0 + j) * K + k;
+      const int2 wp = *reinterpret_cast<const int2*>(wj);
+      const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(&wp.x));
+      const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(&wp.y));
+      acc[j] = fmaf(x0.x, w0.x, acc[j]);
+      acc[j] = fmaf(x0.y, w0.y, acc[j]);
+      acc[j] = fmaf(x1.x, w1.x, acc[j]);
+      acc[j] = fmaf(x1.y, w1.y, acc[j]);
+    }
+  }
+#endif
   __shared__ float partial[Threads / 32][OutTile];
   const int lane = threadIdx.x & 31;
   const int warp = threadIdx.x >> 5;

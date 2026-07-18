@@ -130,6 +130,49 @@ actually deployed in the target container before trusting any number — a
 recreated container silently reverts to no-megakernel. (deploy.sh is idempotent
 so the fix is cheap; the trap is assuming it persisted.)
 
+## 6. Clean per-kernel ranking → round-2 is essential (not optional)
+
+The F0063 clean D-config framing-2 trace (`bench/results/mega_framing2_D_7.2b_5090.txt`,
+BUSY/step 7409.7 us) ranks the levers precisely:
+
+| kernel | count/step | us/step | % BUSY | lever |
+|---|---|---|---|---|
+| gemv_grouped_m1<256,2> (r/k/v/o) | 64.5 | 2660.2 | 35.9% | **F0064 round-1** (done, gated) |
+| gemv_m1<256,2> (ffn.key + resid proj) | 32.3 | 2600.1 | 35.1% | **F0064 round-2** (this section) |
+| sparse_cmix_f32acc | 32.3 | 430.8 | 5.8% | next |
+| add_ln<16> | 64.5 | 425.9 | 5.7% | next |
+| cuBLAS gemvx (**lm_head**, 1 call) | 1.0 | 324.3 | 4.4% | next (stock — swap for our GEMV?) |
+| lora_stage2<8> / stage1<128> | 32.3 | 256.2 / 207.3 | 6.3% | next |
+| gn_gatecorr / wkv_decode | 32.3 | 95.0 / 84.4 | 2.4% | small |
+| float16_copy + FillFunctor (sparse zeros+cast pair) | 32.3 | 29.9 + 27.2 | 0.8% | F0060 Stage-B fusion target |
+
+**The two M==1 GEMV kernels are ~71% of BUSY/step and nearly equal (2660 + 2600).**
+F0064 round-1 touched only `gemv_grouped_m1` (2660). To actually reach Bo's 92.4%,
+the identical rewrite MUST also land on `gemv_m1` (2600) — round-2 is half the GEMV
+budget, not a nice-to-have.
+
+**Revised projection (still to be measured, both need the clean window):**
+- round-1 alone (grouped, −12% BW): 2660→~2340, saves ~320 us/step → BUSY ~7090
+  → ~142.6 tok/s ≈ **91.9% of Bo**.
+- round-1 + round-2 (both GEMVs): saves ~630 us/step → BUSY ~6780 → ~149 tok/s
+  ≈ **96% of Bo** (crossing 92.4%).
+
+**Round-2 implemented** (this branch): the same V1 + V2 rewrite applied to
+`gemv_m1_kernel` AND `gemv_m1_sqrelu_kernel` in rwkv7_fast.cu (both M==1, loop
+byte-identical to grouped; sqrelu's post-loop activation untouched). `gemv_mb_kernel`
+(the multi-batch / concurrency path, line ~289) has a different M-loop body and is
+deferred to its own careful round (round-2c, the high-concurrency axis).
+
+**Round-2 gate strategy** (gemv_m1 is grouped's reference, so changing it needs an
+independent golden): (a) TRANSITIVE — round-1 pinned `grouped_v1 == gemv_m1_old`
+(zero differing bytes, §4); round-2 leaves grouped_v1 untouched, so if
+`test_mega_rkv` still passes (`grouped_v1 == gemv_m1_v1`) then
+`gemv_m1_v1 == grouped_v1 == gemv_m1_old` transitively; (b) DIRECT — capture
+`gemv_m1_old(x,w)` golden tensors before the change, `torch.equal` after; (c)
+sqrelu via `test_sqrelu_gate.py`; (d) greedy `verify_m1d` 1.5B + 7.2B. All
+co-resident-safe (correctness is contamination-invariant) — pre-gated so the clean
+window is pure measurement.
+
 ## 5. Artifacts
 
 - Kernel: `sglang_overlay/.../rwkv7_kernels/cuda/rwkv7_mega.cu` (gemv_grouped_m1
