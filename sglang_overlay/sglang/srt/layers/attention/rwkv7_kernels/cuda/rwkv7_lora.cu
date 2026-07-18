@@ -73,12 +73,46 @@ __global__ __launch_bounds__(Threads, 1) void lora_stage1_kernel(
   const dtype* x = xs + static_cast<int64_t>(chain) * H;
   const dtype* w = d_cat + static_cast<int64_t>(r) * H;
   rwkv7_pdl_wait();  // xs from shift_lerp6 predecessor (no-op unarmed)
+  // F0065: LATENCY-bound at decode (grid = Rtot ~ few hundred blocks, 8 serial
+  // load rounds/thread; measured 6.4us vs ~1.8us byte floor = ~28% of
+  // achievable — the opposite regime from F0064's BW-wall GEMVs). So the
+  // F0064 V1+V2 load treatment IS the medicine here: one 64-bit int2 load per
+  // 4-half chunk + K-unroll x2 with hoisted loads (2x bytes in flight). The
+  // per-acc FMA sequence is unchanged (chunk k fully, then chunk k+kstride
+  // fully — exactly what the serial loop produced) => byte-identical output;
+  // the existing byte gates apply as-is.
   float acc = 0.0f;
-  for (int k = threadIdx.x << 2; k < H; k += Threads << 2) {
-    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(x + k));
-    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(x + k + 2));
-    const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(w + k));
-    const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(w + k + 2));
+  const int kstride = Threads << 2;
+  int k = threadIdx.x << 2;
+  for (; k + kstride < H; k += kstride << 1) {
+    const int2 xp0 = *reinterpret_cast<const int2*>(x + k);
+    const int2 wp0 = *reinterpret_cast<const int2*>(w + k);
+    const int2 xp1 = *reinterpret_cast<const int2*>(x + k + kstride);
+    const int2 wp1 = *reinterpret_cast<const int2*>(w + k + kstride);
+    const float2 xa0 = __half22float2(*reinterpret_cast<const __half2*>(&xp0.x));
+    const float2 xb0 = __half22float2(*reinterpret_cast<const __half2*>(&xp0.y));
+    const float2 wa0 = __half22float2(*reinterpret_cast<const __half2*>(&wp0.x));
+    const float2 wb0 = __half22float2(*reinterpret_cast<const __half2*>(&wp0.y));
+    const float2 xa1 = __half22float2(*reinterpret_cast<const __half2*>(&xp1.x));
+    const float2 xb1 = __half22float2(*reinterpret_cast<const __half2*>(&xp1.y));
+    const float2 wa1 = __half22float2(*reinterpret_cast<const __half2*>(&wp1.x));
+    const float2 wb1 = __half22float2(*reinterpret_cast<const __half2*>(&wp1.y));
+    acc = fmaf(xa0.x, wa0.x, acc);
+    acc = fmaf(xa0.y, wa0.y, acc);
+    acc = fmaf(xb0.x, wb0.x, acc);
+    acc = fmaf(xb0.y, wb0.y, acc);
+    acc = fmaf(xa1.x, wa1.x, acc);
+    acc = fmaf(xa1.y, wa1.y, acc);
+    acc = fmaf(xb1.x, wb1.x, acc);
+    acc = fmaf(xb1.y, wb1.y, acc);
+  }
+  for (; k < H; k += kstride) {  // tail: 0 or 1 remaining chunk
+    const int2 xp = *reinterpret_cast<const int2*>(x + k);
+    const int2 wp = *reinterpret_cast<const int2*>(w + k);
+    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(&xp.x));
+    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(&xp.y));
+    const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(&wp.x));
+    const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(&wp.y));
     acc = fmaf(x0.x, w0.x, acc);
     acc = fmaf(x0.y, w0.y, acc);
     acc = fmaf(x1.x, w1.x, acc);
