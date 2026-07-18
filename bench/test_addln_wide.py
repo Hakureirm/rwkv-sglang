@@ -25,7 +25,8 @@ SEEDS = [0, 1, 2]
 
 
 def run_mode(mode: str) -> None:
-    from sglang.srt.layers.attention.rwkv7_kernels import ln_fused  # noqa: F401
+    from sglang.srt.layers.attention.rwkv7_kernels import ln_fused
+    assert ln_fused.available(), "rwkv7_ln JIT build failed"
     outs = {}
     for T, N in SHAPES:
         for seed in SEEDS:

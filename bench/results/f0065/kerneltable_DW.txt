@@ -1,0 +1,34 @@
+window 307.43 ms, steps=43 (by cudaGraphLaunch), kernels/step=533.6
+SPAN/step 7149.6 us -> 139.87 tok/s (kernel-loop framing)
+BUSY/step 7230.1 us   gap/step -80.5 us (pos 24.3, overlap-gained 104.8)
+inter-kernel gap us: p10 -0.320  p50 -0.192  p90 +0.096  p99 +0.256   overlapped transitions: 79.1%
+
+per-kernel (per step over 43): count  us  name
+    64.53    2657.17  void (anonymous namespace)::gemv_grouped_m1_kernel<256, 2>(int, int, c10::Half const*, c10::Half const*, 
+    32.26    2597.22  void gemv_m1_kernel<256, 2>(int, int, c10::Half const*, c10::Half const*, c10::Half*)
+    32.26     431.59  sparse_cmix_f32acc_kernel(int, __half const*, __half const*, float*)
+     1.02     324.23  std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, __half, __half, __half, float, fal
+    32.26     257.75  void lora_stage2_kernel<8>(int, int, int, c10::Half const*, c10::Half const*, int const*, float const*, c
+    64.53     254.85  void (anonymous namespace)::add_ln_kernel<2>(int, float, c10::Half const*, c10::Half const*, c10::Half co
+    32.26     205.37  void lora_stage1_kernel<128>(int, int, c10::Half const*, c10::Half const*, int const*, float*)
+    32.28      94.21  (anonymous namespace)::gn_gatecorr_kernel(int, float, int, c10::Half const*, c10::Half const*, c10::Half 
+    32.26      83.86  void (anonymous namespace)::wkv_decode_kernel<__half>(__half const*, __half const*, __half const*, __half
+    32.26      56.95  void shift_lerp6_kernel<256>(int, int, int, c10::Half const*, c10::Half const*, int const*, float*, c10::
+    32.26      56.06  _lora_gates_kernel
+    32.26      54.80  _kk_kmix_kernel
+    32.28      47.50  void shift_lerp1_kernel<256>(int, int, int, c10::Half const*, c10::Half const*, int const*, float*, c10::
+    32.26      29.82  void at::native::vectorized_elementwise_kernel<4, at::native::float16_copy_kernel_cuda(at::TensorIterator
+    32.26      27.45  void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> 
+     2.05      14.08  void at::native::(anonymous namespace)::vectorized_layer_norm_kernel<c10::Half, float, false>(int, float,
+     1.02      10.99  void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::ArgMaxOps<float>, unsigned
+     1.02       4.11  void at::native::index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<at::native::index_put_kern
+     2.05       3.69  void at::native::vectorized_elementwise_kernel<2, at::native::CUDAFunctorOnSelf_add<long>, std::array<cha
+     2.05       3.20  void at::native::index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<at::native::index_put_kern
+     1.02       2.87  void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)
+     1.02       2.75  void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctorOnSelf_add<int>, std::array<char
+     1.02       2.08  void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)
+     1.02       1.92  void at::native::(anonymous namespace)::indexSelectSmallIndex<c10::Half, long, unsigned int, 2, 2, -2>(at
+     1.02       1.78  void at::native::index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<at::native::index_kernel_i
+     1.02       1.59  void at::native::index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<at::native::index_kernel_i
+     1.02       1.18  void at::native::(anonymous namespace)::multi_tensor_apply_kernel<at::native::(anonymous namespace)::Tens
+     1.02       1.05  void (anonymous namespace)::clamp_position_kernel<long>(long*, long const*, unsigned long)

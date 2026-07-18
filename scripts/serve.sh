@@ -78,6 +78,13 @@ export RWKV_FUSED_SQRELU=1         # epilogue-fused ffn relu(k)^2 into the key G
 # verified on sm_120 (5090) so far - same narrower-arch disclosure as
 # GATES/SQRELU above.
 export RWKV_FUSED_ADDLN=1          # fused residual-add + LayerNorm (all norm boundaries)
+# F0065 small-T wide config for add_ln (512thr/row vs the pathological single
+# 128-thr block at decode T=1). Tier note: a pure fp32-Welford REORDERING (tree
+# shape), one tier above a numerics change — x_new stays byte-identical, LN y
+# gated no-farther-from-fp32-truth than the parity config (bench/
+# test_addln_wide.py) + greedy 24/24+8/8 EXACT under the full stack. Measured
+# 7.2B bsz1: add_ln 426.6->254.9 us/step, e2e +2.4% (141.3 tok/s).
+export RWKV_ADDLN_WIDE=1
 export RWKV_FUSED_GNGC=1           # fused GroupNorm + gate-corr epilogue (attn output)
 export RWKV_FUSED_RELUSQ=1         # fused relu(k)^2 on the M>1 dense ffn path
 export RWKV_FUSED_VRESGATE=1       # fused batched LoRA-gate activations (w/a/v)
