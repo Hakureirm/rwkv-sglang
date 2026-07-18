@@ -1,0 +1,48 @@
+{
+  "task": "F0064 wide-load GEMV rewrite - kernel-level microbench, all three legs (COMPLETE; supersedes the blocked-run version of this file)",
+  "arch": "sm86 (RTX 3090), cap=(8,6)",
+  "legs": {
+    "leg0": "pre-F0064 baseline (two strided 32-bit __half2 loads per 4-half chunk)",
+    "v1": "F0064 default (one 64-bit int2 load per 4-half chunk)",
+    "v2": "F0064 + -DRWKV7_GEMV_KUNROLL2 (K-unroll x2 load-hoist), flag verified in both build.ninja"
+  },
+  "prediction_preregistered": "F0060 fast-card thesis: 3090's 936 GB/s bus already saturated by narrow-load kernels -> 3090 gain small (+0~3%); 5090 projection ~+9%. Written down before any V1/V2 numbers existed.",
+  "correctness": "ALL gates PASS with zero differing bytes on BOTH legs: test_mega_rkv + test_mega_a2 (rkv G=3 / o G=1 / rkvo G=4) + test_mega_o_model (real weights) + sqrelu oracle (gemv_m1_sqrelu==relu(gemv_m1)^2) + the independent fixed-seed golden captured pre-swap (gemv_m1 + gemv_m1_sqrelu outputs byte-identical across leg0/V1/V2) + greedy smokes 1.5B 24/24, 7.2B 8/8 EXACT on both legs. Second-arch (sm86) bit-exact re-gate: DONE, PASS.",
+  "round1_grouped_gemv_graphed_us_per_call": {
+    "note": "grp = gemv_grouped_m1 one launch; sep = 3x gemv_m1 launches (gemv_m1 is ALSO rewritten by F0064 r2, so sep moves too). Two independent runs per leg (test_mega_rkv + test_mega_a2) shown as run1/run2.",
+    "columns": ["shape", "cfg", "leg0_run1/run2", "v1_run1/run2", "v2_run1/run2", "delta_v1_vs_leg0", "delta_v2_vs_leg0"],
+    "grp_graph": [
+      ["1.5B r/k/v", "(128,4)", "30.27/30.00", "30.14/30.31", "30.15/30.12", "+0.3%", "+0.0%"],
+      ["7.2B r/k/v", "(256,4)", "114.90/114.88", "114.86/114.87", "114.84/114.84", "-0.03%", "-0.04%"]
+    ],
+    "sep_graph": [
+      ["1.5B 3x gemv_m1", "(128,4)", "33.20/32.88", "33.59/33.59", "33.43/33.48", "+1.7%", "+1.2%"],
+      ["7.2B 3x gemv_m1", "(256,4)", "121.07/121.18", "118.33/118.48", "118.13/118.02", "-2.3%", "-2.5%"]
+    ]
+  },
+  "round2_standalone_graphed_us_per_call": {
+    "columns": ["shape", "N", "K", "cfg", "kernel", "leg0", "v1", "v2", "delta_v1", "delta_v2"],
+    "rows": [
+      ["1.5B rkvo",  2048, 2048,  "(128,4)", "gemv_m1",        11.13, 11.25, 11.20, "+1.1%", "+0.6%"],
+      ["1.5B rkvo",  2048, 2048,  "(128,4)", "gemv_m1_sqrelu", 11.15, 11.28, 11.20, "+1.2%", "+0.4%"],
+      ["7.2B rkvo",  4096, 4096,  "(256,4)", "gemv_m1",        40.62, 39.66, 39.57, "-2.4%", "-2.6%"],
+      ["7.2B rkvo",  4096, 4096,  "(256,4)", "gemv_m1_sqrelu", 40.59, 39.60, 39.61, "-2.4%", "-2.4%"],
+      ["1.5B ffn-k", 8192, 2048,  "(128,4)", "gemv_m1",        40.17, 39.40, 39.40, "-1.9%", "-1.9%"],
+      ["1.5B ffn-k", 8192, 2048,  "(128,4)", "gemv_m1_sqrelu", 40.18, 39.40, 39.35, "-1.9%", "-2.1%"],
+      ["7.2B ffn-k", 16384, 4096, "(256,4)", "gemv_m1",       152.33, 152.45, 152.37, "+0.1%", "+0.0%"],
+      ["7.2B ffn-k", 16384, 4096, "(256,4)", "gemv_m1_sqrelu",152.40, 152.48, 152.40, "+0.1%", "+0.0%"],
+      ["odd-N",      6, 2048,     "(128,2)", "gemv_m1",        1.60, 1.52, 1.63, "-5.0%", "+1.9%"],
+      ["small-K",    2048, 8,     "(128,4)", "gemv_m1",        1.89, 1.86, 1.91, "-1.6%", "+1.1%"]
+    ],
+    "units": "microseconds per call, cuda-graph replay (production-relevant); odd-N/small-K are sub-2us edge shapes where the deltas are launch-noise, not signal"
+  },
+  "e2e_bsz1_tok_per_s": {
+    "columns": ["model", "leg0", "v1", "v2", "delta_v1", "delta_v2"],
+    "rows": [
+      ["1.5B", 261.3, 261.9, 261.7, "+0.2%", "+0.15%"],
+      ["7.2B", 72.3, 72.3, 72.9, "+0.0%", "+0.8%"]
+    ],
+    "protocol": "bench/bsz_throughput.py c=1, 64-in/256-out, n=8, identical config per model across all legs"
+  },
+  "verdict": "PREDICTION CONFIRMED - thesis HOLDS. Every reproducible delta sits inside the pre-registered +0~3% band: the largest kernel-level win is -2.4~-2.6% us/call (~+2.5% speed) on the square 4096x4096 GEMV shapes, e2e moves are +0.0~+0.8%, and the single biggest-bytes kernel (7.2B ffn-k 16384x4096) is DEAD FLAT - it is already at the narrow-load kernels' achievable bandwidth on this bus, exactly as F0060 predicts. Mechanistic detail consistent with the thesis: the rewrite only helps where latency-hiding is imperfect (square shapes, fewer rows in flight per wave); the fat shape that saturates the bus gains nothing. V2-vs-V1 on sm86 is noise everywhere (within run-to-run band; e2e 7.2B +0.8% vs V1's +0.0% is at the band edge, not a clear KUNROLL2 win) - so extra loads-in-flight buys nothing measurable on this arch either, again consistent with bus-limited (not latency-limited) behavior at these shapes. The 5090's projected ~+9% remains plausible and untested by this run; nothing here contradicts it."
+}

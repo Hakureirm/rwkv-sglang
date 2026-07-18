@@ -1,0 +1,22 @@
+{
+  "task": "F0064 wide-load GEMV rewrite - same-session before/after A/B",
+  "leg": "leg2_v2_kunroll2",
+  "arch": "sm86 (RTX 3090)",
+  "model": "rwkv7-1.5b-fla",
+  "build": "same F0064 sources as V1, rebuilt with -DRWKV7_GEMV_KUNROLL2 for BOTH extensions (rwkv7_fast + rwkv7_mega). Flag injected via a strictly-scoped sitecustomize shim on torch cpp_extension.load (inert unless its env flag is set; the loaders hardcode extra_cuda_cflags so a plain NVCC env var would not be recorded); presence verified in both extensions' build.ninja cuda_cflags before any measurement, and re-verified after the e2e legs (no silent rebuild).",
+  "config": "identical to leg0/leg1",
+  "gates": {
+    "test_mega_rkv": "PASS zero differing bytes",
+    "test_mega_a2": "PASS (rkv + o G=1 + rkvo G=4) zero differing bytes",
+    "test_mega_o_model": "PASS real weights 1.5B+7.2B",
+    "sqrelu_oracle": "PASS zero differing bytes",
+    "direct_golden_vs_pre_f0064_capture": "PASS zero differing bytes",
+    "greedy_smoke": "24/24 EXACT"
+  },
+  "bsz1_sweep": {
+    "protocol": "bench/bsz_throughput.py, in-len=64 out-len=256, c=1, n=8",
+    "out_tok_per_s": 261.7,
+    "lat_p50_s": 0.98,
+    "vs_leg0": "+0.15% (261.3 -> 261.7)"
+  }
+}
