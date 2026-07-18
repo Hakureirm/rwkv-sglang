@@ -1,0 +1,18 @@
+{
+  "task": "F0064 wide-load GEMV rewrite - same-session before/after A/B",
+  "leg": "leg2_v2_kunroll2",
+  "arch": "sm86 (RTX 3090)",
+  "model": "rwkv7-7.2b-fla",
+  "build": "same V2 build as the 1.5B leg2 file (KUNROLL2 verified in both build.ninja files)",
+  "config": "identical to leg0/leg1 7.2B (mem-fraction 0.80 / cg-max-bs 1 / max-running 128 workaround)",
+  "gates": {
+    "greedy_smoke": "8/8 EXACT",
+    "kernel_gates": "shared with 1.5B leg2 file"
+  },
+  "bsz1_sweep": {
+    "protocol": "bench/bsz_throughput.py, in-len=64 out-len=256, c=1, n=8",
+    "out_tok_per_s": 72.9,
+    "lat_p50_s": 3.51,
+    "vs_leg0": "+0.8% (72.3 -> 72.9)"
+  }
+}

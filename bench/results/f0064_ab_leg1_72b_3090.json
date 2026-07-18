@@ -1,0 +1,18 @@
+{
+  "task": "F0064 wide-load GEMV rewrite - same-session before/after A/B",
+  "leg": "leg1_v1_default_int2_wide_load",
+  "arch": "sm86 (RTX 3090)",
+  "model": "rwkv7-7.2b-fla",
+  "build": "same V1 build as the 1.5B leg1 file",
+  "config": "identical to leg0 7.2B (mem-fraction-static=0.80, cuda-graph-max-bs=1, max-running-requests=128 memory-fit workaround; full fast-path env set + RWKV_MEGA=1, fp16)",
+  "gates": {
+    "greedy_smoke": "8/8 EXACT",
+    "kernel_gates": "shared with 1.5B leg1 file (shape-parameterized, cover 7.2B N=4096 and N=16384 shapes)"
+  },
+  "bsz1_sweep": {
+    "protocol": "bench/bsz_throughput.py, in-len=64 out-len=256, c=1, n=8",
+    "out_tok_per_s": 72.3,
+    "lat_p50_s": 3.52,
+    "vs_leg0": "+0.0% (72.3 -> 72.3)"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "task": "F0064 wide-load GEMV rewrite - same-session before/after A/B on 3090 (sm86)",
+  "status": "RESOLVED - run COMPLETED same session. The blocker below stalled the first attempt at Leg1; the coordinator then staged the missing header (rwkv7_pdl.cuh, md5 87562091b97094c34bc083cc73303166 - a staging omission, not a design gap) and Legs 1+2 completed with all gates PASS. Full results: f0064_ab_kernel_microbench_3090.json (3-leg tables + verdict) and the per-leg f0064_ab_leg{0,1,2}_{15b,72b}_3090.json files.",
+  "original_blocker_record": {
+    "what": "Both staged F0064 .cu files #include \"rwkv7_pdl.cuh\" (shared PDL wait/launch_dependents/enabled/launch-attribute header) which was not in the 2-file staging set and did not exist anywhere on the box. Unconditional #include -> hard nvcc failure on both files regardless of sm target.",
+    "exact_compiler_errors": [
+      "rwkv7_mega.cu:56:10: fatal error: rwkv7_pdl.cuh: No such file or directory",
+      "rwkv7_fast.cu:29:10: fatal error: rwkv7_pdl.cuh: No such file or directory"
+    ],
+    "executor_action": "did NOT author a substitute header (inter-kernel synchronization design, no ground truth on this box to verify against the 5090's SASS-verified version); restored the box to the verified pre-F0064 baseline and reported. Coordinator confirmed the refusal was correct."
+  },
+  "pre_existing_environment_findings_unrelated_to_f0064": {
+    "deploy_sh_missing": "scripts/deploy.sh documented (overlay README, snapshot, human README: `BOX=<host> SP=<sp> bash scripts/deploy.sh`) but absent on the box; invocation shape implies it runs from the git-repo-side machine. Substituted docker cp of pinned-md5 files directly into the container's editable-install cuda/ dir (md5-verified in-container each time) - complete substitute since the loaders JIT-compile straight from that path.",
+    "host_repo_overlay_stale": "Host repo overlay cuda/ has 6 .cu files; the container's live editable sglang install has 10 (missing on host: rwkv7_mega.cu, rwkv7_ln.cu, rwkv7_w8a8.cu, rwkv7_wkv.cu + newer versions of shared ones + their .py wrappers). Host repo dir is not a git repository. Kernel work is happening against the container's editable install without being mirrored back - recreate-the-container risk (the 5090-session precedent).",
+    "missing_named_test_files": "test_mega_rkv.py / test_mega_a2.py / test_mega_o_model.py / mega_model_gate.py / mega_insitu_launches.py live only in the container's /tmp, not the host bench/. bench/test_sqrelu_gate.py (referenced by fast_linear.py's own docstring) exists nowhere; a substitute implementing its documented contract (sqrelu==relu(gemv_m1)^2, torch.equal) + a fixed-seed golden capture/verify was built for this run (bench_gemv_r2_golden.py, in container /tmp).",
+    "72b_serve_sh_defaults_oom_the_kv_pool": "serve.sh throughput defaults (memfrac 0.85, cg-max-bs 512, max-running 512) fail 7.2B fp16 boot on 24GB ('Loaded weights leave no GPU memory for the KV cache'); also fails at memfrac 0.80 alone. Root-caused via prior in-container logs to the max-running-requests x cuda-graph-bucket combination. Working config used for ALL legs uniformly: memfrac 0.80, cg-max-bs 1, max-running-requests 128. 1.5B needed no overrides."
+  },
+  "box_final_state": {
+    "kernels": "F0064 V1 left as the live default (coordinator direction: tested-forward state): rwkv7_mega.cu 46c3068547504d6b6ab4a797d2bf7229, rwkv7_fast.cu 88ba82883dd4cb499ed6ef5433e50f3e, rwkv7_pdl.cuh 87562091b97094c34bc083cc73303166 in the container cuda/ dir",
+    "backups_kept": ["rwkv7_mega.cu.pre-f0064.bak", "rwkv7_fast.cu.pre-r2.bak (same dir)"],
+    "jit_cache": "cleared after V2, rebuilt once as default V1 (no KUNROLL2 - verified 0 matches in both build.ninja) with the bit-exact gate re-run PASS - box ends on a fresh verified default V1 build",
+    "v2_build_shim": "left at container /tmp/kunroll_shim/sitecustomize.py - inert by default (env-gated), documents the V2 build path (PYTHONPATH=/tmp/kunroll_shim RWKV7_KUNROLL2_SHIM=1); chains the distro apport hook it shadows",
+    "servers": "none left running; GPU verified 1 MiB / 0% after every leg",
+    "golden": "pre-F0064 fixed-seed golden kept at container /tmp/r2_golden_pre_f0064.pt"
+  }
+}

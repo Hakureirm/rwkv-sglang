@@ -1,0 +1,29 @@
+{
+  "task": "F0064 wide-load GEMV rewrite - same-session before/after A/B",
+  "leg": "leg0_baseline_pre_f0064",
+  "arch": "sm86 (RTX 3090)",
+  "model": "rwkv7-7.2b-fla",
+  "config": {
+    "dtype": "float16",
+    "mode": "throughput",
+    "mem_fraction_static": 0.80,
+    "cuda_graph_max_bs": 1,
+    "max_running_requests": 128,
+    "env_flags": ["RWKV_FAST_LINEAR=1", "RWKV_SPARSE_FFN=1", "RWKV_FUSED_LORA=1",
+                  "RWKV_FUSED_GLUE=1", "RWKV_GEMV_AUTOTUNE=1", "RWKV_FUSED_GATES=1",
+                  "RWKV_FUSED_SQRELU=1", "RWKV_FUSED_ADDLN=1", "RWKV_FUSED_GNGC=1",
+                  "RWKV_FUSED_RELUSQ=1", "RWKV_FUSED_VRESGATE=1", "RWKV_MEGA=1"],
+    "deviation_from_15b_config": "mem-fraction/cg-max-bs/max-running lowered from serve.sh defaults purely to fit 7.2B fp16 KV-pool sizing on this 24GB card at this sglang build (pre-existing environment issue, not F0064-related); cuda_graph_max_bs=1 still exercises the cuda-graph decode path for bsz1, which is all this task measures. Applied identically across all three legs."
+  },
+  "greedy_smoke": {"match": "8/8", "exact": true, "first_divergence": null},
+  "bsz1_sweep": {
+    "protocol": "bench/bsz_throughput.py, in-len=64 out-len=256, c=1",
+    "concurrency": 1,
+    "requests": 8,
+    "out_tok_per_s": 72.3,
+    "per_stream_tok_s": 72.3,
+    "lat_p50_s": 3.52,
+    "lat_p99_s": 3.679
+  },
+  "note": "Baseline leg of the completed 3-leg A/B. See f0064_ab_kernel_microbench_3090.json for the full comparison."
+}

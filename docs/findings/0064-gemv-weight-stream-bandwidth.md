@@ -231,6 +231,49 @@ provenance: F0063's clean A/D are reused as the baseline (same sglang base
 in-window — if A′ deviates >2% from BOTH 136.9 and the r2-predicted uplift
 band, suspect environment drift and say so rather than publishing.
 
+## 9. 3090 (sm86) same-session A/B — mechanism test: PREDICTION CONFIRMED
+
+Run design: clean 3090 (our box, 0% util), Leg0 (pre-F0064 baseline) → V1 →
+V2, identical configs per model across legs, with the prediction PRE-REGISTERED
+before any Leg1/2 numbers existed: *the 3090's 936 GB/s bus is already
+saturated by the narrow-load kernels, so the 3090 gain should be small (+0~3%);
+a large gain would falsify the F0060 fast-card thesis.*
+
+**Second-arch bit-exact re-gate: ALL GREEN** (V1+V2: test_mega_rkv +
+test_mega_a2 + test_mega_o_model zero differing bytes, sqrelu oracle, DIRECT
+golden vs pre-F0064 capture byte-identical, greedy 1.5B 24/24 + 7.2B 8/8).
+PDL intrinsics compile out on sm86 by guard, as designed.
+
+**Result — every reproducible delta inside the predicted band:**
+
+| axis | Leg0 → V1 → V2 |
+|---|---|
+| gemv_m1 4096² (graphed us/call) | 40.62 → 39.66 → 39.57 (**−2.4~2.6%**) |
+| sep 3× gemv_m1 7.2B | 121.1 → 118.4 → 118.1 (**−2.3~2.5%**) |
+| gemv_m1 ffn-k 16384×4096 (biggest bytes) | 152.3 → 152.4 → 152.4 (**dead flat**) |
+| grouped rkv 7.2B | 114.9 → 114.9 → 114.8 (flat) |
+| e2e bsz1 1.5B | 261.3 → 261.9 → 261.7 (+0.2%) |
+| e2e bsz1 7.2B | 72.3 → 72.3 → 72.9 (+0.0~0.8%) |
+
+**Verdict: the fast-card thesis HOLDS.** Gains appear only where latency-hiding
+is imperfect (square shapes, ~−2.5%); the bus-saturating fat shape gains
+nothing — the 3090 was already at its achievable BW with narrow loads. V2-vs-V1
+is noise everywhere on sm86 (bus-limited, not latency-limited — extra loads in
+flight buy nothing). Nothing here contradicts the 5090 ~+9% projection; the
+5090 sits at 81% of peak (the latency-limited regime the square shapes sample),
+which is precisely where the rewrite pays. The 5090 number remains the open
+question and is NOT claimed until measured clean.
+
+Environment note (second data point for the §4 drift trap): the 3090 host
+repo's overlay is stale and deploy.sh does not live on boxes (it is Mac-side
+orchestration); the container's editable sglang install is the live tree.
+Verify the live tree's identity before gating on ANY box.
+
+Raw: `bench/results/f0064_ab_{leg0,leg1,leg2}_{15b,72b}_3090.json`,
+`f0064_ab_kernel_microbench_3090.json` (full 3-leg tables + verdict),
+`f0064_ab_blocker_3090.json` (the pdl.cuh staging omission, RESOLVED, kept for
+the record). All leak-scanned clean.
+
 ## 8. Artifacts
 
 - Kernel: `sglang_overlay/.../rwkv7_kernels/cuda/rwkv7_mega.cu` (gemv_grouped_m1

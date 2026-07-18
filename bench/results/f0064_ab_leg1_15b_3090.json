@@ -1,0 +1,22 @@
+{
+  "task": "F0064 wide-load GEMV rewrite - same-session before/after A/B",
+  "leg": "leg1_v1_default_int2_wide_load",
+  "arch": "sm86 (RTX 3090)",
+  "model": "rwkv7-1.5b-fla",
+  "build": "rwkv7_mega.cu md5 46c3068547504d6b6ab4a797d2bf7229 + rwkv7_fast.cu md5 88ba82883dd4cb499ed6ef5433e50f3e + rwkv7_pdl.cuh md5 87562091b97094c34bc083cc73303166; default flags (no KUNROLL2)",
+  "config": "identical to leg0 (serve.sh throughput defaults, full fast-path env set + RWKV_MEGA=1, fp16)",
+  "gates": {
+    "test_mega_rkv": "PASS zero differing bytes",
+    "test_mega_a2": "PASS (rkv + o G=1 + rkvo G=4) zero differing bytes",
+    "test_mega_o_model": "PASS real weights 1.5B+7.2B",
+    "sqrelu_oracle": "PASS zero differing bytes (6 shapes x 3 seeds)",
+    "direct_golden_vs_pre_f0064_capture": "PASS zero differing bytes (independent sm86 golden, fixed-seed inputs)",
+    "greedy_smoke": "24/24 EXACT"
+  },
+  "bsz1_sweep": {
+    "protocol": "bench/bsz_throughput.py, in-len=64 out-len=256, c=1, n=8",
+    "out_tok_per_s": 261.9,
+    "lat_p50_s": 0.98,
+    "vs_leg0": "+0.2% (261.3 -> 261.9)"
+  }
+}
