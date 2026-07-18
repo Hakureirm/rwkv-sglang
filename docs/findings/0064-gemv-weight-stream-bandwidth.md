@@ -2,7 +2,7 @@
 doc_kind: finding
 finding_id: F0064
 title: "GEMV weight-stream bandwidth (#50 follow-on): the flagship bsz1 gap to Bo (D=87.9% of 155.2) lives in BUSY/step, not launch overlap — GEMV is ~74% of busy at ~81% of peak BW vs Bo's ~92%. Two bit-exact load-path rewrites of gemv_grouped_m1 (V1: one 64-bit int2 coalesced load per 4-half chunk replacing two strided 32-bit __half2 loads; V2 opt-in RWKV7_GEMV_KUNROLL2: K-unroll x2 load-hoist for 2x memory-level parallelism), both keeping the EXACT Threads*4 partition + FMA order so torch.equal vs the UNCHANGED gemv_m1 reference still holds. STATUS: implemented on branch mega-gemv-bw; bit-exact gate + SASS load-width confirm PENDING; speed measurement HELD for a clean single-tenant 5090 window (never measured dirty)."
-status: open — implemented, gating + SASS pending, speed measurement held for clean window
+status: open — CORRECTNESS DONE (bit-exact V1+V2 all green, SASS confirms the load widened 32→64-bit + V2's 2× hoist); speed measurement HELD for a clean single-tenant 5090 window
 discovered_by: Opus 4.8 (1M), 2026-07-18
 severity: info
 related: [F0063, F0060, F0061, F0056]
@@ -90,7 +90,47 @@ Alignment: k ≡ 0 (mod 4 halves) and kstride ≡ 0 (mod 4 halves) with K%4==0 a
    ONLY in a confirmed clean single-tenant window (0 compute-apps, 0
    tracking/Pending pods), per the sky-yield rule. Log held; do not measure dirty.
 
-## 4. Artifacts
+## 4. Gate results — CORRECTNESS DONE (2026-07-18, tower, co-resident with hb_compile)
+
+Validated on the 5090 tower while `hb_compile` (root, non-sky, ~98% util) was
+co-resident — correctness/SASS are contamination-invariant, so this ran without
+a clean window. Build: `mega.py`'s JIT `cpp_extension.load` (sm_120, `-O3
+-Xptxas -O3`); V2 via `NVCC_APPEND_FLAGS=-DRWKV7_GEMV_KUNROLL2` + cache clear.
+
+**SASS — the load genuinely widened (not a compiler no-op):** for the (256,4)
+7.2B config, gemv_grouped_m1's weight/x loads went from paired 32-bit
+`LDG.E.CONSTANT R5,[R18]` + `LDG.E.CONSTANT R2,[R18+0x4]` (two strided 4-byte
+loads) → one **`LDG.E.64.CONSTANT`** (single contiguous 8-byte load): 30→15
+load instrs per config, same bytes, half the instructions, double the width.
+V2 additionally hoists **10 loads before the first FMA** (2 chunks × 5) vs V1's
+5 — the 2× memory-level parallelism materialized in codegen, confirmed across
+two independent build paths (SASS saved `tmp/f0064_sass/{before,v1,v2}.sass`).
+
+**Bit-exact gates — all PASS, both variants (zero failures):**
+
+| gate | V1 (64-bit load) | V2 (+KUNROLL2) |
+|---|---|---|
+| `test_mega_rkv.py` torch.equal (rkv G=3 / o G=1 / rkvo G=4, 5 shapes × 2 families × 3 scales) | PASS, zero differing bytes | PASS, zero differing bytes |
+| `verify_m1d.py` 1.5B greedy, cuda-graph, full stack+MEGA+WKV_CUDA+PDL | 24/24 EXACT | 24/24 EXACT |
+| `verify_m1d.py` 7.2B same config (mem-fraction 0.5, fit alongside hb_compile) | 8/8 EXACT | 8/8 EXACT |
+
+So the rewrite is proven byte-identical to the UNCHANGED gemv_m1 reference AND
+SASS-confirmed to actually widen the load. The value claim (faster) remains
+unproven — the framing-2 A/V1/V2 kernel-loop re-measure is HELD for a clean
+window (dirty BW numbers are meaningless on the very axis we're optimizing).
+
+**Ops discovery (flagged, real reproducibility risk):** the live `rwkvmain`
+serving container had NEVER had the megakernel deployed this session —
+`mega.py`/`rwkv7_mega.cu` were absent (last deploy predates them;
+`rwkv510`/`vllmrwkv` containers same stale state). F0063's "verified in
+repo-mega" did NOT survive what looks like a container recreate between
+sessions. Fixed by re-running `scripts/deploy.sh` (idempotent; byte-verified
+post-deploy). Lesson: the clean-window measure MUST re-confirm the overlay is
+actually deployed in the target container before trusting any number — a
+recreated container silently reverts to no-megakernel. (deploy.sh is idempotent
+so the fix is cheap; the trap is assuming it persisted.)
+
+## 5. Artifacts
 
 - Kernel: `sglang_overlay/.../rwkv7_kernels/cuda/rwkv7_mega.cu` (gemv_grouped_m1
   V1 default + V2 `#ifdef RWKV7_GEMV_KUNROLL2`); reference `rwkv7_fast.cu`
