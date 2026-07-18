@@ -22,19 +22,27 @@ TAG="${4:?tag (72b|15b)}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$OUT"
 
-if [ "$TAG" = 72b ]; then
-  FIX_PROMPT='[11, 6699, 304, 25740, 109, 37480, 4600, 52151, 4596, 22590, 30449, 4706]'
-  FIX_EXPECT='[37138, 45, 44312, 47, 11, 6699, 304, 25740]'
-else
-  FIX_PROMPT="$(python3 - <<EOF
+# Fixture selection by tag FAMILY (prefix match). The original exact-string
+# `[ "$TAG" = 72b ]` silently fed the 1.5B fixture to any decorated tag like
+# "72b_f0064" — every leg then "fails" the greedy gate on a wrong-fixture
+# comparison (found during the F0064 flagship run). Unknown tags now fail loud.
+case "$TAG" in
+  72b*)
+    FIX_PROMPT='[11, 6699, 304, 25740, 109, 37480, 4600, 52151, 4596, 22590, 30449, 4706]'
+    FIX_EXPECT='[37138, 45, 44312, 47, 11, 6699, 304, 25740]'
+    ;;
+  15b*)
+    FIX_PROMPT="$(python3 - <<EOF
 import json; fx=json.load(open("$REPO/bench/fixtures/oracle_rwkv7_15b_eiffel.json")); print(fx["prompt_tokens"])
 EOF
 )"
-  FIX_EXPECT="$(python3 - <<EOF
+    FIX_EXPECT="$(python3 - <<EOF
 import json; fx=json.load(open("$REPO/bench/fixtures/oracle_rwkv7_15b_eiffel.json")); print(fx["greedy_tokens"])
 EOF
 )"
-fi
+    ;;
+  *) echo "mega_flag_matrix: unknown tag '$TAG' (want 72b*|15b*)" >&2; exit 1 ;;
+esac
 
 run_leg() { # $1 leg name, $2 extra env (space-separated K=V)
   local LEG="$1"; shift

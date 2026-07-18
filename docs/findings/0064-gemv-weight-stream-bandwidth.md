@@ -2,7 +2,7 @@
 doc_kind: finding
 finding_id: F0064
 title: "GEMV weight-stream bandwidth (#50 follow-on): the flagship bsz1 gap to Bo (D=87.9% of 155.2) lives in BUSY/step, not launch overlap — GEMV is ~74% of busy at ~81% of peak BW vs Bo's ~92%. Two bit-exact load-path rewrites of gemv_grouped_m1 (V1: one 64-bit int2 coalesced load per 4-half chunk replacing two strided 32-bit __half2 loads; V2 opt-in RWKV7_GEMV_KUNROLL2: K-unroll x2 load-hoist for 2x memory-level parallelism), both keeping the EXACT Threads*4 partition + FMA order so torch.equal vs the UNCHANGED gemv_m1 reference still holds. STATUS: implemented on branch mega-gemv-bw; bit-exact gate + SASS load-width confirm PENDING; speed measurement HELD for a clean single-tenant 5090 window (never measured dirty)."
-status: open — CORRECTNESS DONE (bit-exact V1+V2 all green, SASS confirms the load widened 32→64-bit + V2's 2× hoist); speed measurement HELD for a clean single-tenant 5090 window
+status: CLOSED (2026-07-19) — flagship measured clean: NULL RESULT. V1 flat (≤0.15%, inside noise, both instruments), V2 a consistent ~1% REGRESSION (rejected). §10's corrected per-kernel byte-floor accounting shows the GEMVs were ALREADY at 95.6-97.7% of achievable BW — the projected headroom never existed; the real remaining gap to Bo is ~1.3 ms/step of latency-bound small-kernel BUSY → lever redirected to Stage-B fusion. V1 kept as default (bit-exact dual-arch proven, halves LDG count, strictly-no-worse); the falsified projection and the null are published, not buried
 discovered_by: Opus 4.8 (1M), 2026-07-18
 severity: info
 related: [F0063, F0060, F0061, F0056]
@@ -53,7 +53,7 @@ machine: 5090 tower (sm120) — target; edit authored on the Mac working tree, b
   BW numbers will be published (the whole point is peak-BW achievement, which a
   co-resident tenant destroys).
 
-## 1. The projection (to be confirmed, not asserted)
+## 1. The projection (to be confirmed, not asserted) — **REFUTED by §10**
 
 If V1+V2 move GEMV from ~81% → ~92% of peak BW, GEMV busy drops
 ~5260 × (1 − 81/92) ≈ **−630 us/step**, taking BUSY/step 7410 → ~6780, i.e.
@@ -273,6 +273,83 @@ Raw: `bench/results/f0064_ab_{leg0,leg1,leg2}_{15b,72b}_3090.json`,
 `f0064_ab_kernel_microbench_3090.json` (full 3-leg tables + verdict),
 `f0064_ab_blocker_3090.json` (the pdl.cuh staging omission, RESOLVED, kept for
 the record). All leak-scanned clean.
+
+## 10. FLAGSHIP RESULT (2026-07-19, clean 5090 window): NULL — and the corrected attribution
+
+The window opened naturally (the co-resident D-Robotics compile exited on its
+own; nothing was killed). Measurement: same container lineage, same harness,
+same configs as F0063's clean session — the ONLY changed variable is the F0064
+kernels. All greedy gates EXACT; GPU brackets matched F0063's footprint to the
+MiB (19740→19748); zero yields; both instruments (serving wall-clock AND
+43-step kernel-loop trace) agree.
+
+**Serving bsz1 7.2B**: A′=136.9 (F0063 A: 136.9), D′V1=137.9 (F0063 D: 137.8),
+B′=138.3, C′=137.9, **D′V2=136.5 (−0.94%)**. 1.5B: A′=477.9 / D′V1=492.7 /
+B′=490.6 / C′=492.4 (F0063: 479.2/493.0) — all flat.
+**Kernel-loop 7.2B**: A′=134.95 (F0063: 134.96), D′V1=136.57 (F0063: 136.43,
++0.10%), D′V2=135.32 (−0.81%). **Per-kernel (the direct evidence)**: grouped
+2660.15→2656.14 (−0.15%) / gemv_m1 2600.09→2599.81 (−0.01%) under V1; under V2
+grouped 2696.85 (+1.38%) / gemv_m1 2624.46 (+0.94%) — a real regression, in
+the same direction on both instruments. Every OTHER kernel in the 533-row
+table is flat, isolating the change. Overlap 79.0→79.1%, gap −79.9→−80.0 us
+(PDL state untouched).
+
+**Verdict: V1 neutral (keep — see below), V2 REJECTED (consistent ~1%
+regression on sm120; noise on sm86). The projected ~149 tok/s did not happen.
+We remain at 88.0% of Bo's 155.2 (82.1% of the 168.0 ceiling).**
+
+### Why the projection was wrong — the corrected per-kernel byte-floor accounting
+
+The §1 projection derived "GEMV at ~81% of peak BW" from END-TO-END tok/s ÷
+ceiling (136.43/168.0) and attributed the whole gap to GEMV streaming
+efficiency. Doing the arithmetic PER KERNEL (which §6's own table already
+enabled — the same discipline §7 applied to kill the lm_head candidate, applied
+inconsistently) refutes that:
+
+| kernel | bytes/step | floor @1691.7 GB/s | measured | achieved BW |
+|---|---|---|---|---|
+| gemv_grouped_m1 (r/k/v/o, 4×4096²×2B×32L) | 4.295 GB | 2539 us | 2656 us | 1617 GB/s = **95.6%** |
+| gemv_m1 (ffn.key, 16384×4096×2B×32L) | 4.295 GB | 2539 us | 2600 us | 1652 GB/s = **97.7%** |
+
+**The GEMVs were already at 95.6-97.7% of achievable BW.** Total genuine GEMV
+headroom ≈ 178 us/step, not the projected 630. And the SASS-level explanation
+for V1's flatness: the "two strided 32-bit loads" sit at +0x0/+0x4 —
+CONSECUTIVE addresses. At sector (32B) granularity the warp's request stream is
+IDENTICAL to the 64-bit version: both halves of every sector are requested
+either way, and the coalescer merges them. V1 halves the LDG instruction count
+but moves the same bytes in the same pattern — on a bandwidth-wall kernel that
+changes nothing (the 3090's −2.4% on square shapes was the instruction-issue
+side effect, visible only where bytes/instruction ratio is worse). V2's
+regression: the +kstride hoisted load (2 KB away) costs registers and disrupts
+access locality for zero benefit when the memory system is already saturated.
+
+**Where the gap to Bo ACTUALLY lives** (completing the accounting): BUSY/step
+7410 vs floor 5950 → 1460 us excess. GEMV excess ≈ 178. lm_head ≈ +7 over
+floor. wkv ≈ +44. The remainder — **~1.2-1.3 ms/step — is the latency-bound
+small-kernel chain** (add_ln 426, lora_stage1/2 463, sparse glue/casts/zeros
+~120, gn_gatecorr 95, shifts 105, kk/lora_gates 112): kernels that move almost
+no bytes but pay per-launch/per-kernel overhead 32-64× each. Bo's step = 6440
+us = the same 5950 floor + only ~490 us of overhead — because albatross runs
+13 kernels/step vs our 533. **The megakernel thesis was the right read all
+along; F0064 attacked the wrong term.** Lever redirected: Stage-B fusion
+(fold add_ln into GEMV epilogues, fuse the lora chain, fuse gn+glue, kill the
+zeros/cast pair) targeting −800~1000 us of the ~1300 → step ~6.4-6.6 ms →
+**148-156 tok/s ≈ parity with Bo's 155.2** — now with arithmetic that has
+per-kernel floors behind it, not a ratio guess.
+
+**Disposition**: V1 stays as the default source (bit-exact proven on sm120+
+sm86 with direct goldens, SASS-verified, strictly-no-worse, halves LDG count,
+tiny wins on 3090 square shapes). V2 stays in-source under the macro,
+documented DO-NOT-ENABLE (this measured regression is the reproducible record).
+The §1 projection text is kept above, marked refuted — the falsification is
+published, not buried. Harness fix shipped: mega_flag_matrix.sh tag matching
+(exact-string → prefix family + fail-loud; the F0064 run found decorated tags
+silently selected the wrong fixture).
+
+Raw (all leak-scrubbed): `bench/results/f0064/c1_72b_{A,B,C,D}.json`,
+`c1_15b_f0064_{A,B,C,D}.json`, `framing2_{A,D,Dv2}_7.2b.txt`; full logs +
+traces + the preserved wrong-fixture failed run on the tower under
+`repo-mega/bench/results/f0064*/` and `logs/mega/f0064/`.
 
 ## 8. Artifacts
 
