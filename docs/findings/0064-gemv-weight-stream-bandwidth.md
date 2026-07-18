@@ -1,0 +1,103 @@
+---
+doc_kind: finding
+finding_id: F0064
+title: "GEMV weight-stream bandwidth (#50 follow-on): the flagship bsz1 gap to Bo (D=87.9% of 155.2) lives in BUSY/step, not launch overlap — GEMV is ~74% of busy at ~81% of peak BW vs Bo's ~92%. Two bit-exact load-path rewrites of gemv_grouped_m1 (V1: one 64-bit int2 coalesced load per 4-half chunk replacing two strided 32-bit __half2 loads; V2 opt-in RWKV7_GEMV_KUNROLL2: K-unroll x2 load-hoist for 2x memory-level parallelism), both keeping the EXACT Threads*4 partition + FMA order so torch.equal vs the UNCHANGED gemv_m1 reference still holds. STATUS: implemented on branch mega-gemv-bw; bit-exact gate + SASS load-width confirm PENDING; speed measurement HELD for a clean single-tenant 5090 window (never measured dirty)."
+status: open — implemented, gating + SASS pending, speed measurement held for clean window
+discovered_by: Opus 4.8 (1M), 2026-07-18
+severity: info
+related: [F0063, F0060, F0061, F0056]
+machine: 5090 tower (sm120) — target; edit authored on the Mac working tree, branch mega-gemv-bw
+---
+
+# Finding F0064: GEMV weight-stream bandwidth — the next flagship lever
+
+## 0. TL;DR
+
+- **Where the flagship gap actually is** (from F0063 §6c, the clean-window
+  decomposition): PDL already killed the launch gaps (D net gap/step is
+  NEGATIVE, 79.0% overlapped transitions). The residual 87.9%→92.4%-of-ceiling
+  gap to Bo is **BUSY/step**: ours ~7410 us/step vs Bo's ~6440 (155.2 tok/s =
+  6.44 ms/step). GEMV is ~74% of busy (grouped r/k/v/o 2660 us/step + residual
+  gemv_m1 2600 us/step = ~5260 us/step), and at bsz1 GEMV is pure memory-bound:
+  we hit ~81% of peak BW (136.4 tok/s = 81.2% of the 168.0 ceiling), Bo ~92%.
+  Same bytes moved (10.07 GB/step, disclosed identical) — **Bo's GEMV streams
+  them at higher achieved BW.** That is the lever.
+- **Why the current kernel leaves BW on the table** (gemv_grouped_m1_kernel,
+  rwkv7_mega.cu): each weight row is fetched as **two STRIDED 32-bit `__half2`
+  loads** (offsets +0 and +2), and the K-loop is not unrolled, so few loads are
+  in flight to cover DRAM latency. Neither maximizes per-transaction bytes nor
+  memory-level parallelism — the two things that separate ~81% from ~92% on a
+  streaming GEMV (Little's law: achieved BW ∝ bytes-in-flight for a fixed
+  latency; transaction width sets the per-load byte count).
+- **The rewrite (bit-exact preserved, house-law intact)**:
+  - **V1 (default)**: one 64-bit `int2` load = 4 contiguous halves per weight
+    row, replacing the two strided 32-bit loads. Across a warp each thread now
+    reads a contiguous 8-byte span → a single 256B/warp coalesced stream instead
+    of two half-populated sector streams; per-row load-instruction count halves.
+  - **V2 (`-DRWKV7_GEMV_KUNROLL2`)**: additionally hoist BOTH consecutive
+    k-chunks' loads before either chunk's FMAs → 2× memory-level parallelism.
+  - Both keep the **EXACT Threads*4 per-thread partition and the EXACT per-acc
+    FMA order** (chunk(k) fully, then chunk(k+kstride) fully) — only how the
+    bytes are FETCHED changes, never which fp32 terms are summed or in what
+    order. So `y` stays **byte-identical** to gemv_m1.
+- **Strongest possible gate**: only `gemv_grouped_m1` is rewritten this round;
+  `gemv_m1_kernel` (rwkv7_fast.cu) is left UNCHANGED as an independent golden.
+  `bench/test_mega_rkv.py` does `torch.equal(grouped, G× gemv_m1)` → proves the
+  rewrite against a reference that did NOT change with it (a bug in the rewrite
+  cannot hide by mutating both sides). Propagation to gemv_m1 itself is a
+  SEPARATE later round, re-gated against a numpy oracle.
+- **STATUS**: implemented on branch `mega-gemv-bw` (commit below). NOT gated,
+  NOT measured. Bit-exact gate + SASS load-width confirmation are the next step
+  (can run co-resident — correctness/SASS don't need a clean card). **Speed
+  measurement is HELD for a clean single-tenant 5090 window** — no dirty GEMV
+  BW numbers will be published (the whole point is peak-BW achievement, which a
+  co-resident tenant destroys).
+
+## 1. The projection (to be confirmed, not asserted)
+
+If V1+V2 move GEMV from ~81% → ~92% of peak BW, GEMV busy drops
+~5260 × (1 − 81/92) ≈ **−630 us/step**, taking BUSY/step 7410 → ~6780, i.e.
+136.4 → ~149 tok/s ≈ **96% of Bo's 155.2**. That would close most of the
+remaining gap on the single dominant kernel class alone; the add_ln / wkv /
+sparse-path residuals (F0063 §6c) are the follow-on levers. **This is a
+projection from the F0063 per-kernel table, flagged as such — the clean-window
+framing-2 re-measure is the actual gate on the number.**
+
+## 2. Bit-exactness argument (the audit trail)
+
+For one k-chunk, original: `x0=(h2f(x[k]),h2f(x[k+1]))` from `*(half2*)(x+k)`,
+`x1=(h2f(x[k+2]),h2f(x[k+3]))` from `*(half2*)(x+k+2)`. V1: `xp=*(int2*)(x+k)`
+reads the same 8 bytes = halves x[k..k+3]; `xp.x` = first 4 bytes = bits of
+(x[k],x[k+1]) → `__half22float2(*(half2*)&xp.x)` = the same `x0`; `xp.y` →
+the same `x1`. Identical for the weight row. FMA sequence per `acc[j]` is
+unchanged. V2 reorders only LOADS (issues chunk k and chunk k+kstride loads
+before their FMAs); the FMA sequence into each `acc[j]` remains chunk(k) 4
+terms then chunk(k+kstride) 4 terms — the same order the scalar loop produces.
+Alignment: k ≡ 0 (mod 4 halves) and kstride ≡ 0 (mod 4 halves) with K%4==0 and
+16-byte tensor base ⇒ every `int2` address is 8-byte aligned. ∴ byte-identical.
+
+## 3. Gate plan (next step — co-resident OK, no clean card needed)
+
+1. **SASS diff** (cuobjdump `gemv_grouped_m1` on main vs branch): confirm V1 emits
+   one `LDG.E.64` per weight row where main had two `LDG.E.32` (evidence the load
+   actually widened — if main already emitted `.64`/`.128`, V1 is neutral and the
+   lever is V2's MLP; report either way).
+2. **Bit-exact gate**: `bench/test_mega_rkv.py` (torch.equal vs G× gemv_m1) for
+   V1 AND V2 (`-DRWKV7_GEMV_KUNROLL2`) — must be zero differing bytes both.
+3. **Greedy e2e**: `verify_m1d` full stack + MEGA + WKV_CUDA + PDL under CUDA
+   graph, 1.5B 24/24 + 7.2B 8/8 EXACT, V1 and V2.
+4. **HELD**: framing-2 kernel-loop re-measure (A / V1 / V2) + serving bsz1 —
+   ONLY in a confirmed clean single-tenant window (0 compute-apps, 0
+   tracking/Pending pods), per the sky-yield rule. Log held; do not measure dirty.
+
+## 4. Artifacts
+
+- Kernel: `sglang_overlay/.../rwkv7_kernels/cuda/rwkv7_mega.cu` (gemv_grouped_m1
+  V1 default + V2 `#ifdef RWKV7_GEMV_KUNROLL2`); reference `rwkv7_fast.cu`
+  gemv_m1_kernel UNCHANGED.
+- Branch `mega-gemv-bw` (NOT main — held for review until gated + measured clean,
+  per the F0063 hold-on-separate-branch lesson).
+- [[F0063]] (the flagship measurement + §6c decomposition this attacks) ·
+  [[F0060]] [[F0061]] (the mega prefabs) · ADR-0008 (megakernel feasibility).
+</content>
+</invoke>

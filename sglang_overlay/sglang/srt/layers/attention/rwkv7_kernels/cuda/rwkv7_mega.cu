@@ -24,12 +24,16 @@
 // bit-exact-gated PREFAB the 5090 whole-block grid assembles (see F0060 §7.5).
 //
 // BIT-EXACTNESS (house law): every output element's fp32 accumulation is the
-// SAME code as rwkv7_fast.cu::gemv_m1_kernel (identical per-thread k-stride =
-// Threads*4, identical warp-shuffle tree, identical serial cross-warp sum), and
-// each role is launched with the SAME (Threads, OutTile) the deployed
-// gemv_m1_cfg path picks for (N,K). => y[p] is byte-identical to gemv_m1(x_p,
-// W_p). Gated by bench/test_mega_rkv.py (torch.equal vs G x gemv_m1) + greedy
-// verify_m1d. No new numerics are introduced. Roles are passed by value in a
+// SAME per-thread k-stride = Threads*4 partition, the SAME warp-shuffle tree, and
+// the SAME serial cross-warp sum as rwkv7_fast.cu::gemv_m1_kernel, and each role
+// is launched with the SAME (Threads, OutTile) the deployed gemv_m1_cfg path
+// picks for (N,K). The F0064 BW rewrite (below) changes only how the weight/x
+// bytes are FETCHED (one 64-bit int2 load per 4-half chunk, optional K-unroll x2
+// load-hoist), never which fp32 terms are summed or in what order => y[p] stays
+// byte-identical to gemv_m1(x_p, W_p). gemv_m1_kernel itself is left UNCHANGED as
+// the bit-exact reference, so bench/test_mega_rkv.py (torch.equal vs G x gemv_m1)
+// + greedy verify_m1d prove the rewrite against an independent golden. No new
+// numerics are introduced. Roles are passed by value in a
 // small pointer pack (param space, no device indirection / gather launch), so a
 // role can point at wherever its input lives (non-adjacent shift_lerp6 rows, the
 // post-WKV o input, ...).
@@ -67,8 +71,9 @@ __device__ __forceinline__ float warp_sum(float x) {
 }
 
 // gemv_grouped_m1: y_all[G,N], y_all[p] = x_p @ W_p[N,K]^T, p = blockIdx.y.
-// Grid = dim3(N/OutTile, G). Body is gemv_m1_kernel verbatim (per-role select of
-// x/weight/y), so each row is bit-identical to gemv_m1. The up-to-4 role
+// Grid = dim3(N/OutTile, G). Body is gemv_m1_kernel's accumulation with the F0064
+// wide-load rewrite (per-role select of x/weight/y); same fp32 terms in the same
+// order, so each row is byte-identical to gemv_m1. The up-to-4 role
 // activations/weights are SEPARATE __restrict__ scalar params (not a by-value
 // pointer pack) — a dynamic-indexed pack defeats the aliasing/register analysis
 // and measured ~1.5x SLOWER than the 3-pointer Stage-A1 kernel; the ternary on
@@ -97,20 +102,84 @@ __global__ __launch_bounds__(Threads, 1) void gemv_grouped_m1_kernel(
   float acc[OutTile];
 #pragma unroll
   for (int j = 0; j < OutTile; ++j) acc[j] = 0.0f;
-  for (int k = threadIdx.x << 2; k < K; k += Threads << 2) {
-    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(x + k));
-    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(x + k + 2));
+  // BW LEVER (F0064): the weight stream is the bsz1 bottleneck (flagship BUSY/step
+  // is GEMV-dominated at ~81% of peak BW vs Bo's ~92%). Two bit-exact-preserving
+  // load-path rewrites, both keeping the EXACT 4-half-per-thread partition and the
+  // EXACT per-acc FMA order (=> torch.equal vs gemv_m1 still holds; only how bytes
+  // are FETCHED changes, never the fp32 accumulation):
+  //   V1 (default): one 64-bit int2 load (4 contiguous halves) per weight row,
+  //     replacing the two STRIDED 32-bit __half2 loads (offsets +0 and +2). Across
+  //     a warp each thread now reads a contiguous 8-byte span => one 256B/warp
+  //     coalesced stream instead of two half-populated sector streams, and the
+  //     per-row load-instruction count halves.
+  //   V2 (RWKV7_GEMV_KUNROLL2): additionally issue BOTH consecutive k-chunks'
+  //     loads before either chunk's FMAs => 2x memory-level parallelism to cover
+  //     DRAM latency (Little's law: more bytes in flight = higher achieved BW),
+  //     with the FMA order still chunk(k) fully then chunk(k+kstride) fully — the
+  //     same sequence the scalar loop produces, so byte-identical.
+  const int kstride = Threads << 2;
+#if defined(RWKV7_GEMV_KUNROLL2)
+  int k = threadIdx.x << 2;
+  for (; k + kstride < K; k += kstride << 1) {
+    const int2 xp0 = *reinterpret_cast<const int2*>(x + k);
+    const int2 xp1 = *reinterpret_cast<const int2*>(x + k + kstride);
+    const float2 xa0 = __half22float2(*reinterpret_cast<const __half2*>(&xp0.x));
+    const float2 xb0 = __half22float2(*reinterpret_cast<const __half2*>(&xp0.y));
+    const float2 xa1 = __half22float2(*reinterpret_cast<const __half2*>(&xp1.x));
+    const float2 xb1 = __half22float2(*reinterpret_cast<const __half2*>(&xp1.y));
 #pragma unroll
     for (int j = 0; j < OutTile; ++j) {
       const dtype* wj = weight + static_cast<int64_t>(n0 + j) * K + k;
-      const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(wj));
-      const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(wj + 2));
+      const int2 wp0 = *reinterpret_cast<const int2*>(wj);
+      const int2 wp1 = *reinterpret_cast<const int2*>(wj + kstride);
+      const float2 wa0 = __half22float2(*reinterpret_cast<const __half2*>(&wp0.x));
+      const float2 wb0 = __half22float2(*reinterpret_cast<const __half2*>(&wp0.y));
+      const float2 wa1 = __half22float2(*reinterpret_cast<const __half2*>(&wp1.x));
+      const float2 wb1 = __half22float2(*reinterpret_cast<const __half2*>(&wp1.y));
+      acc[j] = fmaf(xa0.x, wa0.x, acc[j]);
+      acc[j] = fmaf(xa0.y, wa0.y, acc[j]);
+      acc[j] = fmaf(xb0.x, wb0.x, acc[j]);
+      acc[j] = fmaf(xb0.y, wb0.y, acc[j]);
+      acc[j] = fmaf(xa1.x, wa1.x, acc[j]);
+      acc[j] = fmaf(xa1.y, wa1.y, acc[j]);
+      acc[j] = fmaf(xb1.x, wb1.x, acc[j]);
+      acc[j] = fmaf(xb1.y, wb1.y, acc[j]);
+    }
+  }
+  for (; k < K; k += kstride) {  // tail: 0 or 1 remaining chunk (V1 body)
+    const int2 xp = *reinterpret_cast<const int2*>(x + k);
+    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(&xp.x));
+    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(&xp.y));
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      const dtype* wj = weight + static_cast<int64_t>(n0 + j) * K + k;
+      const int2 wp = *reinterpret_cast<const int2*>(wj);
+      const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(&wp.x));
+      const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(&wp.y));
       acc[j] = fmaf(x0.x, w0.x, acc[j]);
       acc[j] = fmaf(x0.y, w0.y, acc[j]);
       acc[j] = fmaf(x1.x, w1.x, acc[j]);
       acc[j] = fmaf(x1.y, w1.y, acc[j]);
     }
   }
+#else
+  for (int k = threadIdx.x << 2; k < K; k += kstride) {
+    const int2 xp = *reinterpret_cast<const int2*>(x + k);
+    const float2 x0 = __half22float2(*reinterpret_cast<const __half2*>(&xp.x));
+    const float2 x1 = __half22float2(*reinterpret_cast<const __half2*>(&xp.y));
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      const dtype* wj = weight + static_cast<int64_t>(n0 + j) * K + k;
+      const int2 wp = *reinterpret_cast<const int2*>(wj);
+      const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(&wp.x));
+      const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(&wp.y));
+      acc[j] = fmaf(x0.x, w0.x, acc[j]);
+      acc[j] = fmaf(x0.y, w0.y, acc[j]);
+      acc[j] = fmaf(x1.x, w1.x, acc[j]);
+      acc[j] = fmaf(x1.y, w1.y, acc[j]);
+    }
+  }
+#endif
   __shared__ float partial[Threads / 32][OutTile];
   const int lane = threadIdx.x & 31;
   const int warp = threadIdx.x >> 5;
