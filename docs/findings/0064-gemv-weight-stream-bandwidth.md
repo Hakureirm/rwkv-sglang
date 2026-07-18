@@ -141,7 +141,7 @@ BUSY/step 7409.7 us) ranks the levers precisely:
 | gemv_m1<256,2> (ffn.key + resid proj) | 32.3 | 2600.1 | 35.1% | **F0064 round-2** (this section) |
 | sparse_cmix_f32acc | 32.3 | 430.8 | 5.8% | next |
 | add_ln<16> | 64.5 | 425.9 | 5.7% | next |
-| cuBLAS gemvx (**lm_head**, 1 call) | 1.0 | 324.3 | 4.4% | next (stock — swap for our GEMV?) |
+| cuBLAS gemvx (**lm_head**, 1 call) | 1.0 | 324.3 | 4.4% | **NO lever** — already ~98% BW (see below) |
 | lora_stage2<8> / stage1<128> | 32.3 | 256.2 / 207.3 | 6.3% | next |
 | gn_gatecorr / wkv_decode | 32.3 | 95.0 / 84.4 | 2.4% | small |
 | float16_copy + FillFunctor (sparse zeros+cast pair) | 32.3 | 29.9 + 27.2 | 0.8% | F0060 Stage-B fusion target |
@@ -173,7 +173,46 @@ sqrelu via `test_sqrelu_gate.py`; (d) greedy `verify_m1d` 1.5B + 7.2B. All
 co-resident-safe (correctness is contamination-invariant) — pre-gated so the clean
 window is pure measurement.
 
-## 5. Artifacts
+**lm_head candidate KILLED by arithmetic** (correcting the table's earlier
+"swap for our GEMV?" note): 7.2B lm_head = vocab 65536 × hidden 4096 × fp16 =
+536.9 MB/step; the physical floor at 1691.7 GB/s is ~317 us. cuBLAS gemvx
+measures 324.3 us = **~98% of peak BW — no headroom**. Do not spend a round
+here. (General lesson, same as F0063's honest-ledger style: compute the
+byte-floor BEFORE nominating a kernel as a lever.) The realistic post-GEMV
+levers are the latency-bound small-kernel chain — add_ln 6.6 us/call × 64.5 +
+gn_gatecorr + shifts + lora glue + the sparse zeros/cast pair — where the tool
+is FUSION (fewer kernels), i.e. F0060's Stage-B, not wider loads.
+
+## 7. Clean-window measurement runbook (dispatch verbatim when the waiter fires)
+
+Waiter: `tmp/f0064_waiter.sh` on the tower (decoupled setsid/nohup, PID logged
+in `tmp/f0064_waiter.log`) — writes `tmp/f0064_window_open` when 0 compute-apps
++ 0 Pending pods + util<10%. On fire, dispatch with THIS leg design — chosen so
+NO .bak swapping is needed mid-window (the r1+r2 tree stays deployed
+throughout; the flag matrix itself provides attribution):
+
+| leg | config | isolates | compare against |
+|---|---|---|---|
+| A′ | flags OFF (MEGA=0 WKV_CUDA=0 PDL=0), r2 fast.cu | **pure V1 wide-load at max exposure** — flags-off routes ALL projections through gemv_m1 (161.65 calls/step, F0063 framing-2 A) | F0063 A = 136.9 serving / 134.96 kernel-loop |
+| D′V1 | full stack (MEGA+WKV_CUDA+PDL), r1+r2, V1 | **the headline** | F0063 D = 137.8 / 136.43; Bo 155.2 / same-session 155.75 |
+| D′V2 | same, rebuilt `-DRWKV7_GEMV_KUNROLL2` | V2's 2× load-hoist on top of V1 | D′V1 |
+
+Per leg: greedy-smoke hard gate (8/8) → serving bsz1 sweep (~5-6 min) →
+framing-2 trace on D′V1 (and D′V2 if window holds): the per-kernel table must
+show grouped 2660→? and gemv_m1 2600→? us/step — the DIRECT BW-achievement
+evidence, stronger than end-to-end tok/s. Priority if the window is short:
+D′V1 serving+trace > A′ > D′V2 > 1.5B bonus. Budget ~25 min total (F0063 §6b
+precedent). MANDATORY pre-checks: (1) overlay actually deployed in the target
+container (the §4 container-recreate trap — grep the deployed fast.cu/mega.cu
+for `RWKV7_GEMV_KUNROLL2`); (2) JIT cache state matches the leg (V1 = default
+build, V2 = NVCC_APPEND_FLAGS rebuild + cache clear); (3) sky-yield sentinel
+armed (any Pending pod → stop within a minute, log the yield). Anchor
+provenance: F0063's clean A/D are reused as the baseline (same sglang base
+754524d, same card, measured clean 2026-07-18); A′ additionally re-anchors
+in-window — if A′ deviates >2% from BOTH 136.9 and the r2-predicted uplift
+band, suspect environment drift and say so rather than publishing.
+
+## 8. Artifacts
 
 - Kernel: `sglang_overlay/.../rwkv7_kernels/cuda/rwkv7_mega.cu` (gemv_grouped_m1
   V1 default + V2 `#ifdef RWKV7_GEMV_KUNROLL2`); reference `rwkv7_fast.cu`
