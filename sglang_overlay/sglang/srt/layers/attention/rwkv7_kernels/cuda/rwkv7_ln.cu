@@ -61,6 +61,7 @@
 #include <torch/library.h>
 #include <cuda_fp16.h>
 
+#include <cstdlib>
 #include <optional>
 #include <tuple>
 
@@ -456,6 +457,27 @@ at::Tensor relu_sq(at::Tensor x) {
   return y;
 }
 
+// F0065 (Stage-B opener): the deployed (32,4) config transcribes torch's
+// per-row block for BIT-PARITY — correct at the large-batch profile it was
+// built against, but at decode bsz1 the launch is grid=dim3(T=1): ONE
+// 128-thread block on the whole GPU, ~6.6 us/call x 64.5 calls/step = 426
+// us/step of the 7.2B bsz1 BUSY (F0063 per-kernel table). Additionally
+// own[16] is dynamically indexed -> local-memory spill risk at MaxVec=16.
+// The WIDE variant (env RWKV_ADDLN_WIDE=1, small-T only) runs the SAME
+// template at (32,16)=512 threads/row with MaxVecPerThread=2 (registers, no
+// spill): 4x fewer serial load rounds per thread, same Welford ALGORITHM but
+// a DIFFERENT partition/tree shape => NOT bit-parity with torch's (32,4)
+// order. Numerics bar: fp32-reference oracle tolerance + greedy-EXACT e2e
+// (the fp16-state WKV precedent), gated before any default flip; default
+// remains the parity config.
+static bool addln_wide_enabled() {
+  static const bool v = []() {
+    const char* e = getenv("RWKV_ADDLN_WIDE");
+    return e && e[0] == '1';
+  }();
+  return v;
+}
+
 std::tuple<at::Tensor, at::Tensor> add_ln(at::Tensor x, at::Tensor delta,
                                           at::Tensor gamma, at::Tensor beta,
                                           double eps) {
@@ -477,9 +499,25 @@ std::tuple<at::Tensor, at::Tensor> add_ln(at::Tensor x, at::Tensor delta,
   auto y = at::empty_like(x);
   if (T == 0) return {x_new, y};
   auto stream = at::cuda::getCurrentCUDAStream();
+  const bool pdl = rwkv7_pdl_enabled("ln");
+  // WIDE small-T path: (32,16) needs each thread to own <= 2 vecs => N <= 4096.
+  if (addln_wide_enabled() && T <= 32 && N <= 2 * 512 * kVec) {
+    const dim3 threads_w(32, 16, 1);
+    const int nshared_w = threads_w.y * 3 / 2 * sizeof(float);
+    rwkv7_launch_maybe_pdl(pdl, add_ln_kernel<2>,
+        dim3(static_cast<unsigned>(T)), threads_w, nshared_w, stream.stream(),
+        static_cast<int>(N), static_cast<float>(eps),
+        static_cast<const dtype*>(x.data_ptr<dtype>()),
+        static_cast<const dtype*>(delta.data_ptr<dtype>()),
+        static_cast<const dtype*>(gamma.data_ptr<dtype>()),
+        static_cast<const dtype*>(beta.data_ptr<dtype>()),
+        x_new.data_ptr<dtype>(), y.data_ptr<dtype>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    return {x_new, y};
+  }
   const dim3 threads(32, 4, 1);
   const int nshared = threads.y > 1 ? threads.y * 3 / 2 * sizeof(float) : 0;
-  rwkv7_launch_maybe_pdl(rwkv7_pdl_enabled("ln"), add_ln_kernel<kMaxVecPerThread>,
+  rwkv7_launch_maybe_pdl(pdl, add_ln_kernel<kMaxVecPerThread>,
       dim3(static_cast<unsigned>(T)), threads, nshared, stream.stream(),
       static_cast<int>(N), static_cast<float>(eps),
       static_cast<const dtype*>(x.data_ptr<dtype>()),
