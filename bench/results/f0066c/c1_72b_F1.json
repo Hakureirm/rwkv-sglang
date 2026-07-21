@@ -1,0 +1,36 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 14.35,
+      "out_tokens": 2048,
+      "out_tok_per_s": 142.8,
+      "req_per_s": 0.558,
+      "lat_p50_s": 1.793,
+      "lat_p99_s": 1.794,
+      "per_stream_tok_s": 142.8
+    }
+  ],
+  "peak": {
+    "concurrency": 1,
+    "requests": 8,
+    "wall_s": 14.35,
+    "out_tokens": 2048,
+    "out_tok_per_s": 142.8,
+    "req_per_s": 0.558,
+    "lat_p50_s": 1.793,
+    "lat_p99_s": 1.794,
+    "per_stream_tok_s": 142.8
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30070,
+    "concurrencies": "1",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "c1_72b_F1.json"
+  }
+}

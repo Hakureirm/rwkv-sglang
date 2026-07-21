@@ -966,7 +966,8 @@ class Rwkv7Attention(nn.Module):
                             import sys
                             _LORA_GATED_ANNOUNCED = True
                             print("[rwkv7] F0066c fused LoRA gate epilogue ENABLED "
-                                  "(stage2-folded; byte-exact vs lora4_m1+gates)",
+                                  "(stage2-folded; torch-reference-exact on all "
+                                  "fp16 patterns, bench/test_lora_gated.py)",
                                   file=sys.stderr, flush=True)
                     else:
                         lo = lora_fused.lora4_m1(xs, *self._lora_pack)

@@ -1,0 +1,80 @@
+F0066c (lora4_m1_gated: LoRA-gate epilogue folded into lora_stage2, env
+RWKV_FUSED_LORA_GATED, default OFF; kernel byte-identical to the TORCH reference
+chain -- 65536-pattern census expf==torch.sigmoid 0 mismatches; the deployed
+triton composition deviates 1 ULP on 2/65536 tl.exp patterns, see
+../probe_sigmoid_bits.log + gate re-anchor adjudication in gates_round2.log).
+Clean A/B, 5090, single-tenant, serve.sh MEMFRAC=0.85 CGMAXBS=32
+--max-running-requests 32, c=1 64in/256out (bench/bsz_throughput.py), greedy
+smoke hard gate per leg (7.2B 8/8, 1.5B 24/24 -- ALL legs EXACT), framing-2
+48-step traces via /start_profile mid-decode (bench/step_span_from_trace.py).
+
+Legs: F0 = full stack + WIDE + F0066b, LORA_GATED=0 (anchor; = the F0066-r2 E0
+      config exactly). F1 = F0 + RWKV_FUSED_LORA_GATED=1. Announce-line check
+      enforced per leg (F1 must show '[rwkv7] F0066c fused LoRA gate epilogue
+      ENABLED', F0 must not and must show the W1 gates composition line) -- all
+      4 legs correct. RWKV_FUSED_ADDLN_SHIFT UNSET everywhere (documented-off).
+
+== Serving (c=1, out tok/s) =====================================================
+                       7.2B                    1.5B
+F0066-r2 E0 anchor     142.0 (bracket 142.2)   509.0 (bracket 508.0)
+F0 (=E0 re-run)        142.3                   509.4
+F1 (=F0+c)             142.8                   514.5
+c effect (F1-F0)       +0.5 (+0.35%)           +5.1 (+1.00%)
+F1 vs E0 anchor        +0.8 (+0.56%)           +5.5 (+1.08%)
+vs Bo 155.2 (7.2B)     F0 91.7%  F1 92.0%      (F0066-r2 E0 was 91.5%)
+
+== Kernel-loop framing (span/step -> tok/s, steps by cudaGraphLaunch) ===========
+                       7.2B                    1.5B
+F0                     7088.6us -> 141.07      1975.9us -> 506.11
+F1                     7052.1us -> 141.80      1953.3us -> 511.95
+span delta             -36.5us (+0.52%)        -22.6us (+1.15%)
+kernels/step           502.2 -> 469.1 (-33.1)  382.9 -> 358.6 (-24.3)
+  (brief predicted ~501.6 -> ~469: MATCHED)
+overlapped transitions 96.8% -> 96.5%          95.7% -> 95.4%
+BUSY/step              7210.7 -> 7167.7        2052.1 -> 2024.8
+steps in window        43 / 43                 43 / 43
+
+== Per-kernel attribution (per step; us) ========================================
+7.2B:
+  F0  lora_stage2_kernel<8>        32.33 calls / 258.11us  (7.98 us/call)
+  F0  _lora_gates_kernel           32.33 calls /  57.36us  (1.77 us/call)
+      pair sum                     64.66 calls / 315.47us
+      (brief's F0066-r2 E0 cites:  258.14 + 56.96 = 315.10 -- same within window raggedness)
+  F1  lora_stage2_gated_kernel<8>  32.28 calls / 283.43us  (8.78 us/call)
+  F1  _lora_gates_kernel           GONE (0 rows in the top-40 table)
+  -> cluster GPU time -32.0us/step, launches -32.3/step;
+     per-call: composed pair 9.76 -> gated 8.78 = -0.98us (the folded epilogue
+     costs +0.80us inside stage2 but kills the 1.77us standalone launch).
+  control: lora_stage1_kernel 206.49 -> 206.02us (untouched, as expected)
+
+1.5B mirrors 7.2B:
+  F0  stage2 24.37/99.88 (4.10/call) + gates 24.37/39.55 (1.62/call) = 139.43us
+  F1  stage2_gated 24.40/111.76 (4.58/call); _lora_gates GONE
+  -> cluster -27.7us/step, launches -24.4/step; per-call pair 5.72 -> 4.58 = -1.14us
+  control: stage1 80.81 -> 80.40us (untouched)
+
+== Verdict ======================================================================
+F0066c: clean win on both models, both instruments, direction and magnitude as
+  predicted. 7.2B +0.35% serving / +0.52% kernel-loop; 1.5B +1.00% serving /
+  +1.15% kernel-loop; launch count -32.3/step (7.2B) and -24.4/step (1.5B); the
+  ~57us standalone _lora_gates_kernel and its raw-lo round trip are GONE from
+  the trace. 7.2B c=1 serving best-so-far: 142.8 tok/s = 92.0% of Bo 155.2
+  (F0065 141.3 = 91.0%, F0066b 142.0 = 91.5%). 1.5B 514.5 (from 509.0).
+  Numerics: kernel == torch.sigmoid chain on ALL 65536 fp16 patterns (stronger
+  anchor than the replaced triton path, which carries a 2/65536 1-ULP tl.exp
+  anomaly); greedy e2e EXACT both models both flag states (the binding gate).
+  Default stays OFF pending the usual promotion review.
+
+== Anomalies ====================================================================
+1. Round-1 gate v1 (byte-vs-triton-composition) FAILED 7/9 deterministically;
+   bit probe adjudicated: the CUDA chain is right (==torch everywhere), triton's
+   tl.exp is the 1-ULP outlier on 2/65536 patterns (neither expf nor __expf nor
+   torch matches it). Gate re-anchored to torch; claim wording corrected from
+   'byte-identical to lora4_m1->fused_lora_gates' to 'byte-identical to the
+   torch reference chain' (announce string still says vs lora4_m1+gates -- a
+   cosmetic string-only lag, code panel's call whether to reword).
+2. 15b_F1 leg log tail shows the serve process 'Killed' -- that is the leg
+   script's own end-of-leg pkill reaping the server AFTER all stages completed
+   (announce+smoke+sweep+trace all green above it); not a failure.
+3. Serve logs scrubbed of absolute paths (profiler output-dir echo) before
+   archiving, matching prior-round practice; scan clean of usernames/hosts/IPs.

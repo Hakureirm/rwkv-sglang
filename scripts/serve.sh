@@ -64,6 +64,13 @@ export RWKV_GEMV_AUTOTUNE=1        # arch-aware GEMV launch autotune (warmup onl
 # accumulated — a narrower-published-speed-number issue, not a correctness one (an
 # arch-specific divergence would fail the routine oracle re-verify this project runs per box).
 export RWKV_FUSED_GATES=1          # fused LoRA-gate activations (sigmoids+neg/mul/sub/add)
+# F0066c: the gate epilogue folded INTO lora stage2 (kills the standalone
+# _lora_gates launch + the raw-lo round trip on the bsz1 decode path). Tier
+# note: torch-reference-exact on ALL 65536 fp16 patterns (probe census) —
+# STRONGER than the triton path it replaces (which carries a 1-ULP tl.exp
+# anomaly on 2/65536 rare patterns); greedy 24/24+8/8 EXACT. Measured 7.2B
+# c=1 +0.35% (142.8), 1.5B +1.0% (514.5), kernels/step -32.
+export RWKV_FUSED_LORA_GATED=1
 export RWKV_FUSED_SQRELU=1         # epilogue-fused ffn relu(k)^2 into the key GEMV's store
 # W1' large-batch glue set (2026-07-13), same bar as the rest of this stack:
 # byte-exact vs the live reference ops (bench/test_ln_fused.py, zero differing

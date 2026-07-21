@@ -81,6 +81,43 @@ inv_sqrt_e = 0.6065306597126334). Extend stage1/2's meta with an epilogue-act
 code per role; byte-exact gate vs the two-op composition. Implement after
 (a)+(b) validate.
 
+## 6. F0066c RESULTS (2026-07-21, full round, clean window): WIN — 142.8 = 92.0% of Bo
+
+The stage2+gates fold (§2b) implemented as `lora4_m1_gated` and validated:
+
+**The gate saga (a real audit find):** round-1's composition gate failed 7/9 —
+deterministic, single-chain, rare — and the bit-level probe (full 65536-pattern
+fp16 census, `bench/results/f0066c/probe_sigmoid_bits.log`) INVERTED the
+suspicion: the new CUDA chain is bit-identical to torch.sigmoid on EVERY finite
+fp16 pattern (0/65536), while the deployed triton `_lora_gates_kernel`'s
+tl.exp deviates 1 ULP from torch/expf/__expf on exactly 2/65536 rare patterns
+(its own gate never sampled them). Adjudication: do NOT emulate the anomaly —
+the gate re-anchored to the TORCH reference chain (= the model's own non-fused
+fallback, the project's original semantic baseline), triton delta kept as an
+informational census. The replacement is numerically STRONGER than what it
+replaces.
+
+**Gates (all green):** torch-anchored composition 9/9 (census lines fired
+exactly on the 2 previously-failing cases, 1 element each — attribution
+confirmed); regression suite PASS; greedy full stack + LORA_GATED **1.5B
+24/24 + 7.2B 8/8 EXACT** (the 2/65536 anomaly never fired in the fixtures —
+no bit change on the pinned decodes); cross-check OFF EXACT.
+
+**Measurement (single-tenant, both instruments concordant):**
+
+| serving c=1 | F0 (off) | F1 (on) | Δ |
+|---|---|---|---|
+| 7.2B | 142.3 | **142.8** | +0.35% → **92.0% of Bo 155.2** |
+| 1.5B | 509.4 | **514.5** | +1.00% |
+
+Per-kernel contract exact: `_lora_gates_kernel` GONE, `lora_stage2_gated`
+283.43 us/step vs the composed 315.47 (−32.0 us + −32.3 launches/step;
+per-call pair 9.76→8.78 — the epilogue costs +0.80 inside stage2 and kills
+the 1.77 standalone launch); stage1 flat (control). kernels/step 502.2→469.1
+(prediction matched). 1.5B mirrors (−27.7 us). Promoted to serve.sh defaults.
+Ladder: F0065 91.0% → F0066b 91.5% → **F0066c 92.0%**. Raw:
+`bench/results/f0066c/`.
+
 ## 5. THE BIG ROCK banked (design, not implemented): inline-lerp GEMV — the
 ## correct successor to the failed J=6 kernel
 
