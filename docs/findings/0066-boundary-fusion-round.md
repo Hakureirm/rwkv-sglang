@@ -2,7 +2,7 @@
 doc_kind: finding
 finding_id: F0066
 title: "Stage-B fusion round (#57, after F0065): (a) fused add_ln+token-shift+lerp boundary kernel — ONE launch replaces the add_ln→shift_lerp6 (attn, J=6) and add_ln→shift_lerp1 (ffn, J=1) pairs, byte-exact composition (WIDE add_ln phases verbatim + glue rounding chain verbatim, `normed` never touches HBM), env RWKV_FUSED_ADDLN_SHIFT; (b) sparse-path finalize — persistent fp32 accumulator (at::zeros once per process, finalize re-zeros in-pass) + hand cast kernel replace the stock FillFunctor-zeros + float16_copy pair, closing BOTH former PDL chain breaks. Targets ~-100-150us/step of the ~710us residual gap to Bo."
-status: open — implemented on branch stage-b-smallkernels (commits 9e883c0 + this); (a) gate+measure in flight on the tower, (b) queued for the next validation round
+status: CLOSED (2026-07-21, round 2, clean single-tenant A/B) — SPLIT VERDICT, both published: **(b) sparse finalize = WIN, banked**: 7.2B 141.3→142.0 (+0.5%) / 1.5B 502.3→509.0 (+1.3%) serving, zeros+cast rows GONE, finalize 1.03us/call, kernels/step −32, **PDL overlap 79.1%→96.8%** (both chain breaks closed), unconditional. **(a) fused add_ln+shift = honest NET REGRESSION as shipped**: E1−E0 = −2.3% 7.2B / −1.8% 1.5B; the launch-count claim delivered (438 kernels/step, −63.6) but the J=6 kernel costs 10.43us/call vs 5.72 composed (+82% — ONE 512-thread block storing 6×8KB output planes can't match the composition's 16-block-parallel shift; single-block store bandwidth is the wall); J=1 is parity on 7.2B (5.48 vs 5.43) and WINS on 1.5B (3.69 vs 4.29). The −60..−90us/step projection is REFUTED (measured +150.6us) — second F0064-class lesson: projections need per-kernel evidence of the actual bound, store-side included. RWKV_FUSED_ADDLN_SHIFT stays default OFF; per-J arming (J=1 only) is supported by the data if wanted; J=6 needs a store-parallel rework before it can pay. Round-1's greedy gate also caught 3 unguarded x.dtype sites (fixed, 6b3e559) — and the audit-grep that missed them had excluded 'x\.dtype' to filter a known line: filters hide their own targets, audit unfiltered
 discovered_by: Fable 5, 2026-07-21
 severity: info
 related: [F0065, F0064, F0063, F0060]
@@ -80,6 +80,30 @@ PDL-armed). Transcription spec for the epilogue (exact chains, from fused.py):
 inv_sqrt_e = 0.6065306597126334). Extend stage1/2's meta with an epilogue-act
 code per role; byte-exact gate vs the two-op composition. Implement after
 (a)+(b) validate.
+
+## 4. RESULTS (2026-07-21 round 2, clean window, 60-sample sentinel zero co-resident)
+
+Gates all green: sparse battery PASS (finalize path), composition 24/24,
+greedy full-stack + WIDE + ADDLN_SHIFT **1.5B 24/24 + 7.2B 8/8 EXACT** (the
+round-1 crash fixed + re-gated), regression EXACT.
+
+| serving c=1 | E0 (=F0065+b) | E1 (+a) | E1−E0 (a-effect) |
+|---|---|---|---|
+| 7.2B | **142.0** (+0.5% vs 141.3) = **91.5% of Bo** | 138.8 | **−3.2 (−2.3%)** |
+| 1.5B | **509.0** (+1.3% vs 502.3) | 499.9 | −9.1 (−1.8%) |
+
+Kernel-loop concords (E0 141.28 / E1 138.15; BUSY 7202.5 → 7403.7, +201us).
+Per-kernel: (b) zeros+cast GONE, finalize 32.26×@1.03us, kernels/step
+533.6→501.6, **overlap 79.1→96.8%**; (a) add_ln_shift<2,6> 31.26×@**10.43us**
++ <2,1> 32.26×@5.48 = 502.8us/step vs the composed 352.2 (+150.6);
+shift_lerp1 gone, shift_lerp6 layer-0-remnant 1.02× (no pending residual at
+layer 0 — structurally can't fuse there), add_ln final-norm remnant 1.02×,
+kernels/step 438.0. Root cause of the J=6 loss: single-block 6-plane store
+bandwidth (see status). Disposition: (b) merged unconditional; (a) in-tree,
+default OFF, honest negative published; J=6 store-parallel rework + per-J
+arming are the follow-ups. Raw: `bench/results/f0066/` (c1_*.json E0/E1 both
+models + brackets, kerneltable_*, ab_summary.txt; the prefill-poisoned first
+E0 trace kept as *_dirty_prefillwindow evidence).
 
 ## 3. Artifacts
 

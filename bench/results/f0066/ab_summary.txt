@@ -1,0 +1,84 @@
+F0066 (fused add_ln+shift boundary, env RWKV_FUSED_ADDLN_SHIFT) + F0066b (sparse
+finalize: persistent fp32 accumulator + cast-and-rezero kernel, unconditional)
+Round-2 clean A/B, 5090, single-tenant, serve.sh MEMFRAC=0.85 CGMAXBS=32
+--max-running-requests 32, c=1 64in/256out (bench/bsz_throughput.py), greedy
+smoke hard gate per leg (7.2B fixture 8/8, 1.5B 24/24 — ALL legs EXACT),
+framing-2 48-step traces via /start_profile mid-decode (bench/step_span_from_trace.py).
+
+Legs: E0 = full stack + WIDE, ADDLN_SHIFT=0 (carries F0066b unconditionally).
+      E1 = E0 + RWKV_FUSED_ADDLN_SHIFT=1. Announce-line check enforced per leg
+      (E1 must show "[rwkv7] F0066 fused add_ln+shift boundary ENABLED", E0 must not) — all 4 legs correct.
+
+== Serving (c=1, out tok/s) =====================================================
+                       7.2B                    1.5B
+F0065 anchor (DW)      141.3                   502.3
+E0 (=F0065+b)          142.0 (run1 142.2)      509.0 (run1 508.0)
+E1 (=E0+a)             138.8                   499.9
+b effect (E0-anchor)   +0.7 (+0.5%)            +6.7 (+1.3%)
+a effect (E1-E0)       -3.2 (-2.3%)            -9.1 (-1.8%)
+vs Bo 155.2 (7.2B)     E0 91.5%  E1 89.4%      (F0065 was 91.0%)
+
+== Kernel-loop framing (span/step -> tok/s, steps by cudaGraphLaunch) ===========
+                       7.2B                    1.5B
+F0065 anchor (DW)      7149.6us -> 139.87      (F0065 15b DW ~502-ish serving; trace anchor n/a here)
+E0                     7078.4us -> 141.28      1942.7us -> 514.76
+E1                     7238.7us -> 138.15      1998.2us -> 500.44
+kernels/step           533.6 -> E0 501.6 -> E1 438.0        E0 376.9 -> E1 335.3
+overlapped transitions 79.1% -> E0 96.8% / E1 96.4%         E0 95.7% / E1 95.0%
+BUSY/step (7.2B)       7230.1 -> E0 7202.5 -> E1 7403.7
+
+== Per-kernel attribution (per step; us) ========================================
+7.2B F0066b (present in BOTH legs):
+  sparse_out_finalize_kernel        E0 31.20 calls/32.30us  E1 32.28/33.21  (~1.03us/call, as predicted)
+  at::native float16_copy (32/step) GONE (only an unrelated 1.69-call/1.5us copy remains in E0's window)
+  at::native FillFunctor<float>     GONE (both legs)
+  sparse_cmix_f32acc_kernel         F0065 13.38us/call -> E0 11.12/E1 13.08us/call (PDL-overlap-sensitive attribution; BUSY/step is the reliable axis)
+  kernels/step E0 501.6 = F0065 533.6 - 32.0  (=-64.5 pair +32.26 finalize, exact match)
+
+7.2B F0066a (E1 only):
+  add_ln_shift_kernel<2,6>          31.26 calls / 325.96us  (10.43us/call)
+  add_ln_shift_kernel<2,1>          32.26 calls / 176.87us  ( 5.48us/call)
+  fused block total                 63.5 calls / 502.8us
+  E0 composed equivalent            add_ln 63.53/251.35 + shift6 31.22/55.07 + shift1 31.20/45.75
+                                    = 125.95 calls / 352.2us
+  -> the fusion CUTS launches by 62.5/step but COSTS +150.6us/step GPU time.
+     Split: J=6 pair 10.43 vs composed 5.72us/call (+4.7us x 31.3 = +147us — the regression);
+            J=1 pair 5.48 vs composed 5.43us/call (parity).
+  remnants as designed: add_ln_kernel 1.02 calls/3.94us (final norm),
+  shift_lerp6 1.02/1.70 (layer-0 attn entry has no pending residual so the boundary
+  fusion cannot fire there; old glue path), shift_lerp1 fully gone.
+
+1.5B mirrors 7.2B:
+  E0 block: add_ln 47.98/136.22 + shift6 23.98/36.94 + shift1 24.00/34.72 = 95.96 calls/207.9us
+  E1 block: <2,6> 23.35/141.79 (6.07us/call) + <2,1> 24.37/90.02 (3.69us/call) = 47.7 calls/231.8us (+23.9us)
+  J=6: 6.07 vs composed 4.38us/call (loses); J=1: 3.69 vs 4.29 (WINS on 1.5B).
+  F0066b rows identical in kind: finalize ~24 calls/~1.0us/call, FillFunctor<float>+float16_copy pair gone.
+
+== Verdict ======================================================================
+F0066b: real, clean win. Both models, both instruments: 7.2B +0.5% serving / +1.4% kernel-loop
+  (vs F0065 anchor), 1.5B +1.3% serving; launch count -32/step; PDL overlap share 79->97%.
+F0066a as-built: launch-count claim DELIVERED (-63.5/step) and byte-exactness held
+  everywhere (all gates green), but the J=6 fused kernel costs ~1.8x the composed
+  pair per call, so E1 is a NET REGRESSION: 7.2B -2.3% / 1.5B -1.8% serving.
+  The round-1 projection (-60..-90us/step) is REFUTED: measured +150.6us/step (7.2B).
+  The J=1 variant alone is parity-to-positive (wins on 1.5B, parity on 7.2B).
+  Default stays OFF; per-J gating (arm J=1 only) or a J=6 kernel rework are the
+  follow-up options (not attempted here — measurement session, no kernel edits).
+
+== Anomalies (all verbatim in this dir) =========================================
+1. First E0 trace attempt profiled an IDLE server (start_profile before the gen):
+   window caught our own prefill + idle->decode transition (cutlass wmma /
+   _wkv_recurrent_kernel / _lerp6_kernel prefill rows, fake +587us/step gap,
+   129.64 "tok/s"). Kept as kerneltable_72b_E0_dirty_prefillwindow.txt +
+   traces/72b_E0_dirty_prefillwindow/. Protocol fixed: gen first, profile after
+   a settle (2.5s for 7.2B, 0.6s for 1.5B), matching F0065's mid-decode framing.
+2. First 15b_E0 trace attempt: the 2.5s settle outran the whole 1024-token 1.5B
+   decode (~2.0s), so the profiler armed idle and never saw 48 steps; a
+   stop_profile/start_profile collision on the armed-empty profile then produced
+   an empty response and the server died. Leg fully re-run with the 0.6s settle
+   (*_run1 artifacts kept as sweep brackets: 508.0 vs rerun 509.0 tok/s).
+3. E0's kernel table has slightly ragged per-step counts (62.40/31.20 vs E1's
+   64.53/32.26) — edge-trim clipping partial steps; per-call rates and BUSY/step
+   are the comparable quantities and are used above.
+4. bsz_throughput c1 numbers and kernel-loop numbers agree within 0.5-1.0 tok/s
+   on every leg (double-instrument concordance).
