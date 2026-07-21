@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""F0066c gate: lora4_m1_gated == lora4_m1 -> fused_lora_gates, byte-for-byte.
+"""F0066c gate: lora4_m1_gated == lora4_m1 -> the TORCH gate chain, byte-exact.
 
-The gated kernel claims: rows (w_log, a, g_raw[, v_new]) identical to running
-lora4_m1 then the triton _lora_gates_kernel (g is the raw lo row in both).
-Gate = torch.equal per row, C in {3, 4} (layer0 / layer>0), realistic rank
-splits, several seeds.
+REFERENCE CHOICE (probe-adjudicated, bench/results/f0066c/probe_sigmoid_bits.log):
+the gate anchors to the TORCH chain (-sigmoid(lo0)*inv_sqrt_e, sigmoid(lo1),
+raw lo2, v + (vf-v)*sigmoid(lo3)) — the project's original semantic baseline —
+NOT to the deployed triton _lora_gates_kernel. A full 65536-pattern fp16
+census showed the CUDA expf chain is bit-identical to torch.sigmoid on EVERY
+finite pattern (0/65536 mismatches), while triton's tl.exp deviates from
+torch/expf/__expf by 1 ULP on exactly 2/65536 rare patterns (its own gate
+never sampled them). Emulating triton's anomalous bits would enshrine the
+deviation; the gated kernel matches the reference everywhere instead. The
+triton delta is still printed as an INFORMATIONAL census (expected tiny, not
+a failure); greedy e2e remains the binding production gate.
 """
 import torch
 
@@ -41,10 +48,19 @@ def run_case(C, ranks, seed):
     vf = (torch.randn((1, H), generator=g, device="cuda") * 0.6).half()
     has_v = C == 4
 
-    # Path A: composition (deployed ops)
+    # Path A: lora4_m1 + the TORCH gate chain (the semantic reference — see
+    # module docstring; replicates the model's non-fused fallback exactly)
     lo = lora_fused.lora4_m1(xs, d_cat, u_cat, bias, meta)
-    w_a, a_a, v_a = fused_lora_gates(lo, v, vf, has_v)
+    w_a = -torch.sigmoid(lo[0:1]) * _INV_SQRT_E
+    a_a = torch.sigmoid(lo[1:2])
     g_a = lo[2:3]
+    v_a = v + (vf - v) * torch.sigmoid(lo[3:4]) if has_v else v
+
+    # Informational census vs the deployed triton kernel (expected: tiny 1-ULP
+    # deltas on the 2/65536 anomalous patterns, when sampled)
+    w_t, a_t, v_t = fused_lora_gates(lo, v, vf, has_v)
+    tri_delta = int((w_t != w_a).sum() + (a_t != a_a).sum()
+                    + ((v_t != v_a).sum() if has_v else 0))
 
     # Path B: gated
     yb = lora_fused.lora4_m1_gated(
@@ -56,6 +72,8 @@ def run_case(C, ranks, seed):
           and torch.equal(g_a, g_b))
     if has_v:
         ok = ok and torch.equal(v_a, yb[3:4])
+    if tri_delta:
+        print(f"  (info) triton-vs-torch delta elements C={C} seed={seed}: {tri_delta}")
     if not ok:
         print(f"FAIL C={C} ranks={ranks} seed={seed}: "
               f"w={torch.equal(w_a, w_b)} a={torch.equal(a_a, a_b)} "
