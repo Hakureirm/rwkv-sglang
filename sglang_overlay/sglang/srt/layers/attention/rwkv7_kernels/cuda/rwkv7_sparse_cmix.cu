@@ -28,6 +28,10 @@
 #include <torch/library.h>
 #include <cuda_fp16.h>
 
+#include <map>
+#include <mutex>
+#include <utility>
+
 #include "rwkv7_pdl.cuh"  // PDL chain (task #50 sm120 step); no-op unarmed
 
 namespace {
@@ -96,6 +100,43 @@ __global__ __launch_bounds__(THREADS, 4) void sparse_cmix_f32acc_kernel(
   rwkv7_pdl_launch_dependents();  // next stage schedules early (no-op unarmed)
 }
 
+// F0066b: hand finalize — reads the fp32 accumulator, writes the fp16 output
+// (same __float2half_rn rounding torch's .to(kHalf) applies), and RE-ZEROS the
+// accumulator in the same pass so the persistent buffer below never needs
+// at::zeros again. Replaces the (FillFunctor zeros + float16_copy cast) stock
+// pair — one launch instead of two, and BOTH former PDL chain breaks close
+// (the stock kernels couldn't carry griddepcontrol; this one does).
+__global__ void sparse_out_finalize_kernel(int H,
+                                           float* __restrict__ acc,
+                                           __half* __restrict__ out) {
+  const int k = blockIdx.x * blockDim.x + threadIdx.x;
+  rwkv7_pdl_wait();  // acc holds the cmix atomics' result (no-op unarmed)
+  if (k < H) {
+    out[k] = __float2half_rn(acc[k]);
+    acc[k] = 0.0f;  // buffer returns to the zeroed state for the next layer
+  }
+  rwkv7_pdl_launch_dependents();
+}
+
+// Persistent per-(device, H) fp32 accumulator: allocated + zeroed ONCE per
+// process; kept zeroed by the finalize kernel's read-and-rezero. All decode
+// work runs on one stream per rank, so reuse across layers/steps is ordered;
+// under cuda-graph the fixed address is exactly what capture wants. (If a
+// launch ever failed mid-step the buffer could be left dirty — the routine
+// greedy/oracle gates would catch the resulting divergence immediately.)
+static at::Tensor sparse_acc_buffer(int64_t H, const at::TensorOptions& opts) {
+  static std::mutex mu;
+  static std::map<std::pair<int, int64_t>, at::Tensor> cache;
+  std::lock_guard<std::mutex> g(mu);
+  const auto key = std::make_pair(
+      static_cast<int>(opts.device().index()), H);
+  auto it = cache.find(key);
+  if (it != cache.end()) return it->second;
+  auto t = at::zeros({H}, opts.dtype(at::kFloat));
+  cache.emplace(key, t);
+  return t;
+}
+
 // out[1,H] = tiled_value_weight @ relu(preact)^2 , fp32-accumulate, fp16 output.
 at::Tensor sparse_cmix(at::Tensor preact, at::Tensor wt, int64_t H) {
   const int64_t inter = preact.numel();
@@ -105,18 +146,27 @@ at::Tensor sparse_cmix(at::Tensor preact, at::Tensor wt, int64_t H) {
   TORCH_CHECK((inter % FFN_TILE) == 0 && (H % C_TILE) == 0, "sparse_cmix: shape not conforming");
   auto pc = preact.contiguous();
   auto wc = wt.contiguous();
-  auto out32 = at::zeros({H}, preact.options().dtype(at::kFloat));
+  auto out32 = sparse_acc_buffer(H, preact.options());
+  auto out16 = at::empty({1, H}, preact.options());
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 grid(static_cast<unsigned>(inter / FFN_TILE), static_cast<unsigned>(H / C_TILE));
+  const bool pdl = rwkv7_pdl_enabled("sparse");
   // torch only instantiates data_ptr<> for its scalar types (at::Half), not __half.
-  rwkv7_launch_maybe_pdl(rwkv7_pdl_enabled("sparse"), sparse_cmix_f32acc_kernel,
+  rwkv7_launch_maybe_pdl(pdl, sparse_cmix_f32acc_kernel,
       grid, dim3(THREADS), 0, stream.stream(),
       static_cast<int>(H),
       reinterpret_cast<const half*>(pc.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(wc.data_ptr<at::Half>()),
       out32.data_ptr<float>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  return out32.to(at::kHalf).view({1, H});
+  constexpr int kFinThreads = 256;
+  rwkv7_launch_maybe_pdl(pdl, sparse_out_finalize_kernel,
+      dim3(static_cast<unsigned>((H + kFinThreads - 1) / kFinThreads)),
+      dim3(kFinThreads), 0, stream.stream(), static_cast<int>(H),
+      out32.data_ptr<float>(),
+      reinterpret_cast<__half*>(out16.data_ptr<at::Half>()));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return out16;
 }
 
 TORCH_LIBRARY(rwkv7_sparse_cmix, m) {
