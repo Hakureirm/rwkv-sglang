@@ -214,6 +214,11 @@ _FUSED_VRESGATE = os.environ.get("RWKV_FUSED_VRESGATE", "0") == "1"
 # materializes). Decode-only via the glue eligibility; default OFF.
 _FUSED_ADDLN_SHIFT = os.environ.get("RWKV_FUSED_ADDLN_SHIFT", "0") == "1"
 _ADDLN_SHIFT_ANNOUNCED = False
+# F0066c: fold the LoRA-gate epilogue into lora4_m1's stage2 (kills the
+# standalone _lora_gates launch + the raw-lo round trip; byte-identical to
+# lora4_m1 -> fused_lora_gates, bench/test_lora_gated.py). Default OFF.
+_FUSED_LORA_GATED = os.environ.get("RWKV_FUSED_LORA_GATED", "0") == "1"
+_LORA_GATED_ANNOUNCED = False
 _ADDLN_ANNOUNCED = False  # one-time notice (fused residual-add + LayerNorm)
 _GNGC_ANNOUNCED = False  # one-time notice (fused GroupNorm + gate-corr)
 _RELUSQ_ANNOUNCED = False  # one-time notice (fused relu^2, dense ffn path)
@@ -927,6 +932,7 @@ class Rwkv7Attention(nn.Module):
         # chains' up(act(down(x)))+bias; the OUTER nonlinearities (w_log sigmoid, a
         # sigmoid, v-residual mix) stay in model code, identical to the torch path.
         lo = None       # [C,H] from lora4_m1 (T==1)
+        lo_gated = None  # [C,H] from lora4_m1_gated (F0066c: gate epilogue folded)
         lo_mn = None    # [T,C,H] from lora4_mn (T>1, ADR-0005 R3)
         # M-gate (measured crossover): the fused LoRA wins at small batch (bsz1
         # +15%) but LOSES to the cuBLAS-batched ReplicatedLinear at large M
@@ -947,12 +953,36 @@ class Rwkv7Attention(nn.Module):
                 C = 4 if self.layer_id > 0 else 3
                 if T == 1:
                     xs = lp[2:2 + C].reshape(C, -1)               # [C,H]
-                    lo = lora_fused.lora4_m1(xs, *self._lora_pack)
+                    if _FUSED_LORA_GATED and _FUSED_GATES:
+                        # F0066c: stage2 writes (w_log, a, g_raw[, v_new])
+                        # directly; v/vfirst only read when C==4 (layer>0).
+                        vf = v_first if (self.layer_id != 0 and v_first is not None) else v
+                        lo_gated = lora_fused.lora4_m1_gated(
+                            xs, *self._lora_pack,
+                            v.reshape(-1).contiguous(),
+                            vf.reshape(-1).contiguous(), _INV_SQRT_E)
+                        global _LORA_GATED_ANNOUNCED
+                        if self.layer_id == 0 and not _LORA_GATED_ANNOUNCED:
+                            import sys
+                            _LORA_GATED_ANNOUNCED = True
+                            print("[rwkv7] F0066c fused LoRA gate epilogue ENABLED "
+                                  "(stage2-folded; byte-exact vs lora4_m1+gates)",
+                                  file=sys.stderr, flush=True)
+                    else:
+                        lo = lora_fused.lora4_m1(xs, *self._lora_pack)
                 else:
                     # [C,T,H] -> [T,C,H]; per-token result == lora4_m1(xs[t]) (test_lora_mn.py)
                     xs = lp[2:2 + C].permute(1, 0, 2).contiguous()  # [T,C,H]
                     lo_mn = lora_fused.lora4_mn(xs, *self._lora_pack)  # [T,C,H]
-        if lo is not None:
+        if lo_gated is not None:
+            # F0066c rows: (w_log, a, g_raw[, v_new]) — same tensors the
+            # composition produced, slice-for-slice.
+            w_log = lo_gated[0:1]
+            a = lo_gated[1:2]
+            g = lo_gated[2:3]
+            if self.layer_id != 0:
+                v = lo_gated[3:4]
+        elif lo is not None:
             # W1: fuse the gate activations (3 sigmoids + neg/mul + v-residual) into
             # one launch, else the per-op torch path (bit-identical, test_lora_gates.py).
             if _FUSED_GATES:

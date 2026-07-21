@@ -78,6 +78,11 @@ def _register_fakes():
         @torch.library.register_fake("rwkv7_lora::lora4_mn")
         def _lora4_mn_fake(xs, d_cat, u_cat, bias_cat, meta):
             return xs.new_empty((xs.shape[0], xs.shape[1], xs.shape[2]))
+
+        @torch.library.register_fake("rwkv7_lora::lora4_m1_gated")
+        def _lora4_m1_gated_fake(xs, d_cat, u_cat, bias_cat, meta, v, vfirst,
+                                 inv_sqrt_e):
+            return xs.new_empty((xs.shape[0], xs.shape[1]))
     except Exception:
         pass  # older torch without register_fake -> caller must disable piecewise cuda graph
 
@@ -134,6 +139,26 @@ def lora4_m1(
     xs fp16 [C, H] = the chains' lerped inputs stacked in pack order. Caller
     (models/rwkv7.py) guarantees eligibility (fp16, M==1, packed weights built)."""
     return torch.ops.rwkv7_lora.lora4_m1(xs, d_cat, u_cat, bias_cat, meta)
+
+
+def lora4_m1_gated(
+    xs: torch.Tensor,
+    d_cat: torch.Tensor,
+    u_cat: torch.Tensor,
+    bias_cat: torch.Tensor,
+    meta: torch.Tensor,
+    v: torch.Tensor,
+    vfirst: torch.Tensor,
+    inv_sqrt_e: float,
+) -> torch.Tensor:
+    """F0066c: lora4_m1 with the gate epilogue folded into stage2.
+
+    Returns [C,H] with rows (w_log, a, g_raw[, v_new]) — byte-identical to
+    lora4_m1 followed by fused_lora_gates (bench/test_lora_gated.py); the
+    standalone _lora_gates_kernel launch and the raw-lo round trip are gone.
+    v/vfirst are [H] fp16 contiguous; only read when C==4 (layer>0)."""
+    return torch.ops.rwkv7_lora.lora4_m1_gated(
+        xs, d_cat, u_cat, bias_cat, meta, v, vfirst, inv_sqrt_e)
 
 
 def lora4_mn(

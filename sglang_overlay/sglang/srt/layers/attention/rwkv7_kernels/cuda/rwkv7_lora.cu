@@ -186,6 +186,80 @@ __global__ __launch_bounds__(Warps * 32, 1) void lora_stage2_kernel(
   rwkv7_pdl_launch_dependents();  // next stage schedules early (no-op unarmed)
 }
 
+// ---------------------------------------------------------------------------
+// F0066c: stage2 WITH the LoRA-gate epilogue folded in (kills the standalone
+// _lora_gates_kernel launch + the lo round trip). The pack's chain order is
+// FIXED (w, a, g[, v] — see fused_lora_gates' contract), so the epilogue
+// switches on the role index c directly, no meta change:
+//   c==0 (w): s0 = rnd(1/(1+expf(-lo)));  y = rnd((-s0) * inv_sqrt_e)
+//   c==1 (a): y = rnd(1/(1+expf(-lo)))
+//   c==2 (g): y = lo (raw — the caller's g slice is unchanged)
+//   c==3 (v): s3 = rnd(sigmoid(lo)); d = rnd(vf - v); p = rnd(d*s3);
+//             y = rnd(v + p)                      [only when C==4, layer>0]
+// where lo = rnd(acc + bias) — the exact fp16 value the standalone chain
+// loaded from memory; every rnd is the triton kernel's fp32-op->DT rounding,
+// transcribed 1:1 => byte-identical to lora4_m1 -> fused_lora_gates
+// (bench/test_lora_gated.py). Store pattern is unchanged (one lane-0 store
+// per output element across C*H/8 blocks) — no J=6-style single-block store
+// wall (the F0066a lesson applied).
+// ---------------------------------------------------------------------------
+template <int Warps>
+__global__ __launch_bounds__(Warps * 32, 1) void lora_stage2_gated_kernel(
+    int H, int C, int Rtot, float inv_sqrt_e,
+    const dtype* __restrict__ u_cat,     // [H, R_total]
+    const dtype* __restrict__ bias_cat,  // [C, H]
+    const int* __restrict__ meta,        // [C, 3]
+    const float* __restrict__ h,         // [R_total]
+    const dtype* __restrict__ v_in,      // [H] (attn v; only read when C==4)
+    const dtype* __restrict__ vf_in,     // [H] (v_first; only read when C==4)
+    dtype* __restrict__ y) {             // [C, H] gated rows
+  extern __shared__ float hs[];  // R_total floats
+  rwkv7_pdl_wait();  // h is stage1's output; wait before staging (no-op unarmed)
+  for (int i = threadIdx.x; i < Rtot; i += Warps * 32) hs[i] = h[i];
+  __syncthreads();
+  const int gw = blockIdx.x * Warps + (threadIdx.x >> 5);
+  if (gw >= C * H) return;
+  const int c = gw / H;
+  const int n = gw - c * H;
+  const int roff = meta[c * 3];
+  const int rank = meta[c * 3 + 1];
+  const dtype* u = u_cat + static_cast<int64_t>(n) * Rtot + roff;
+  const int lane = threadIdx.x & 31;
+  float acc = 0.0f;
+  if (((Rtot | roff | rank) & 1) == 0) {
+    for (int r = lane << 1; r < rank; r += 64) {
+      const float2 uv = __half22float2(*reinterpret_cast<const __half2*>(u + r));
+      acc = fmaf(uv.x, hs[roff + r], acc);
+      acc = fmaf(uv.y, hs[roff + r + 1], acc);
+    }
+  } else {
+    for (int r = lane; r < rank; r += 32) {
+      acc = fmaf(__half2float(u[r]), hs[roff + r], acc);
+    }
+  }
+  acc = warp_sum(acc);
+  if (lane == 0) {
+    const __half lo_h = __float2half_rn(acc + __half2float(bias_cat[gw]));
+    if (c == 0) {
+      const float s0 = __half2float(
+          __float2half_rn(1.f / (1.f + expf(-__half2float(lo_h)))));
+      y[gw] = __float2half_rn((-s0) * inv_sqrt_e);
+    } else if (c == 1) {
+      y[gw] = __float2half_rn(1.f / (1.f + expf(-__half2float(lo_h))));
+    } else if (c == 2) {
+      y[gw] = lo_h;
+    } else {  // c == 3: v-residual mix
+      const float s3 = __half2float(
+          __float2half_rn(1.f / (1.f + expf(-__half2float(lo_h)))));
+      const float vv = __half2float(v_in[n]);
+      const float d = __half2float(__float2half_rn(__half2float(vf_in[n]) - vv));
+      const float p = __half2float(__float2half_rn(d * s3));
+      y[gw] = __float2half_rn(vv + p);
+    }
+  }
+  rwkv7_pdl_launch_dependents();  // kk_kmix / wkv stage schedules early
+}
+
 at::Tensor lora4_m1(at::Tensor xs, at::Tensor d_cat, at::Tensor u_cat,
                     at::Tensor bias_cat, at::Tensor meta) {
   const int64_t C = xs.size(0);
@@ -227,6 +301,62 @@ at::Tensor lora4_m1(at::Tensor xs, at::Tensor d_cat, at::Tensor u_cat,
       u_cat.data_ptr<dtype>(), bias_cat.data_ptr<dtype>(),
       static_cast<const int*>(meta.data_ptr<int>()),
       static_cast<const float*>(h.data_ptr<float>()), y.data_ptr<dtype>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return y;
+}
+
+// F0066c host: lora4_m1 with the gate epilogue folded into stage2. v/vfirst
+// are only dereferenced when C==4 (layer>0); callers pass v for both when
+// C==3 (never read). Same stage1; the fused output rows are (w_log, a, g_raw
+// [, v_new]) in place of raw lo.
+at::Tensor lora4_m1_gated(at::Tensor xs, at::Tensor d_cat, at::Tensor u_cat,
+                          at::Tensor bias_cat, at::Tensor meta, at::Tensor v,
+                          at::Tensor vfirst, double inv_sqrt_e) {
+  const int64_t C = xs.size(0);
+  const int64_t H = xs.size(1);
+  const int64_t Rtot = d_cat.size(0);
+  TORCH_CHECK(xs.is_cuda() && xs.scalar_type() == at::kHalf, "lora4_m1_gated: xs must be CUDA fp16");
+  TORCH_CHECK(d_cat.scalar_type() == at::kHalf && u_cat.scalar_type() == at::kHalf &&
+              bias_cat.scalar_type() == at::kHalf, "lora4_m1_gated: weights/bias must be fp16");
+  TORCH_CHECK(meta.scalar_type() == at::kInt && meta.dim() == 2 &&
+              meta.size(0) == C && meta.size(1) == 3 && meta.is_cuda(),
+              "lora4_m1_gated: meta must be CUDA int32 [C,3]");
+  TORCH_CHECK(d_cat.size(1) == H, "lora4_m1_gated: d_cat [R_total,H] mismatch");
+  TORCH_CHECK(u_cat.size(0) == H && u_cat.size(1) == Rtot, "lora4_m1_gated: u_cat [H,R_total] mismatch");
+  TORCH_CHECK(bias_cat.size(0) == C && bias_cat.size(1) == H, "lora4_m1_gated: bias_cat [C,H] mismatch");
+  TORCH_CHECK(C == 3 || C == 4, "lora4_m1_gated: chain order contract needs C in {3,4}");
+  TORCH_CHECK(v.scalar_type() == at::kHalf && v.numel() == H && v.is_contiguous(),
+              "lora4_m1_gated: v fp16 [H] contiguous");
+  TORCH_CHECK(vfirst.scalar_type() == at::kHalf && vfirst.numel() == H &&
+              vfirst.is_contiguous(), "lora4_m1_gated: vfirst fp16 [H] contiguous");
+  TORCH_CHECK(xs.is_contiguous() && d_cat.is_contiguous() && u_cat.is_contiguous() &&
+              bias_cat.is_contiguous() && meta.is_contiguous(), "lora4_m1_gated: inputs must be contiguous");
+  TORCH_CHECK((H % 4) == 0, "lora4_m1_gated requires H%4==0");
+  TORCH_CHECK(Rtot >= 1, "lora4_m1_gated: empty rank total");
+  auto h = at::empty({Rtot}, xs.options().dtype(at::kFloat));
+  auto y = at::empty({C, H}, xs.options());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  const bool pdl = rwkv7_pdl_enabled("lora");
+  constexpr int kThreads = 128;
+  rwkv7_launch_maybe_pdl(pdl, lora_stage1_kernel<kThreads>,
+      dim3(static_cast<unsigned>(Rtot)), dim3(kThreads), 0, stream.stream(),
+      static_cast<int>(H), static_cast<int>(C),
+      xs.data_ptr<dtype>(), d_cat.data_ptr<dtype>(),
+      static_cast<const int*>(meta.data_ptr<int>()), h.data_ptr<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  constexpr int kWarps = 8;
+  const int64_t total = C * H;
+  const int64_t blocks = (total + kWarps - 1) / kWarps;
+  const size_t smem = static_cast<size_t>(Rtot) * sizeof(float);
+  rwkv7_launch_maybe_pdl(pdl, lora_stage2_gated_kernel<kWarps>,
+      dim3(static_cast<unsigned>(blocks)), dim3(kWarps * 32), smem,
+      stream.stream(),
+      static_cast<int>(H), static_cast<int>(C), static_cast<int>(Rtot),
+      static_cast<float>(inv_sqrt_e),
+      u_cat.data_ptr<dtype>(), bias_cat.data_ptr<dtype>(),
+      static_cast<const int*>(meta.data_ptr<int>()),
+      static_cast<const float*>(h.data_ptr<float>()),
+      v.data_ptr<dtype>(), vfirst.data_ptr<dtype>(), y.data_ptr<dtype>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return y;
 }
@@ -365,8 +495,11 @@ at::Tensor lora4_mn(at::Tensor xs, at::Tensor d_cat, at::Tensor u_cat,
 TORCH_LIBRARY(rwkv7_lora, m) {
   m.def("lora4_m1(Tensor xs, Tensor d_cat, Tensor u_cat, Tensor bias_cat, Tensor meta) -> Tensor");
   m.def("lora4_mn(Tensor xs, Tensor d_cat, Tensor u_cat, Tensor bias_cat, Tensor meta) -> Tensor");
+  m.def("lora4_m1_gated(Tensor xs, Tensor d_cat, Tensor u_cat, Tensor bias_cat, "
+        "Tensor meta, Tensor v, Tensor vfirst, float inv_sqrt_e) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(rwkv7_lora, CUDA, m) {
   m.impl("lora4_m1", &lora4_m1);
   m.impl("lora4_mn", &lora4_mn);
+  m.impl("lora4_m1_gated", &lora4_m1_gated);
 }
