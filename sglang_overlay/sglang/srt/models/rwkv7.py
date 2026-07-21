@@ -932,7 +932,7 @@ class Rwkv7Attention(nn.Module):
         # +15%) but LOSES to the cuBLAS-batched ReplicatedLinear at large M
         # (lora4_mn is correctness-first, no smem). Crossover ~M=4→8; fire only
         # for T <= RWKV_FUSED_LORA_MAX_BS (default 4), else torch fallback.
-        if self._fused_lora and fused and x.dtype == torch.float16 and T <= _FUSED_LORA_MAX_BS:
+        if self._fused_lora and fused and (lp6 is not None or x.dtype == torch.float16) and T <= _FUSED_LORA_MAX_BS:
             if self._lora_pack is None:
                 # lazy build on the first eligible (eager warmup) forward
                 self._lora_pack = self._build_lora_pack()
@@ -987,7 +987,7 @@ class Rwkv7Attention(nn.Module):
             vl = self.v_lora(xv) if self.layer_id != 0 else None
             if (
                 _FUSED_VRESGATE
-                and x.dtype == torch.float16
+                and (lp6 is not None or x.dtype == torch.float16)
                 and wl.is_contiguous()
                 and al.is_contiguous()
                 and v.is_contiguous()
@@ -1035,7 +1035,7 @@ class Rwkv7Attention(nn.Module):
         if (
             _FUSED_GNGC
             and fused
-            and x.dtype == torch.float16
+            and (lp6 is not None or x.dtype == torch.float16)
             and hd <= 64
             and self.g_norm.weight.dtype == torch.float16
             and ln_fused.available()
