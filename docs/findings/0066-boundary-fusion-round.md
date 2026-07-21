@@ -61,6 +61,19 @@ WIDE-off byte-PASS, `test_glue.py` untouched) + greedy verify_m1d full stack
 (a silent no-fire measured as a win is the classic self-deception — the agent
 brief hard-fails on missing announce). (b) sparse battery + greedy, next round.
 
+## 2b. Next cut banked (design read, not yet implemented): stage2 epilogue fold
+
+Both consumers of lora_stage2's outputs are PURE ELEMENTWISE (verified in
+fused.py): `_lora_gates_kernel` runs the w_log/a/v_out rounding chains directly
+on `lo` (stage2's output), and `_kk_kmix_kernel` computes kk = rnd(k·k_k) and
+k_new = rnd chains from (k, a) at the SAME per-element index. Fold: extend
+stage2's meta with a per-role epilogue-act code; after each warp's acc is
+final, apply the role's exact rounding chain in-register and write the FINAL
+tensors (w_log/a_out/v_out; for the `a` role additionally load k[h] +
+kk/ka params and emit kk_out/knew_out) instead of raw `lo`. Kills BOTH triton
+kernels (~112 us/step) + the lo/a round trips; extra inputs v/v_first/k/params;
+byte-exact gate vs the three-op composition. Implement after (a)+(b) validate.
+
 ## 3. Artifacts
 
 Branch `stage-b-smallkernels`: 9e883c0 (a: kernel+wiring+test) + this commit
