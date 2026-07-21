@@ -81,6 +81,28 @@ inv_sqrt_e = 0.6065306597126334). Extend stage1/2's meta with an epilogue-act
 code per role; byte-exact gate vs the two-op composition. Implement after
 (a)+(b) validate.
 
+## 5. THE BIG ROCK banked (design, not implemented): inline-lerp GEMV — the
+## correct successor to the failed J=6 kernel
+
+The J=6 loss teaches that materializing 6 lerp output planes is itself the
+waste. The albatross-style design: **the lerp outputs never exist in memory.**
+- A compact boundary kernel (one block/row, ~2us) does add + LN + conv-scatter
+  and writes only (y, d) — 2×8KB — where d = round_fp16(prev − y) is the
+  SHARED lerp delta (it does not depend on the role!).
+- The grouped r/k/v GEMV (and the lora stage1 reads, and the ffn.key GEMV via
+  x_k) compute their own input ON THE FLY in the x-load path:
+  x_role[k] = round_fp16(y[k] + round_fp16(mix_role[k]·d[k])) — the exact
+  shift_lerp rounding chain, in registers, per block. Each block reads y, d,
+  and ONLY its role's mix row (+24KB L2 per block vs +8KB today); the extra L2
+  reads ride under the DRAM weight stream (the bottleneck), so the cost is
+  ~hidden, while the wins are: the 6-plane writes+reads GONE, shift_lerp6/1
+  GONE, add_ln's apply-store halved. Estimated −(255+57+48) + ~130 ≈
+  **−230 us/step**. Consumers to convert: gemv_grouped (rkv), lora_stage1
+  (reads xw/xa/xg/xv — 4 more roles), ffn.key gemv_m1 (x_k role).
+  Byte-exactness is achievable (same per-element chains); the gate is the
+  composition equality on every consumer's output. This is a multi-kernel
+  surgery — its own round with its own finding, after F0066c banks.
+
 ## 4. RESULTS (2026-07-21 round 2, clean window, 60-sample sentinel zero co-resident)
 
 Gates all green: sparse battery PASS (finalize path), composition 24/24,
