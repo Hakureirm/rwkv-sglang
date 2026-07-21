@@ -63,16 +63,23 @@ brief hard-fails on missing announce). (b) sparse battery + greedy, next round.
 
 ## 2b. Next cut banked (design read, not yet implemented): stage2 epilogue fold
 
-Both consumers of lora_stage2's outputs are PURE ELEMENTWISE (verified in
-fused.py): `_lora_gates_kernel` runs the w_log/a/v_out rounding chains directly
-on `lo` (stage2's output), and `_kk_kmix_kernel` computes kk = rnd(k·k_k) and
-k_new = rnd chains from (k, a) at the SAME per-element index. Fold: extend
-stage2's meta with a per-role epilogue-act code; after each warp's acc is
-final, apply the role's exact rounding chain in-register and write the FINAL
-tensors (w_log/a_out/v_out; for the `a` role additionally load k[h] +
-kk/ka params and emit kk_out/knew_out) instead of raw `lo`. Kills BOTH triton
-kernels (~112 us/step) + the lo/a round trips; extra inputs v/v_first/k/params;
-byte-exact gate vs the three-op composition. Implement after (a)+(b) validate.
+CORRECTED after reading both triton kernels in full: `_lora_gates_kernel` is
+PURE ELEMENTWISE on `lo` (stage2's output) — foldable; but `_kk_kmix_kernel`
+has a **per-head L2 normalize** (tl.sum of kk² over head_dim=64 → sqrt →
+fp16-round → clamp 1e-12 → divide) — a 64-wide reduction that stage2's
+one-warp-per-output-element shape cannot host without cross-warp/-block
+plumbing. Revised scope: fold ONLY the gates chain into stage2's epilogue
+(~57 us/step + the lo round trips); `_kk_kmix` stays standalone (already
+PDL-armed). Transcription spec for the epilogue (exact chains, from fused.py):
+  w row:  s0 = rnd(1/(1+exp(-lo0))); wlog = rnd((-s0) * inv_sqrt_e)
+  a row:  a = rnd(1/(1+exp(-lo1)))
+  g row:  passthrough (caller-side slice today — keep writing raw lo)
+  v row (HAS_V, layer>0): s3 = rnd(sigmoid(lo3)); diff = rnd(vf - v);
+          prod = rnd(diff * s3); vnew = rnd(v + prod)   [needs v, v_first]
+(each rnd = fp32 op → __float2half_rn → back; sigmoid = 1/(1+expf(-x));
+inv_sqrt_e = 0.6065306597126334). Extend stage1/2's meta with an epilogue-act
+code per role; byte-exact gate vs the two-op composition. Implement after
+(a)+(b) validate.
 
 ## 3. Artifacts
 
