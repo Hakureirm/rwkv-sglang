@@ -214,6 +214,43 @@ class Rwkv7AttnBackend(MambaAttnBackendBase):
         from sglang.srt.layers.attention.rwkv7_kernels import glue
         return glue.shift_lerp1(normed.contiguous(), x_k.reshape(-1).contiguous(), ci, conv)
 
+    # F0066: fused (residual add + LN + paged token-shift + lerp) — one kernel
+    # replacing the add_ln -> shift_lerp* pair. Byte-exact vs that composition
+    # (bench/test_addln_shift.py); same eligibility as the glue ops plus the
+    # add_ln WIDE tier (fp16 affine, N<=4096). Returns None to fall back.
+    def try_fused_addln_shift6(self, x, delta, ln, layer_id, conv_idx, mix6,
+                               forward_batch):
+        e = self._fused_glue_conv(layer_id, conv_idx, x, forward_batch)
+        if e is None or mix6.dtype != torch.float16:
+            return None
+        if delta.dtype != torch.float16 or ln.weight.dtype != torch.float16:
+            return None
+        if x.shape[-1] > 4096 or (x.shape[-1] % 4) != 0:
+            return None
+        conv, ci = e
+        from sglang.srt.layers.attention.rwkv7_kernels import ln_fused
+        if not ln_fused.available():
+            return None
+        return ln_fused.add_ln_shift6(
+            x.contiguous(), delta.contiguous(), ln, mix6, ci, conv)
+
+    def try_fused_addln_shift1(self, x, delta, ln, layer_id, conv_idx, x_k,
+                               forward_batch):
+        e = self._fused_glue_conv(layer_id, conv_idx, x, forward_batch)
+        if e is None or x_k.dtype != torch.float16:
+            return None
+        if delta.dtype != torch.float16 or ln.weight.dtype != torch.float16:
+            return None
+        if x.shape[-1] > 4096 or (x.shape[-1] % 4) != 0:
+            return None
+        conv, ci = e
+        from sglang.srt.layers.attention.rwkv7_kernels import ln_fused
+        if not ln_fused.available():
+            return None
+        return ln_fused.add_ln_shift1(
+            x.contiguous(), delta.contiguous(), ln,
+            x_k.reshape(-1).contiguous(), ci, conv)
+
     # ---- WKV recurrence (decode + extend both -> OUR wkv_recurrent kernel) ----
     def recurrence(
         self,

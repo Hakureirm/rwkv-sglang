@@ -74,6 +74,15 @@ def _register_fakes():
         @torch.library.register_fake("rwkv7_ln::vres_gates")
         def _fv(wl, al, vl, v, vf, inv_sqrt_e):
             return torch.empty_like(wl), torch.empty_like(wl), torch.empty_like(v)
+
+        @torch.library.register_fake("rwkv7_ln::add_ln_shift6")
+        def _fs6(x, delta, gamma, beta, eps, mix6, cache_indices, conv):
+            T, N = x.shape
+            return torch.empty_like(x), x.new_empty((6, T, N))
+
+        @torch.library.register_fake("rwkv7_ln::add_ln_shift1")
+        def _fs1(x, delta, gamma, beta, eps, x_k, cache_indices, conv):
+            return torch.empty_like(x), torch.empty_like(x)
     except Exception:
         pass  # older torch without register_fake -> caller disables piecewise capture
 
@@ -102,6 +111,24 @@ def vres_gates(wl, al, vl, v, v_first, inv_sqrt_e):
     v_new = v + (v_first - v) * sigmoid(vl) (when vl is not None, layer>0)
     - bit-identical to the torch op chain (bench/test_ln_fused.py)."""
     return torch.ops.rwkv7_ln.vres_gates(wl, al, vl, v, v_first, inv_sqrt_e)
+
+
+def add_ln_shift6(x, delta, ln: torch.nn.LayerNorm, mix6, cache_indices, conv):
+    """F0066: fused add_ln (WIDE tier) + paged token-shift + 6-way lerp.
+
+    Returns (x_new, lp6[6,T,H]) — byte-exact vs add_ln(RWKV_ADDLN_WIDE=1)
+    followed by rwkv7_glue.shift_lerp6 (bench/test_addln_shift.py); `normed`
+    never materializes. Caller guards eligibility (decode, fp16, N<=4096)."""
+    return torch.ops.rwkv7_ln.add_ln_shift6(
+        x, delta, ln.weight, ln.bias, ln.eps, mix6, cache_indices, conv)
+
+
+def add_ln_shift1(x, delta, ln: torch.nn.LayerNorm, x_k, cache_indices, conv):
+    """F0066: fused add_ln (WIDE tier) + paged token-shift + 1-way lerp (ffn).
+
+    Returns (x_new, xk[T,H]) — byte-exact vs the two-op composition."""
+    return torch.ops.rwkv7_ln.add_ln_shift1(
+        x, delta, ln.weight, ln.bias, ln.eps, x_k, cache_indices, conv)
 
 
 def gn_gatecorr(o, r, k, r_k, v, g, gn: torch.nn.GroupNorm, nh: int):

@@ -208,6 +208,12 @@ _FUSED_RELUSQ = os.environ.get("RWKV_FUSED_RELUSQ", "0") == "1"
 # exact torch rounding chain (same validated sigmoid form as fused_lora_gates).
 # The g_lora GEMM chain is untouched. Same gates as the other W1' fusions.
 _FUSED_VRESGATE = os.environ.get("RWKV_FUSED_VRESGATE", "0") == "1"
+# F0066: fused (residual add + LN + paged token-shift + lerp) — replaces the
+# add_ln -> shift_lerp* pair at both per-layer norm boundaries with ONE kernel
+# (byte-exact vs that composition, bench/test_addln_shift.py; `normed` never
+# materializes). Decode-only via the glue eligibility; default OFF.
+_FUSED_ADDLN_SHIFT = os.environ.get("RWKV_FUSED_ADDLN_SHIFT", "0") == "1"
+_ADDLN_SHIFT_ANNOUNCED = False
 _ADDLN_ANNOUNCED = False  # one-time notice (fused residual-add + LayerNorm)
 _GNGC_ANNOUNCED = False  # one-time notice (fused GroupNorm + gate-corr)
 _RELUSQ_ANNOUNCED = False  # one-time notice (fused relu^2, dense ffn path)
@@ -827,8 +833,13 @@ class Rwkv7Attention(nn.Module):
         forward_batch: ForwardBatch,
         x: torch.Tensor,
         v_first: Optional[torch.Tensor],
+        lp6: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        T = x.shape[0]
+        # F0066: lp6 = precomputed [6,T,H] lerp outputs from the fused
+        # add_ln_shift6 boundary kernel; when given, x is None and the
+        # shift/lerp stage below is skipped (x is not used past the lerps
+        # on this path).
+        T = lp6.shape[1] if lp6 is not None else x.shape[0]
         if T == 0:
             return x, v_first
 
@@ -839,12 +850,12 @@ class Rwkv7Attention(nn.Module):
         # Fused triton elementwise path: bit-identical to the torch reference at
         # bf16/fp16 (verified), so it stacks with cuda-graph + int8. fp32 keeps the
         # original torch path (1-ULP reduction-order drift would risk the fp32 gate).
-        fused = x.dtype != torch.float32
+        fused = lp6 is not None or x.dtype != torch.float32
 
         # R2: try the fused paged token-shift + 6-way lerp (one kernel, shifted
         # stays on-chip). Falls back to token_shift + fused_lerp6 when ineligible.
-        lp = None
-        if fused:
+        lp = lp6
+        if lp is None and fused:
             lp = be.try_fused_shift_lerp6(x, self.layer_id, 0, self._mix6_buf(), forward_batch)
         if lp is not None:
             global _GLUE_ANNOUNCED
@@ -1112,12 +1123,15 @@ class Rwkv7FeedForward(nn.Module):
         )
         self._value_tiled = None
 
-    def forward(self, forward_batch: ForwardBatch, x: torch.Tensor) -> torch.Tensor:
-        if x.shape[0] == 0:
+    def forward(self, forward_batch: ForwardBatch, x: torch.Tensor,
+                xk_pre: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # F0066: xk_pre = precomputed lerp output from the fused add_ln_shift1
+        # boundary kernel; when given, x is None and the shift stage is skipped.
+        if xk_pre is None and x.shape[0] == 0:
             return x
         be = _linear_backend(forward_batch)
         # R2: fused paged token-shift + 1-way lerp (falls back to token_shift + torch lerp)
-        xk = be.try_fused_shift_lerp1(x, self.layer_id, 1, self.x_k, forward_batch)
+        xk = xk_pre if xk_pre is not None else be.try_fused_shift_lerp1(x, self.layer_id, 1, self.x_k, forward_batch)
         if xk is None:
             shifted = be.token_shift(x, self.layer_id, 1, forward_batch)
             xk = x + self.x_k * (shifted - x)
@@ -1224,16 +1238,44 @@ class Rwkv7DecoderLayer(nn.Module):
         # With RWKV_FUSED_ADDLN off (or ineligible) delta_in is always None and
         # this is byte-for-byte the original x = x + attn_out / x + ffn(...)
         # sequence.
+        f6 = None
         if delta_in is not None:
-            fl = _try_add_ln(x, delta_in, self.attn_norm)
-            if fl is not None:
-                x, normed = fl
+            if _FUSED_ADDLN_SHIFT and _FUSED_ADDLN and x.dtype == torch.float16:
+                be = _linear_backend(forward_batch)
+                if be is not None:
+                    f6 = be.try_fused_addln_shift6(
+                        x, delta_in, self.attn_norm, self.attn.layer_id, 0,
+                        self.attn._mix6_buf(), forward_batch)
+            if f6 is not None:
+                global _ADDLN_SHIFT_ANNOUNCED
+                if not _ADDLN_SHIFT_ANNOUNCED:
+                    import sys
+                    _ADDLN_SHIFT_ANNOUNCED = True
+                    print("[rwkv7] F0066 fused add_ln+shift boundary ENABLED "
+                          "(decode; byte-exact vs the two-op composition)",
+                          file=sys.stderr, flush=True)
+                x, lp6 = f6
+                attn_out, v_first = self.attn(forward_batch, None, v_first, lp6=lp6)
             else:
-                x = x + delta_in
-                normed = self.attn_norm(x)
+                fl = _try_add_ln(x, delta_in, self.attn_norm)
+                if fl is not None:
+                    x, normed = fl
+                else:
+                    x = x + delta_in
+                    normed = self.attn_norm(x)
+                attn_out, v_first = self.attn(forward_batch, normed, v_first)
         else:
             normed = self.attn_norm(x)
-        attn_out, v_first = self.attn(forward_batch, normed, v_first)
+            attn_out, v_first = self.attn(forward_batch, normed, v_first)
+        if _FUSED_ADDLN_SHIFT and _FUSED_ADDLN and x.dtype == torch.float16:
+            be = _linear_backend(forward_batch)
+            if be is not None:
+                f1 = be.try_fused_addln_shift1(
+                    x, attn_out, self.ffn_norm, self.attn.layer_id, 1,
+                    self.ffn.x_k, forward_batch)
+                if f1 is not None:
+                    x, xk1 = f1
+                    return x, v_first, self.ffn(forward_batch, None, xk_pre=xk1)
         fl = _try_add_ln(x, attn_out, self.ffn_norm)
         if fl is not None:
             x, normed2 = fl

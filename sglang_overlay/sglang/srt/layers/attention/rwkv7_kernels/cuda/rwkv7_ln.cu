@@ -226,6 +226,98 @@ __global__ void add_ln_kernel(int N, float eps,
   rwkv7_pdl_launch_dependents();  // shift_lerp stage schedules early
 }
 
+// F0066 (Stage-B fusion round 2): fused (residual add + LayerNorm + paged
+// token-shift + J-way lerp) — one launch replacing the add_ln -> shift_lerpJ
+// pair at both per-layer norm boundaries. BYTE-EXACT COMPOSITION: the
+// add/stats/apply phases are add_ln_kernel's WIDE config verbatim (same
+// (32,16) partition, same Welford trees => bit-identical y in registers), and
+// the shift/lerp phase replicates shift_lerp*_kernel's exact rounding chain
+// (sh = round_fp16(conv) read BEFORE the scatter; conv <- float(y_fp16);
+// d = round_fp16(sh - y); out_j = round_fp16(y + round_fp16(mix_j * d))) on
+// the register-resident y. `normed` never touches HBM (the composition wrote
+// 8KB + re-read it twice); gated by bench/test_addln_shift.py: torch.equal on
+// (x_new, out, conv-after) vs the two-op composition, pads included.
+// PAD rows (ci<0 or >=S): x_new/stats still computed + written (composition
+// parity — add_ln has no pad concept), out rows zeroed, conv untouched.
+template <int MaxVecPerThread, int J>
+__global__ void add_ln_shift_kernel(
+    int N, float eps, int S,
+    const dtype* __restrict__ x,
+    const dtype* __restrict__ delta,
+    const dtype* __restrict__ gamma,
+    const dtype* __restrict__ beta,
+    const dtype* __restrict__ mixes,        // [J, N] fp16
+    const int* __restrict__ cache_indices,  // [T]
+    float* __restrict__ conv,               // [S, N] fp32, row stride N
+    dtype* __restrict__ x_new,              // [T, N]
+    dtype* __restrict__ out) {              // [J, T, N]
+  extern __shared__ float s_data[];
+  const int64_t i1 = blockIdx.x;
+  const int64_t T = gridDim.x;
+  const half4* xv = reinterpret_cast<const half4*>(x + i1 * N);
+  const half4* dv = reinterpret_cast<const half4*>(delta + i1 * N);
+  const half4* gv = reinterpret_cast<const half4*>(gamma);
+  const half4* bv = reinterpret_cast<const half4*>(beta);
+  half4* xnv = reinterpret_cast<half4*>(x_new + i1 * N);
+  const int numx = blockDim.x * blockDim.y;
+  const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
+  const int n_vec = N / kVec;
+  rwkv7_pdl_wait();  // x/delta from the predecessor block (no-op unarmed)
+  half4 own[MaxVecPerThread];
+  int n_own = 0;
+  for (int i = thrx; i < n_vec; i += numx) {
+    half4 a = xv[i];
+    half4 b = dv[i];
+    half4 s;
+#pragma unroll
+    for (int ii = 0; ii < kVec; ii++) {
+      s.val[ii] =
+          __float2half_rn(__half2float(a.val[ii]) + __half2float(b.val[ii]));
+    }
+    xnv[i] = s;
+    own[n_own++] = s;
+  }
+  WelfordLN wd = ln_compute_stats<MaxVecPerThread>(own, n_own, N, s_data);
+  float rstd_val = rsqrtf(wd.sigma2 + eps);
+  const int ci = cache_indices[i1];
+  const bool padrow = (ci < 0 || ci >= S);
+  float* cr = padrow ? nullptr : conv + static_cast<int64_t>(ci) * N;
+  int slot = 0;
+  for (int i = thrx; i < n_vec; i += numx, ++slot) {
+    half4 data = own[slot];
+    half4 g4 = gv[i];
+    half4 b4 = bv[i];
+#pragma unroll
+    for (int ii = 0; ii < kVec; ii++) {
+      const int k = i * kVec + ii;
+      const int64_t obase = i1 * N + k;
+      if (padrow) {
+#pragma unroll
+        for (int j = 0; j < J; ++j) {
+          out[static_cast<int64_t>(j) * T * N + obase] = __float2half_rn(0.f);
+        }
+        continue;
+      }
+      // add_ln apply expression verbatim -> the fp16 y the composition stored
+      const __half yh = __float2half_rn(
+          __half2float(g4.val[ii]) *
+              (rstd_val * (__half2float(data.val[ii]) - wd.mean)) +
+          __half2float(b4.val[ii]));
+      const float y_f = __half2float(yh);            // shift's f32(normed_fp16)
+      const float sh = __half2float(__float2half_rn(cr[k]));  // prev BEFORE scatter
+      cr[k] = y_f;                                   // conv <- float(normed)
+      const float d = __half2float(__float2half_rn(sh - y_f));
+#pragma unroll
+      for (int j = 0; j < J; ++j) {
+        const float m = static_cast<float>(mixes[static_cast<int64_t>(j) * N + k]);
+        const float prod = __half2float(__float2half_rn(m * d));
+        out[static_cast<int64_t>(j) * T * N + obase] = __float2half_rn(y_f + prod);
+      }
+    }
+  }
+  rwkv7_pdl_launch_dependents();  // r/k/v (J=6) or ffn.key (J=1) GEMV schedules early
+}
+
 // ---- torch GroupNorm RowwiseMoments Welford (WelfordOps: true division) ----
 struct WelfordGN {
   float mean;
@@ -529,6 +621,89 @@ std::tuple<at::Tensor, at::Tensor> add_ln(at::Tensor x, at::Tensor delta,
   return {x_new, y};
 }
 
+// F0066 host: shared launcher for J=6 (attn entry) and J=1 (ffn entry).
+// WIDE-tier only ((32,16), MaxVec=2 => N<=4096); the Python wrapper falls back
+// to the two-op path when ineligible, so these are hard checks, not dispatch.
+std::tuple<at::Tensor, at::Tensor> add_ln_shift_impl(
+    at::Tensor x, at::Tensor delta, at::Tensor gamma, at::Tensor beta,
+    double eps, at::Tensor mixes, at::Tensor cache_indices, at::Tensor conv,
+    int64_t J) {
+  const int64_t T = x.size(0);
+  const int64_t N = x.size(1);
+  TORCH_CHECK(x.is_cuda() && x.scalar_type() == at::kHalf, "add_ln_shift: x CUDA fp16");
+  TORCH_CHECK(delta.scalar_type() == at::kHalf && delta.sizes() == x.sizes(),
+              "add_ln_shift: delta fp16 same shape");
+  TORCH_CHECK(gamma.scalar_type() == at::kHalf && gamma.numel() == N &&
+                  beta.scalar_type() == at::kHalf && beta.numel() == N,
+              "add_ln_shift: affine fp16 [N]");
+  TORCH_CHECK(mixes.scalar_type() == at::kHalf && mixes.numel() == J * N,
+              "add_ln_shift: mixes fp16 [J,N]");
+  TORCH_CHECK(conv.scalar_type() == at::kFloat && conv.is_contiguous() &&
+                  conv.dim() >= 2 && conv.size(1) == N,
+              "add_ln_shift: conv fp32 [S,N,1] contiguous, hidden==N");
+  TORCH_CHECK(cache_indices.scalar_type() == at::kInt &&
+                  cache_indices.size(0) == T,
+              "add_ln_shift: cache_indices int32 [T]");
+  TORCH_CHECK(x.is_contiguous() && delta.is_contiguous() &&
+                  gamma.is_contiguous() && beta.is_contiguous() &&
+                  mixes.is_contiguous() && cache_indices.is_contiguous(),
+              "add_ln_shift: inputs contiguous");
+  TORCH_CHECK(N % kVec == 0 && N <= 2 * 512 * kVec,
+              "add_ln_shift: N%4==0 and N<=4096 (WIDE tier)");
+  auto x_new = at::empty_like(x);
+  auto out = at::empty({J, T, N}, x.options());
+  if (T == 0) return {x_new, out};
+  auto stream = at::cuda::getCurrentCUDAStream();
+  const bool pdl = rwkv7_pdl_enabled("ln");
+  const dim3 threads_w(32, 16, 1);
+  const int nshared_w = threads_w.y * 3 / 2 * sizeof(float);
+  if (J == 6) {
+    rwkv7_launch_maybe_pdl(pdl, add_ln_shift_kernel<2, 6>,
+        dim3(static_cast<unsigned>(T)), threads_w, nshared_w, stream.stream(),
+        static_cast<int>(N), static_cast<float>(eps),
+        static_cast<int>(conv.size(0)),
+        static_cast<const dtype*>(x.data_ptr<dtype>()),
+        static_cast<const dtype*>(delta.data_ptr<dtype>()),
+        static_cast<const dtype*>(gamma.data_ptr<dtype>()),
+        static_cast<const dtype*>(beta.data_ptr<dtype>()),
+        static_cast<const dtype*>(mixes.data_ptr<dtype>()),
+        static_cast<const int*>(cache_indices.data_ptr<int>()),
+        conv.data_ptr<float>(), x_new.data_ptr<dtype>(),
+        out.data_ptr<dtype>());
+  } else {
+    TORCH_CHECK(J == 1, "add_ln_shift: J must be 6 or 1");
+    rwkv7_launch_maybe_pdl(pdl, add_ln_shift_kernel<2, 1>,
+        dim3(static_cast<unsigned>(T)), threads_w, nshared_w, stream.stream(),
+        static_cast<int>(N), static_cast<float>(eps),
+        static_cast<int>(conv.size(0)),
+        static_cast<const dtype*>(x.data_ptr<dtype>()),
+        static_cast<const dtype*>(delta.data_ptr<dtype>()),
+        static_cast<const dtype*>(gamma.data_ptr<dtype>()),
+        static_cast<const dtype*>(beta.data_ptr<dtype>()),
+        static_cast<const dtype*>(mixes.data_ptr<dtype>()),
+        static_cast<const int*>(cache_indices.data_ptr<int>()),
+        conv.data_ptr<float>(), x_new.data_ptr<dtype>(),
+        out.data_ptr<dtype>());
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return {x_new, out};
+}
+
+std::tuple<at::Tensor, at::Tensor> add_ln_shift6(
+    at::Tensor x, at::Tensor delta, at::Tensor gamma, at::Tensor beta,
+    double eps, at::Tensor mix6, at::Tensor cache_indices, at::Tensor conv) {
+  return add_ln_shift_impl(x, delta, gamma, beta, eps, mix6, cache_indices,
+                           conv, 6);
+}
+
+std::tuple<at::Tensor, at::Tensor> add_ln_shift1(
+    at::Tensor x, at::Tensor delta, at::Tensor gamma, at::Tensor beta,
+    double eps, at::Tensor x_k, at::Tensor cache_indices, at::Tensor conv) {
+  auto r = add_ln_shift_impl(x, delta, gamma, beta, eps, x_k, cache_indices,
+                             conv, 1);
+  return {std::get<0>(r), std::get<1>(r).squeeze(0)};  // [1,T,N] -> [T,N]
+}
+
 at::Tensor gn_gatecorr(at::Tensor o, at::Tensor r, at::Tensor k, at::Tensor rk,
                        at::Tensor v, at::Tensor g, at::Tensor gamma,
                        at::Tensor beta, double eps, int64_t nh) {
@@ -579,10 +754,22 @@ TORCH_LIBRARY(rwkv7_ln, m) {
   m.def(
       "vres_gates(Tensor wl, Tensor al, Tensor? vl, Tensor v, Tensor? vf, "
       "float inv_sqrt_e) -> (Tensor, Tensor, Tensor)");
+  // F0066: conv is mutated in-place (token-shift scatter) — declare (a!) so
+  // functionalization/compile passes see the write (same as rwkv7_glue).
+  m.def(
+      "add_ln_shift6(Tensor x, Tensor delta, Tensor gamma, Tensor beta, "
+      "float eps, Tensor mix6, Tensor cache_indices, Tensor(a!) conv) "
+      "-> (Tensor, Tensor)");
+  m.def(
+      "add_ln_shift1(Tensor x, Tensor delta, Tensor gamma, Tensor beta, "
+      "float eps, Tensor x_k, Tensor cache_indices, Tensor(a!) conv) "
+      "-> (Tensor, Tensor)");
 }
 TORCH_LIBRARY_IMPL(rwkv7_ln, CUDA, m) {
   m.impl("add_ln", &add_ln);
   m.impl("gn_gatecorr", &gn_gatecorr);
   m.impl("relu_sq", &relu_sq);
   m.impl("vres_gates", &vres_gates);
+  m.impl("add_ln_shift6", &add_ln_shift6);
+  m.impl("add_ln_shift1", &add_ln_shift1);
 }
