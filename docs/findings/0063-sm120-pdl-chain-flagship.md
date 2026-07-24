@@ -66,7 +66,7 @@ machine: 5090 tower (sm120, driver 595-open/CUDA 13.2 host, dev-cu12 container C
   registered; the is_hybrid_ssm WARN is the documented benign case on main.
   Deployed files byte-verified (cmp) against the synced tree: zero diffs.
   **Option-B is validated on sm120** — same path as the 3090 proof.
-- Models: `/data/hakureirm/rwkv-sglang/models/rwkv7-{7.2b,1.5b}-fla`.
+- Models: `/data/rwkv/rwkv-sglang/models/rwkv7-{7.2b,1.5b}-fla`.
 
 ## 2. Phase 1 — server boot + smoke + anchor
 
@@ -323,15 +323,15 @@ the end to release the card back to the (currently-down) sky scheduler.
 ssh $TOWER 'sudo k3s kubectl get pods -A --field-selector=status.phase=Pending --no-headers; nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader'
 ssh $TOWER docker start rwkv-serve
 # 1) 7.2B matrix (A anchor -> D flagship -> B/C attribution), ~25 min:
-ssh $TOWER 'docker exec -d rwkv-serve bash -c "cd /data/hakureirm/rwkv-sglang/repo-mega && bash bench/mega_flag_matrix.sh /models/rwkv7-7.2b-fla 30070 /data/hakureirm/rwkv-sglang/logs/mega/clean 72b > /data/hakureirm/rwkv-sglang/logs/mega/matrix72b.log 2>&1"'
+ssh $TOWER 'docker exec -d rwkv-serve bash -c "cd /data/rwkv/rwkv-sglang/repo-mega && bash bench/mega_flag_matrix.sh /models/rwkv7-7.2b-fla 30070 /data/rwkv/rwkv-sglang/logs/mega/clean 72b > /data/rwkv/rwkv-sglang/logs/mega/matrix72b.log 2>&1"'
 #    expected: A ~133-134 (>2% deviation -> investigate: CGMAXBS=32-vs-512 is
 #    documented-neutral; the sglang base bump b28bc10->754524d is the first
 #    suspect); D = the flagship number vs 168.0 ceiling (=100%) and 155.2 (Bo).
 # 2) traces for framing-2 + PDL attribution (A and D boots + /start_profile 48
 #    steps + bench/step_span_from_trace.py) — span/step p50, busy, gap, overlap%.
 # 3) same-session albatross v3b (~3 min, in rwkv-serve, competitor code stays in
-#    scratch): cd /data/hakureirm/rwkv-sglang/scratch/albatross_v3b/faster3b_2607
-#    && python3 rwkv7_fast_v3b_b1t1_260713.py --model /data/hakureirm/rwkv-sglang/models/rwkv7-g1/rwkv7-g1g-7.2b-20260523-ctx8192.pth
+#    scratch): cd /data/rwkv/rwkv-sglang/scratch/albatross_v3b/faster3b_2607
+#    && python3 rwkv7_fast_v3b_b1t1_260713.py --model /data/rwkv/rwkv-sglang/models/rwkv7-g1/rwkv7-g1g-7.2b-20260523-ctx8192.pth
 #    (g1g vs Bo's g1f: same dims, disclosed; --use_fast_math is THEIR posture)
 # 4) 1.5B matrix (bonus): same script, /models/rwkv7-1.5b-fla, tag 15b.
 # 5) racecheck re-run (LAST, it serializes the GPU): compute-sanitizer racecheck

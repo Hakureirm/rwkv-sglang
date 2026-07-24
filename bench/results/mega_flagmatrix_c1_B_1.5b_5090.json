@@ -31,6 +31,6 @@
     "out_len": 256,
     "reqs_mult": 4,
     "min_reqs": 8,
-    "out": "/data/hakureirm/rwkv-sglang/logs/mega/clean/c1_15b_B.json"
+    "out": "/data/rwkv/rwkv-sglang/logs/mega/clean/c1_15b_B.json"
   }
 }
