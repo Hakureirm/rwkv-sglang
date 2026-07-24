@@ -1069,6 +1069,15 @@ Reading notes, in the order they matter:
   different card — the direction Bo's own statement anticipates. An independent community
   reproduction on another RTX 5090 (shared in community chat; not a published artifact,
   variant/tuning unknown) lands within ~5% of this grid at all three README shapes.
+- **On the "but someone's 5090 hit the headline numbers" question.** The two 5090
+  measurements here that come with a methodology — this grid and that community
+  reproduction — agree within ~5%, and our own 5090 re-tune moves large-batch throughput
+  ≤1%. So a 5090 reaching the Pro-6000 chart's ≈13k (B256) / ≈17k (B16×16) would sit
+  30–45% above *both* documented 5090 runs, which tuning does not explain (we tried).
+  Unattributed "5090" figures circulating at that level coincide almost exactly with the
+  **Pro-6000 chart** values, not with either documented 5090 run — so absent a stated
+  variant + protocol + artifact we treat them as unverified (most consistent with
+  Pro-6000 provenance or a mislabeled card), not as evidence the gap is under-tuning.
 - **The two trees trade places by shape.** `faster3_2605` is much slower single-stream on
   this card (83.9 vs 147.5 at B1) but is the faster tree at B64 (5,335.5 vs 4,662.2, +14%);
   everywhere else `faster3a` leads. Our 5090 re-tune (the same 14-edit diff as above,
