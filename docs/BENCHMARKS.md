@@ -33,6 +33,49 @@ its numbers are ~2× lower for batched decode and are never quoted against the c
 
 ---
 
+## Headline numbers — read this first
+
+> Just want to know how fast and how accurate it is *right now*? This section is enough.
+> Each number cites its detail section (prose §-refs — Ctrl-F the section number to jump) and its
+> measurement date; full conditions, raw files, and historical/per-tier values are in §1–§13 below.
+> **The current-best bsz1 single-request numbers are in §7a-flagship (2026-07-21 megakernel ladder),
+> not §3/§5** — the 1.5B 397.3/447.3 and 7.2B 123.7 in §3/§5 are *pre*-megakernel values, kept only
+> for the step-by-step breakdown.
+
+**Speed · single-request bsz1 (RTX 5090, [steady-state](#g-bsz1) decode)**
+
+| model · precision | current best | vs | source |
+|---|---:|---|---|
+| RWKV-7 **7.2B** fp16 | **142.8 tok/s** | = **92.0%** of Bo's official 155.2 | §7a-flagship · 2026-07-21 |
+| RWKV-7 **1.5B** fp16 | **514.5 tok/s** | same flagship ladder | §7a-flagship · 2026-07-21 |
+
+**Speed · [peak](#g-peak) serving throughput (wall-clock, 64-in/256-out)**
+
+| config | peak tok/s | source |
+|---|---:|---|
+| 1.5B fp16 (RTX 5090) | **22,175** (512 [concurrency](#g-concurrency)) | §5 |
+| 1.5B int8 [w8a8](#g-tiers) (RTX 3090) | **9,851** (256 concurrency) | §5 |
+| 7.2B (RTX 5090) | same protocol c128 = 7,087; peak-concurrency pending a megakernel-round re-measure | §5 |
+
+**Accuracy (the two official [rulers](#g-bpb) + [correctness](#g-oracle))**
+
+| metric | 1.5B | 7.2B |
+|---|---:|---:|
+| [compression bpb](#g-bpb) (lower = better) | 0.6085 | **0.5413** |
+| [MATH500](#g-math500) | avg@64 **0.4042** | greedy avg@1 **0.6320** |
+| oracle token-exact | 24/24 | 24/24 |
+
+- **Correctness**: greedy output vs a pure-numpy fp32 reference — 0.1B / 1.5B / 7.2B (CUDA) + Apple Silicon (MLX) all **24/24** → §1
+- **Quantization**: w8g64 greedy-lossless · w8a8 −2.3pt (MATH500) · int4 collapses −24–26pt on small models (compression hides it; full picture in §4) → §4 / §4b
+- **Platforms**: 11 CUDA GPUs (2018 T4 → B200, RTX 5090) + Apple Silicon (MLX) → §6 / §12
+- **Structural edge**: constant-size recurrent state — per-request memory barely grows with concurrency or context (§10); high-concurrency / long-context is this architecture's home turf
+
+> ⚠️ Framing note: some concurrency/peak values were measured pre-megakernel and are being re-measured
+> to a uniform "fully-optimized, same-precision" bar; the bsz1 flagship (142.8 / 514.5) and
+> accuracy/correctness are current. When a number looks off, trust the dated section with its raw file.
+
+---
+
 ## 0. Glossary — every term in plain words / 名词表——每个术语说人话
 
 Every recurring term in this document, three ways: the term itself, what it means technically
