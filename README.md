@@ -47,7 +47,10 @@ of extra VRAM. High concurrency and long context are where this architecture win
 | RTX 3090 | 230.7 tok/s | 7,205 tok/s fp16 · **9,851 tok/s int8** |
 | RTX 5090 | **409.8 tok/s** fp16 · **548.8** int4 | **22,175 tok/s** |
 
-**7.2B, one RTX 5090 (32 GB):** single request 123.7 tok/s (fp16). Peak serving:
+**7.2B, one RTX 5090 (32 GB):** single request **142.8 tok/s** (fp16) — the megakernel
+flagship ladder (2026-07-21, F0066c), full step-by-step story in
+[BENCHMARKS §7a-flagship](docs/BENCHMARKS.md#7a-flagship-single-stream-megakernel-ladder-the-flagship-bsz1-story-vs-bo).
+Peak serving:
 **6,709 tok/s (fp16 @ c320, safe to ≥344 concurrent)** vs **7,587 tok/s
 (int8, 640 concurrent)**. At bsz 1 fp16 is faster; int8's win is the VRAM headroom that
 lets 7.2B scale to 1.86× the concurrency — the full story (and the correction to a

@@ -22,7 +22,7 @@ slightly faster across the board.
 | plain meaning | "tokens per second once it's running" | "tokens per second from request sent to answer complete" |
 | includes prompt reading (TTFT)? | no | yes |
 | tool | `bench/serving_scale.py` | `bench/bsz_throughput.py` (64-in/256-out) |
-| used in | §3 single-request ladder, §4 quant | §4b int4 speed, §5 sweeps, §6 fleet, §7 Albatross |
+| used in | §3 single-request ladder, §4 quant | §4b int4 speed, §5 sweeps, §6 fleet, §7 Albatross, §7a-flagship |
 
 Same config, same GPU: steady-state reads ~3% higher. Every table below says which window it uses.
 
@@ -795,11 +795,15 @@ byte-exact glue fusions; full ledger and every isolated fusion's contribution:
 
 | concurrency | tok/s |
 |---|---|
-| 1 (single request) | 133.4 |
+| 1 (single request) | 142.8 |
 | 32 | 2,636.4 |
 | 128 | 7,087.3 |
 
-Raw: `bench/results/w1prime_legFinal_B_7.2b_5090.json`.
+Raw: `bench/results/w1prime_legFinal_B_7.2b_5090.json` (c=32/c=128, still the 2026-07-13 W1'
+config). The c=1 cell is the later megakernel flagship number (2026-07-21, F0066c) — see
+§7a-flagship for the full 133.4→142.8 ladder and per-step sourcing. The megakernel/PDL/fusion
+work lands on the bsz1 decode path only so far (F0064 §6: the concurrency GEMV kernel,
+`gemv_mb`, is a separate deferred round) — c=32/c=128 are not yet re-measured under it.
 
 ## 6. The 10-GPU fleet (same code, same recipe, every card)
 
@@ -1067,6 +1071,135 @@ table) + `albatross_5090/retuned_summary.json` + `bsz_sweep_fullstack_{3090main,
 official/README reference numbers (bottom panel). Regenerate:
 `python bench/plots/make_benchmark_plots.py`.*
 
+## 7a-flagship. Single-stream megakernel ladder: the flagship bsz1 story vs Bo
+
+§7 and §7a compare per-card single-stream and large-batch numbers against Albatross at a fixed
+point in time. This section tracks one number over time instead: **7.2B bsz1 on a single RTX
+5090** — fp16 weights + fp32 WKV state, sgl.Engine end-to-end serving (the real request path,
+scheduler included), cuda-graph ON, radix cache OFF, our standard 64-in/256-out shape —
+through the whole megakernel/PDL/fusion effort (task #50/#57, 2026-07-18 through 2026-07-21).
+Every row below traces to one finding; nothing here is a fresh measurement for this table.
+
+| step | what it adds | tok/s | kernel-loop framing | % of Bo's 155.2 | finding |
+|---|---|---:|---:|---:|---|
+| anchor | pre-megakernel full stack (`RWKV_STATE_FP16` + all five W1' glue fusions) | 133.4 | — | — | F0056 |
+| 1 | + megakernel PDL chain (grouped GEMV + hand-CUDA WKV + programmatic dependent launch across the whole decode block) | 137.8 | 136.43 | 87.9% | F0063 |
+| 2 | + `add_ln` WIDE (512-thread/row small-T latency fix, −40.3% on that kernel alone) | 141.3 | 139.87 | 91.0% | F0065 |
+| 3 | + sparse-path finalize (persistent fp32 accumulator replaces `at::zeros`+cast; closes the sparse path's two remaining PDL chain breaks flagged in F0063 §4 — step-level overlap jumps 79.1%→96.8%) | 142.0 | — | 91.5% | F0066b |
+| 4 (headline) | + LoRA-gate epilogue folded into `lora_stage2`'s own launch | **142.8** | — | **92.0%** | F0066c |
+
+Net: **+7.0%** end to end (133.4→142.8). Every step is bit-exact-gated (greedy 24/24 @1.5B +
+8/8 @7.2B under CUDA graph) and its speed effect isolated by an A/B leg pair inside one clean
+single-tenant window (this project's sky-yield discipline — see the findings for the co-
+residency ledgers). Cross-session anchor re-checks agree within ~0.2% of the previous step's
+"after" value (e.g. F0065's own re-measured D0 baseline read 138.0 vs F0063's D of 137.8) —
+inside normal session-to-session noise, not a separate effect. Framed against this project's
+own 168.0 tok/s sparse-byte roofline (1691.7 GB/s achievable read bandwidth ÷ 10.07 GB/step
+sparse-effective traffic, ADR-0008 A0.1/A0.2, first applied to this exact comparison in
+`rwkv-competitors/albatross-megakernel-study-2026-07-13.md`): the anchor sat at 79.4% of that
+ceiling; the headline is at 85.0% (142.8/168.0, arithmetic on the two published constants, not
+an independent measurement).
+
+1.5B bonus ladder (same steps, same card, `bench/mega_flag_matrix.sh` bonus leg):
+
+| step | tok/s | finding |
+|---|---:|---|
+| megakernel PDL chain (MEGA+WKV_CUDA+PDL) | 493.0 | F0063 |
+| + `add_ln` WIDE | 502.3 | F0065 |
+| + sparse-path finalize | 509.0 | F0066b |
+| + LoRA-gate epilogue (headline) | **514.5** | F0066c |
+
+(§5 above separately publishes a pre-megakernel 1.5B figure of 447.3 under the F0056 W1'
+config; F0063's own same-session flags-off recheck of that starting point read 479.2 — a
+larger session-to-session drift than the 7.2B anchor's, not independently reconciled in the
+source findings — so the ladder above is anchored to the megakernel D-leg only, not chained
+to a specific pre-megakernel 1.5B rung. No 1.5B-vs-Bo ratio is published here: the only 1.5B
+Albatross comparison points on record (a ~636 tok/s ceiling, Albatross at ~554, a prior "ours"
+reading of 409) are explicitly flagged in F0063 as unverified-this-session provenance, not a
+clean delta — better omitted than asserted on shaky footing.)
+
+**vs Bo, and the same-card reproduction.** Bo Peng's own bsz1 figure for this megakernel line
+(`faster3b_2607`, commit `32234730f`, self-reported to us in chat; his README says "155+") is
+**155.2 tok/s**, itself 92.4% of the same 168.0 roofline (implied effective bandwidth 1562.9
+GB/s) — this is the "Bo" this section's ratios read against. Card note: that specific 155.2
+claim doesn't state a card in the message it came with; it is a different, newer figure from
+the Pro-6000-measured headline chart values §7a already documents (e.g. 144.04 tok/s B1
+decode). We independently reproduced it, same session as the F0063 clean-window legs: Bo's
+own `faster3b_2607` harness, built and run in our serving container, checkpoint
+`rwkv7-g1g-7.2b-20260523-ctx8192.pth` (ours; Bo's own 155.2 used `g1f` — same architecture and
+dimensions, disclosed substitution, not independently re-verified byte-for-byte) — result
+**155.75 tok/s** (p10/p50/p90 6.411/6.421/6.432 ms), 0.35% from his published number. That's a
+useful two-way corroboration: it says Bo's number is real, and — circumstantially, since he
+didn't name a card for this particular figure — that our 5090 is a fair same-hardware
+comparison point. Against this same-session number instead of the published one,
+142.8/155.75 = 91.7%.
+
+**Framing caveat — read before quoting "92.0% of Bo" elsewhere.** Bo's 155.2 is
+kernel-harness event timing — his own forward-loop + CUDA-event benchmark, no scheduler, no
+API (the same class of measurement §7/§7a already characterize Albatross by). Our 142.8 is
+sgl.Engine end-to-end serving bsz1 — the real request path, scheduler included. These are not
+identical instrumentation. What narrows the gap: F0063 measured our own flagship config under
+both framings side by side and found them within ~1.4% of each other (137.8 tok/s serving vs
+136.43 tok/s kernel-loop) — at bsz1 the GPU timeline is contiguous with no inter-step host
+idle, so serving overhead is near-zero for us at this batch size and the two framings
+converge. Reading "142.8 serving vs Bo's 155.2 kernel-loop" side by side is accordingly a
+fair, if not perfectly matched, comparison — worth restating whenever the 92.0% figure travels
+outside this section.
+
+**Two honest write-ups from the same effort — published, not buried.**
+
+- **F0064 — GEMV wide-load rewrite: NULL result.** The projection was that widening
+  `gemv_grouped_m1`'s per-row load from two strided 32-bit reads to one 64-bit coalesced read
+  (V1), plus a K-unroll×2 variant for more memory-level parallelism (V2), would move GEMV from
+  ~81% to ~92% of achievable bandwidth and close most of the remaining gap to Bo. Both variants
+  passed every bit-exact gate on sm120 and sm86 (SASS-confirmed the load genuinely widened: 30
+  → 15 load instructions per config, same bytes, double the width) — but the clean flagship
+  measurement found the projection **false**: V1 landed flat (≤0.15% either direction, on both
+  the serving and kernel-loop instruments), V2 a consistent ~1% *regression* (rejected). The
+  corrected per-kernel byte-floor accounting explains why: the two M==1 GEMV kernels were
+  already at **95.6–97.7%** of achievable bandwidth — the old strided 32-bit loads sit at
+  consecutive addresses, so the memory controller was already coalescing them into full
+  sectors; there was no real headroom left to reclaim. V1 stays as the default source anyway
+  (bit-exact on two architectures, halves the LDG instruction count, small measured wins on
+  the 3090's bandwidth-unsaturated square shapes, strictly no worse) — but the speed win it
+  was built for did not materialize, and that null is itself the useful finding: it redirected
+  the whole effort from "wider loads" to the latency-bound small-kernel chain (F0065/F0066),
+  which is where the real 133.4→142.8 gain actually came from.
+- **F0066a — fused `add_ln`+token-shift+lerp boundary kernel: net regression, shipped OFF.**
+  Merging the per-layer norm boundary's two launches (`add_ln` then `shift_lerp6`/`shift_lerp1`)
+  into one, byte-exact against the two-op composition, cut launch count as designed
+  (533→438/step) — but measured **−2.3% on 7.2B and −1.8% on 1.5B** end to end, the opposite of
+  the projected −60~90 µs/step gain. Root cause: the fused kernel's `J=6` case (the attention
+  boundary) runs on a single 512-thread block that has to store 6 output planes; that one
+  block's store bandwidth can't match the un-fused composition's 16-block-parallel shift stage
+  — a store-side wall the launch-count projection didn't account for. The `J=1` case (the ffn
+  boundary) is close to neutral (parity on 7.2B, a small win on 1.5B). The kernel stays
+  in-tree and gated (`RWKV_FUSED_ADDLN_SHIFT`, default OFF) rather than deleted — per-`J`
+  arming is supported by the data if a future round wants the `J=1` win alone — but as shipped
+  it is a documented loss, not part of the 142.8 headline.
+
+**Disclaimers.** Single RTX 5090, not a fleet average — §7a's own large-batch grid shows the
+gap to Bo's Pro-6000-class hardware widens at scale, so this ratio should not be assumed to
+travel to other cards. The same-session albatross v3b reproduction used our `g1g` checkpoint
+against Bo's own number's `g1f` — same architecture and dimensions, disclosed, not an
+independent byte-level re-verification. Bo's 155.2 itself is self-reported (a chat message to
+us, echoed by his README's "155+") rather than something we audited beyond the same-session
+reproduction above. Both that reproduction and, per the source competitor-study note this
+section's roofline numbers come from, the original figure are measured from synthetic
+pseudo-random token ids against a zero initial WKV state, not real text — a caveat this
+project's other Albatross sections already carry and repeat here rather than hide. `g1`-family
+checkpoint only; not re-verified on `g1f`/other snapshots beyond the dimension match noted
+above.
+
+Raw: `bench/results/mega_flagmatrix_c1_{A,D,B,C}_{7.2b,1.5b}_5090.json`,
+`mega_framing2_{A,D}_7.2b_5090.txt`, `mega_albatross_v3b_g1g_7.2b_5090.log` (F0063);
+`bench/results/f0064/` (F0064, the null result); `bench/results/f0065/` (F0065);
+`bench/results/f0066/` (F0066b) and `bench/results/f0066c/` (F0066c). Full narrative,
+per-kernel tables and gate logs: [F0063](findings/0063-sm120-pdl-chain-flagship.md),
+[F0064](findings/0064-gemv-weight-stream-bandwidth.md),
+[F0065](findings/0065-smallkernel-latency-round.md),
+[F0066](findings/0066-boundary-fusion-round.md).
+
 ## 7b. Comparison with vllm-rwkv (the community vLLM fork)
 
 **Update (2026-07-16): their varlen stack has merged — the current standing is the 7.2B
@@ -1129,11 +1262,16 @@ against the merged stack.
 Theirs (2026-07-10): c=1 **143.1**, c=32 2,697.3, c=128 7,542.2, peak 8,981.3 @c320 (their
 `--max-num-seqs` cap; that single point had an idle foreign process co-resident — the
 exclusive-GPU neighbors read c=192 7,860.2 and c=256 7,814.0). Ours after W1' (2026-07-13,
-raw `bench/results/w1prime_legFinal_B_7.2b_5090.json`): c=1 **133.4**, c=32 2,636.4, c=128
-7,087.3; that run was not swept past c=128 — our last full-sweep peak on this shape is
-6,709.0 @c320 (fp16, pre-W1', §4/F0047). Read plainly: at 7.2B fp16-vs-fp16, single
-request is **theirs by ~7%** (143.1 vs 133.4), c=32 theirs by ~2%, c=128 theirs by ~6%.
-(§13's 7.2B single-request figure — 133.4 vs 96.0 — is against Qwen3.5, a different
+raw `bench/results/w1prime_legFinal_B_7.2b_5090.json`): c=32 2,636.4, c=128 7,087.3; that run
+was not swept past c=128 — our last full-sweep peak on this shape is 6,709.0 @c320 (fp16,
+pre-W1', §4/F0047). The c=1 cell has since moved past that same-session pairing: the
+2026-07-13 W1' figure was 133.4; the current bsz1 figure, after the megakernel/PDL/fusion
+ladder (2026-07-18 through 2026-07-21, F0063/F0065/F0066c — full story in §7a-flagship), is
+**142.8** — a later, separate session than the c=32/c=128 cells above (that work lands on the
+bsz1 decode path only so far). Read plainly: at 7.2B fp16-vs-fp16, single request is now
+**theirs by ~0.2%** (143.1 vs 142.8 — essentially at parity, closed from ~7% behind), c=32
+theirs by ~2%, c=128 theirs by ~6%.
+(§13's 7.2B single-request figure — 142.8 vs 96.0 — is against Qwen3.5, a different
 comparison; and the 1.5B bsz1 results in the history below are a different model size. Do
 not conflate either with this engine pair.)
 
@@ -1639,12 +1777,15 @@ applied symmetrically:
 | tier | RWKV-7 (fp16, full stack) | Qwen3.5 (bf16, best available) | winner |
 |---|---:|---:|---|
 | 1.5B / 2B | **447.3** | 335.8–336.3 | RWKV-7 **+33.1%** |
-| 7.2B / 9B | **133.4** | 96.0 | RWKV-7 **+39.0%** |
+| 7.2B / 9B | **142.8** | 96.0 | RWKV-7 **+48.75%** |
 
-Raw: `bench/results/w1prime_legEf_1.5b_5090.json` (1.5B),
-`bench/results/w1prime_legFinal_B_7.2b_5090.json` (7.2B) — both the W1' final config,
-`RWKV_STATE_FP16` + all five byte-exact glue fusions (§4/§5, F0056); Qwen3.5's bf16 figures
-are the same runs cited at the end of this section.
+Raw: `bench/results/w1prime_legEf_1.5b_5090.json` (1.5B, W1' final config, unchanged). 7.2B is
+the later megakernel flagship bsz1 number, **142.8** tok/s (2026-07-21, F0066c — full ladder
+in §7a-flagship), superseding the W1' 133.4 that was in
+`bench/results/w1prime_legFinal_B_7.2b_5090.json`; `RWKV_STATE_FP16` + all five byte-exact
+glue fusions (§4/§5, F0056) still sit underneath it, with the megakernel/PDL, `add_ln` WIDE,
+sparse-path finalize and LoRA-gate epilogue work stacked on top (F0063/F0065/F0066b/F0066c).
+Qwen3.5's bf16 figures are the same runs cited at the end of this section.
 
 **Architecture reading — same precision (bf16), both stock paths.** RWKV's fp16 hand kernels
 don't fire in bf16 — this is the reading that isolates the two architectures at matched
