@@ -368,6 +368,141 @@ __global__ void add_ln_shift_kernel(
   rwkv7_pdl_launch_dependents();  // r/k/v (J=6) or ffn.key (J=1) GEMV schedules early
 }
 
+// F0068 SPLIT tier: the single-block wall, attacked with BLOCKS instead of
+// threads. §4 of the finding brackets the thread ladder — (32,32) is SLOWER
+// than (32,16), so one block already saturates its SM's issue capacity and the
+// only remaining structural lever on a T=1 row is to spread it over more SMs.
+// LayerNorm needs a whole-row reduction, so that costs a second launch:
+//   p1: grid (T, NB) — residual add + write x_new slice + one raw Welford
+//       partial per block into a PERSISTENT scratch buffer.
+//   p2: grid (T, NB) — every block folds ALL NB partials in the SAME fixed
+//       order (so every block derives bit-identical mean/rstd), then applies
+//       to its own slice.
+// The partition differs from every other tier, so this is NOT byte-parity with
+// torch; the bar is F0065's (no farther from fp32 truth than the parity tier),
+// gated by bench/test_addln_numerics.py.
+// Scratch follows F0066b's persistent-accumulator precedent: allocated once
+// per process outside capture, fixed address, so it is cuda-graph safe.
+template <int MaxVecPerThread>
+__global__ void add_ln_p1_kernel(int N, int NB,
+                                 const dtype* __restrict__ x,
+                                 const dtype* __restrict__ delta,
+                                 dtype* __restrict__ x_new,
+                                 float* __restrict__ partials) {
+  extern __shared__ float s_data[];
+  const int64_t i1 = blockIdx.x;   // row
+  const int b = blockIdx.y;        // block within the row
+  const int n_vec = N / kVec;
+  const int vpb = n_vec / NB;      // vecs per block (NB divides n_vec)
+  const int v0 = b * vpb;
+  const half4* xv = reinterpret_cast<const half4*>(x + i1 * N);
+  const half4* dv = reinterpret_cast<const half4*>(delta + i1 * N);
+  half4* xnv = reinterpret_cast<half4*>(x_new + i1 * N);
+  const int numx = blockDim.x * blockDim.y;
+  const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
+  rwkv7_pdl_wait();
+
+  WelfordLN wd{0.f, 0.f, 0.f};
+  for (int i = thrx; i < vpb; i += numx) {
+    half4 a = xv[v0 + i];
+    half4 bb = dv[v0 + i];
+    half4 s;
+#pragma unroll
+    for (int ii = 0; ii < kVec; ii++) {
+      s.val[ii] =
+          __float2half_rn(__half2float(a.val[ii]) + __half2float(bb.val[ii]));
+    }
+    xnv[v0 + i] = s;
+#pragma unroll
+    for (int ii = 0; ii < kVec; ii++) {
+      wd = welford_ln_onlinesum(__half2float(s.val[ii]), wd);
+    }
+  }
+  for (int offset = 16; offset > 0; offset >>= 1) {
+    WelfordLN wdB{__shfl_down_sync(0xffffffff, wd.mean, offset),
+                  __shfl_down_sync(0xffffffff, wd.sigma2, offset),
+                  __shfl_down_sync(0xffffffff, wd.count, offset)};
+    wd = welford_ln_combine(wd, wdB);
+  }
+  // one store per warp, then the FastTree in-warp fold (same schedule)
+  float* msbuf = s_data;
+  float* cntbuf = s_data + 2 * blockDim.y;
+  if (blockDim.y > 1) {
+    if (threadIdx.x == 0) {
+      msbuf[2 * threadIdx.y] = wd.mean;
+      msbuf[2 * threadIdx.y + 1] = wd.sigma2;
+      cntbuf[threadIdx.y] = wd.count;
+    }
+    __syncthreads();
+    if (threadIdx.y == 0) {
+      const unsigned yy = threadIdx.x;
+      WelfordLN v{0.f, 0.f, 0.f};
+      if (yy < blockDim.y) v = WelfordLN{msbuf[2 * yy], msbuf[2 * yy + 1], cntbuf[yy]};
+      for (unsigned off = blockDim.y / 2; off > 0; off /= 2) {
+        WelfordLN vB{__shfl_down_sync(0xffffffff, v.mean, off),
+                     __shfl_down_sync(0xffffffff, v.sigma2, off),
+                     __shfl_down_sync(0xffffffff, v.count, off)};
+        if (yy < off) v = welford_ln_combine(v, vB);
+      }
+      wd = v;
+    }
+  }
+  if (thrx == 0) {
+    float* p = partials + (i1 * NB + b) * 3;
+    p[0] = wd.mean;
+    p[1] = wd.sigma2;
+    p[2] = wd.count;
+  }
+  rwkv7_pdl_launch_dependents();
+}
+
+template <int MaxVecPerThread>
+__global__ void add_ln_p2_kernel(int N, int NB, float eps,
+                                 const dtype* __restrict__ x_new,
+                                 const dtype* __restrict__ gamma,
+                                 const dtype* __restrict__ beta,
+                                 const float* __restrict__ partials,
+                                 dtype* __restrict__ y) {
+  const int64_t i1 = blockIdx.x;
+  const int b = blockIdx.y;
+  const int n_vec = N / kVec;
+  const int vpb = n_vec / NB;
+  const int v0 = b * vpb;
+  const half4* xnv = reinterpret_cast<const half4*>(x_new + i1 * N);
+  const half4* gv = reinterpret_cast<const half4*>(gamma);
+  const half4* bv = reinterpret_cast<const half4*>(beta);
+  half4* yv = reinterpret_cast<half4*>(y + i1 * N);
+  const int numx = blockDim.x * blockDim.y;
+  const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
+  rwkv7_pdl_wait();
+
+  // EVERY block folds ALL partials in the same fixed order => identical bits.
+  const float* p = partials + i1 * NB * 3;
+  WelfordLN acc{p[0], p[1], p[2]};
+  for (int j = 1; j < NB; ++j) {
+    WelfordLN pj{p[j * 3], p[j * 3 + 1], p[j * 3 + 2]};
+    acc = welford_ln_combine(acc, pj);
+  }
+  const float mean = acc.mean;
+  const float rstd_val = rsqrtf(acc.sigma2 / float(N) + eps);
+
+  for (int i = thrx; i < vpb; i += numx) {
+    half4 data = xnv[v0 + i];
+    half4 g4 = gv[v0 + i];
+    half4 b4 = bv[v0 + i];
+    half4 out;
+#pragma unroll
+    for (int ii = 0; ii < kVec; ii++) {
+      out.val[ii] = __float2half_rn(
+          __half2float(g4.val[ii]) *
+              (rstd_val * (__half2float(data.val[ii]) - mean)) +
+          __half2float(b4.val[ii]));
+    }
+    yv[v0 + i] = out;
+  }
+  rwkv7_pdl_launch_dependents();
+}
+
 // ---- torch GroupNorm RowwiseMoments Welford (WelfordOps: true division) ----
 struct WelfordGN {
   float mean;
@@ -624,6 +759,7 @@ static int addln_wide_tier() {
   static const int v = []() {
     const char* e = getenv("RWKV_ADDLN_WIDE");
     if (!e) return 0;
+    if (e[0] == '3') return 3;
     if (e[0] == '2') return 2;
     return e[0] == '1' ? 1 : 0;
   }();
@@ -673,6 +809,48 @@ std::tuple<at::Tensor, at::Tensor> add_ln(at::Tensor x, at::Tensor delta,
   const bool pdl = rwkv7_pdl_enabled("ln");
   const bool fast = addln_fasttree_enabled();
   const int tier = addln_wide_tier();
+  // SPLIT tier (F0068): spread the row over NB blocks; needs 2 launches.
+  // NB from RWKV_ADDLN_SPLIT_NB (default 8); requires NB | (N/kVec).
+  if (tier == 3 && T <= 32) {
+    static const int NB = []() {
+      const char* e = getenv("RWKV_ADDLN_SPLIT_NB");
+      const int v = e ? atoi(e) : 8;
+      return (v >= 2 && v <= 64) ? v : 8;
+    }();
+    const int n_vec = static_cast<int>(N) / kVec;
+    if (n_vec % NB == 0) {
+      // persistent partials scratch: [maxT, NB, 3] fp32, allocated ONCE per
+      // process (F0066b precedent) so the address is capture-stable.
+      constexpr int kMaxT = 32;
+      static at::Tensor part = at::empty(
+          {kMaxT * 64 * 3}, at::TensorOptions().dtype(at::kFloat).device(x.device()));
+      const int vpb = n_vec / NB;
+      // Size the block so each thread owns exactly ONE vec: the whole point of
+      // this tier is MORE total threads spread over MORE SMs. (Getting this
+      // wrong is silent: ny chosen for 2 vecs/thread gives NB*64 = 512 total
+      // threads = the same as WIDE, i.e. the same work on the same number of
+      // resident threads plus a second launch — measured 5.04 us, a pure loss.)
+      int ny = 1;
+      while (ny < 16 && ny * 32 < vpb) ny <<= 1;
+      const dim3 threads_s(32, ny, 1);
+      const dim3 grid_s(static_cast<unsigned>(T), static_cast<unsigned>(NB));
+      const int nsh = ny * 3 * static_cast<int>(sizeof(float));
+      rwkv7_launch_maybe_pdl(pdl, add_ln_p1_kernel<16>, grid_s, threads_s, nsh,
+          stream.stream(), static_cast<int>(N), NB,
+          static_cast<const dtype*>(x.data_ptr<dtype>()),
+          static_cast<const dtype*>(delta.data_ptr<dtype>()),
+          x_new.data_ptr<dtype>(), part.data_ptr<float>());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      rwkv7_launch_maybe_pdl(pdl, add_ln_p2_kernel<16>, grid_s, threads_s, 0,
+          stream.stream(), static_cast<int>(N), NB, static_cast<float>(eps),
+          static_cast<const dtype*>(x_new.data_ptr<dtype>()),
+          static_cast<const dtype*>(gamma.data_ptr<dtype>()),
+          static_cast<const dtype*>(beta.data_ptr<dtype>()),
+          part.data_ptr<float>(), y.data_ptr<dtype>());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      return {x_new, y};
+    }
+  }
   // WIDER small-T path (F0068): (32,32)=1024 threads, 1 vec/thread => N<=4096.
   if (tier == 2 && T <= 32 && N <= 1 * 1024 * kVec) {
     const dim3 threads_x(32, 32, 1);

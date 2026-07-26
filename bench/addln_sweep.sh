@@ -12,7 +12,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$OUT"
 : > "$OUT/addln_sweep.jsonl"
 
-for W in 0 1 2; do
+for W in 0 1 2 3; do
   for F in 0 1; do
     for N in 2048 4096; do
       RWKV_ADDLN_WIDE=$W RWKV_ADDLN_FASTTREE=$F \
@@ -29,7 +29,7 @@ RWKV_ADDLN_WIDE=1 RWKV_ADDLN_FASTTREE=1 \
 python3 - "$OUT/addln_sweep.jsonl" <<'PY'
 import json, sys
 rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
-name = {"0": "parity(32,4)", "1": "WIDE(32,16)", "2": "WIDER(32,32)"}
+name = {"0": "parity(32,4)", "1": "WIDE(32,16)", "2": "WIDER(32,32)", "3": "SPLIT(NB blocks)"}
 print(f"{'tier':<14}{'fasttree':>9}{'N':>7}{'us/call':>10}")
 for r in sorted(rows, key=lambda r: (r["N"], r["wide"], r["fasttree"])):
     print(f"{name[r['wide']]:<14}{r['fasttree']:>9}{r['N']:>7}{r['us_per_call_p50']:>10.3f}")

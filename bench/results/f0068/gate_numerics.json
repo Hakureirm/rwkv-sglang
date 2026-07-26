@@ -57,6 +57,28 @@
       "worst_mean_err_delta_vs_parity": 1.4551915228366852e-11,
       "offenders": [],
       "verdict": "PASS"
+    },
+    {
+      "bar": "tier_equidistant_from_fp32_truth",
+      "tier": "3",
+      "fasttree": "0",
+      "cases_byte_identical_to_parity": 10,
+      "cases_compared_numerically": 2,
+      "worst_max_err_delta_vs_parity": 0.0,
+      "worst_mean_err_delta_vs_parity": 0.0,
+      "offenders": [],
+      "verdict": "PASS"
+    },
+    {
+      "bar": "tier_equidistant_from_fp32_truth",
+      "tier": "3",
+      "fasttree": "1",
+      "cases_byte_identical_to_parity": 10,
+      "cases_compared_numerically": 2,
+      "worst_max_err_delta_vs_parity": 0.0,
+      "worst_mean_err_delta_vs_parity": 0.0,
+      "offenders": [],
+      "verdict": "PASS"
     }
   ]
 }

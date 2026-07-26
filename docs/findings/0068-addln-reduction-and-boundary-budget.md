@@ -1,8 +1,8 @@
 ---
 doc_kind: finding
 finding_id: F0068
-title: "Stage-B cut 3 (#57): before building the banked inline-lerp GEMV, decompose what the boundary cluster actually costs. Measured on sm86 at decode T=1: add_ln = graph-node dispatch floor (1.07us) + a width-INDEPENDENT residual + ~0.21us per element-per-thread; the deployed (32,16) WIDE tier is the OPTIMUM of the thread ladder (bracketed both ways — (32,32) WIDER is SLOWER, so one block already saturates its SM and adding threads buys nothing). Two results: (1) FastTree — replay the aten inter-warp Welford schedule inside warp 0 with __shfl_down instead of 4 rounds of smem ping-pong, 9 block-wide syncs -> 2, BIT-IDENTICAL by construction, measured -6.5% (N=4096) / -7.1% (N=2048) on add_ln; (2) the banked F0066 §5 inline-lerp boundary kernel's -230us/step projection does NOT survive the arithmetic — its boundary kernel is a strict superset of add_ln, and F0066a's own failed J=6 kernel already measured the single-block marginal cost (~20 GB/s) that makes it a NET LOSS."
-status: PARTIAL (2026-07-27) — sm86 mechanism + gates GREEN, sm120 step-level effect UNMEASURED (the 5090 box was offline for this round; three independent reachability probes all failed). FastTree gates: bit-identity 96/96 torch.equal across both launcher tiers (bench/test_addln_fasttree.py) + the torch transcription contract preserved at the parity tier, 0 differing bytes, at FastTree=0 AND =1 (bench/test_addln_numerics.py). WIDER (32,32) tier landed in-tree, default OFF, published as an honest NEGATIVE. Both new knobs default OFF; nothing promoted to serve.sh defaults until a 5090 A/B runs
+title: "Stage-B cut 3 (#57): before building the banked inline-lerp GEMV, decompose what the boundary cluster actually costs. Measured on sm86 at decode T=1: add_ln = graph-node dispatch floor (1.07us) + a width-INDEPENDENT residual + ~0.21us per element-per-thread; the deployed (32,16) WIDE tier is the OPTIMUM of the thread ladder (bracketed both ways — (32,32) WIDER is SLOWER, so one block already saturates its SM and adding threads buys nothing). Two results: (1) FastTree — replay the aten inter-warp Welford schedule inside warp 0 with __shfl_down instead of 4 rounds of smem ping-pong, 9 block-wide syncs -> 2, BIT-IDENTICAL by construction, measured -6.5% (N=4096) / -7.1% (N=2048) on add_ln; (2) the banked F0066 §5 inline-lerp boundary kernel's -230us/step projection does NOT survive the arithmetic — its boundary kernel is a strict superset of add_ln, and F0066a's own failed J=6 kernel already measured the single-block marginal cost (~20 GB/s) that makes it a NET LOSS; (3) the cross-block row SPLIT this finding nominated as the next lever was then BUILT and measured in the same round — its parallelisation works (work term -26%) but sm86's second dispatch floor eats all of it, making it the one arm whose verdict genuinely requires sm120 (where PDL runs 96.8% overlapped with negative inter-kernel gaps)."
+status: PARTIAL (2026-07-27) — sm86 mechanism + gates GREEN, sm120 step-level effect UNMEASURED (the 5090 box was offline for this round; three independent reachability probes all failed). FastTree gates: bit-identity 96/96 torch.equal across both launcher tiers (bench/test_addln_fasttree.py) + the torch transcription contract preserved at the parity tier, 0 differing bytes, at FastTree=0 AND =1 (bench/test_addln_numerics.py). WIDER (32,32) tier landed in-tree, default OFF, published as an honest NEGATIVE; SPLIT (cross-block, tier 3) landed in-tree, default OFF, CONDITIONAL negative pending sm120. Both new knobs default OFF; nothing promoted to serve.sh defaults until a 5090 A/B runs
 discovered_by: Opus 5 (1M), 2026-07-27
 severity: info
 related: [F0066, F0065, F0064, F0063]
@@ -157,24 +157,74 @@ of its per-block bytes, so inline-lerp would *double* its reads — the opposite
 regime from the DRAM-bound GEMVs. Convert the rkv GEMV; leave stage1 alone
 unless measured otherwise.
 
+## 5b. Result 4 — SPLIT (cross-block row split) is a CONDITIONAL negative: the parallelism works, sm86's second dispatch eats it
+
+§4 concluded the only remaining structural lever is *more blocks*. That was
+built this round rather than left as a projection (`RWKV_ADDLN_WIDE=3`,
+`RWKV_ADDLN_SPLIT_NB`, default OFF): p1 = grid (T, NB) does the residual add,
+writes the x_new slice and one raw Welford partial per block into a persistent
+scratch ([[F0066]]b's allocate-once precedent, capture-stable address); p2 =
+grid (T, NB) folds ALL NB partials in the same fixed order in every block (so
+every block derives bit-identical mean/rstd) and applies to its own slice.
+
+NB sweep at N=4096 (us/call, one vec per thread): **NB=4 4.417 · 8 4.590 ·
+16 5.669 · 32 7.835** — monotonically worse, and all above WIDE+FastTree's
+4.159. Full ladder at the best NB=4:
+
+| tier | N=2048 | N=4096 |
+|---|---:|---:|
+| parity (32,4) + FastTree | 4.567 | 7.092 |
+| **WIDE (32,16) + FastTree** | **3.308** | **4.159** |
+| WIDER (32,32) + FastTree | 3.490 | 4.149 |
+| SPLIT (NB=4) | 4.017 | 4.401 |
+
+But the decomposition says the idea is not wrong, the *card* is:
+
+| | dispatch | work | total |
+|---|---:|---:|---:|
+| WIDE + FastTree | 1.07 | 3.07 | 4.159 |
+| SPLIT NB=4 | ~2.15 (2 nodes) | **2.27** | 4.401 |
+
+**The parallelisation delivered — the work term drops 26% — and sm86's second
+1.07 us dispatch floor consumes all of it.** That floor is exactly what the
+5090 does not have in the same form: with PDL armed it runs **96.8% overlapped
+transitions and NEGATIVE inter-kernel gaps** ([[F0066]]b). If the second node
+is even half as expensive there, SPLIT flips positive (3.07 → 2.27 on the work
+term would be ≈ −66 us/step ≈ +0.9%). This is the same card-dependence class
+as [[F0051]] (identical fusion: +9.24% on H100 vs +1.22% on L4).
+
+⇒ SPLIT is **not rejected**, it is **unresolvable on sm86**. It stays in-tree,
+default OFF, as a ready-to-measure arm for the first 5090 window. Numerics
+gated the same way: 10/12 cases byte-identical to parity, the other 2 with
+worst max- and mean-error deltas of exactly 0.0.
+
+One implementation trap worth recording: the first SPLIT build sized blocks for
+2 vecs/thread, which made NB×64 = 512 total threads — **the same thread count
+as WIDE**, i.e. the same work on the same resident threads plus an extra
+launch. It measured 5.04 us and looked like a clean refutation of the whole
+idea. It was a harness bug in the launcher, not a result. Sizing for 1
+vec/thread is what produced the numbers above.
+
 ## 6. Disposition + what is next
 
 - FastTree: in-tree, `RWKV_ADDLN_FASTTREE=1`, **default OFF** pending a 5090
   A/B. Bit-identical + gated, so it carries no numerics risk of its own.
 - WIDER: in-tree, `RWKV_ADDLN_WIDE=2`, **default OFF**, negative published.
+- SPLIT: in-tree, `RWKV_ADDLN_WIDE=3` + `RWKV_ADDLN_SPLIT_NB` (default 4),
+  **default OFF**, conditional negative — the one arm whose verdict genuinely
+  needs sm120. Its scratch is allocated on first call; production use needs
+  that first call to be an eager warmup (outside capture), which the model's
+  warmup forwards already provide, but a SPLIT default-flip should assert it.
 - Nothing promoted to `scripts/serve.sh` defaults this round.
 - The `add_ln_shift` path is untouched (it keeps the default `FastTree=false`
   template arg and the matching `blockDim.y*3/2` smem allocation — the FastTree
   layout needs `blockDim.y*3` and the launchers size shared memory per config).
 
-**Next designed step, with its arithmetic stated up front so it can be
-falsified before it is built:** a cross-block row split is the only remaining
-structural lever on add_ln (§4). Two passes over 16 blocks costs 2 dispatch
-floors (2 × 1.07 us on sm86) plus the split work, ≈ 3.1 us vs 4.14 today — a
-thin margin *on sm86*, but the 5090 arms PDL and runs 96.8% overlapped
-transitions with **negative** inter-kernel gaps ([[F0066]]b), so a second
-dispatch is much cheaper there than this box can show. That asymmetry is
-exactly why this must be measured on the 5090 and not extrapolated from here.
+**The first 5090 window should run, in this order:** (1) FastTree A/B — gates
+are green, only the step-level number is missing; (2) SPLIT A/B at NB ∈ {4, 8}
+— the decisive card-dependent question of §5b; (3) only then consider the
+`shift_d` + rkv-GEMV inline-lerp arm of §5, which is worth ~+0.4% and costs a
+multi-kernel surgery.
 
 **Scope discipline for whoever picks this up:** every number in this finding is
 sm86, T=1, CUDA-graph, warm-cache, single-kernel. No step-level or tok/s claim
@@ -182,7 +232,8 @@ is made, and none may be published from this finding alone.
 
 ## 7. Artifacts
 
-`bench/results/f0068/`: `addln_sweep.jsonl` (12 configs × 50 reps),
+`bench/results/f0068/`: `addln_sweep.jsonl` (16 configs × 50 reps),
+`split_nb_sweep.jsonl` (SPLIT NB ∈ {4,8,16,32}),
 `kernel_floor.json` (dispatch-floor probe), `gate_fasttree.json`,
 `gate_numerics.json`. Harness: `bench/bench_addln_configs.py`,
 `bench/bench_kernel_floor.py`, `bench/addln_sweep.sh`. Gates:

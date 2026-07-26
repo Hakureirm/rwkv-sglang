@@ -108,7 +108,7 @@ def main():
 
     tmp = tempfile.mkdtemp(prefix="addln_numerics_")
     arms = {}
-    for wide, fast in itertools.product(("0", "1", "2"), ("0", "1")):
+    for wide, fast in itertools.product(("0", "1", "2", "3"), ("0", "1")):
         path = os.path.join(tmp, f"w{wide}_f{fast}.pt")
         env = dict(os.environ, RWKV_ADDLN_WIDE=wide, RWKV_ADDLN_FASTTREE=fast)
         r = subprocess.run([sys.executable, __file__, "--cuda-dir", args.cuda_dir,
@@ -138,7 +138,7 @@ def main():
     # an fp32/fp64 accumulation whose last bits are order-dependent noise (the
     # observed deltas are ~1e-11 on errors of ~1e-3 — 8 orders down).
     MEAN_RTOL, MEAN_ATOL = 1e-6, 1e-12
-    for wide in ("1", "2"):
+    for wide in ("1", "2", "3"):
         for fast in ("0", "1"):
             worst_max, worst_mean = 0.0, 0.0
             checked, identical, offenders = 0, 0, []
