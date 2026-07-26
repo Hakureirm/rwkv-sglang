@@ -1,0 +1,1 @@
+{"gate": "addln_fasttree", "verdict": "PASS", "comparisons": 96, "tiers": "(32,4) parity + (32,16) WIDE", "note": "torch.equal on x_new and y, FastTree=1 vs FastTree=0, both launcher tiers"}

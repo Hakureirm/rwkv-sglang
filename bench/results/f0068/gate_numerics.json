@@ -1,0 +1,62 @@
+{
+  "gate": "addln_numerics",
+  "overall": "PASS",
+  "results": [
+    {
+      "bar": "tier0_byte_vs_torch",
+      "fasttree": "0",
+      "differing_bytes": 0,
+      "verdict": "PASS"
+    },
+    {
+      "bar": "tier0_byte_vs_torch",
+      "fasttree": "1",
+      "differing_bytes": 0,
+      "verdict": "PASS"
+    },
+    {
+      "bar": "tier_equidistant_from_fp32_truth",
+      "tier": "1",
+      "fasttree": "0",
+      "cases_byte_identical_to_parity": 11,
+      "cases_compared_numerically": 1,
+      "worst_max_err_delta_vs_parity": 0.0,
+      "worst_mean_err_delta_vs_parity": 1.4551915228366852e-11,
+      "offenders": [],
+      "verdict": "PASS"
+    },
+    {
+      "bar": "tier_equidistant_from_fp32_truth",
+      "tier": "1",
+      "fasttree": "1",
+      "cases_byte_identical_to_parity": 11,
+      "cases_compared_numerically": 1,
+      "worst_max_err_delta_vs_parity": 0.0,
+      "worst_mean_err_delta_vs_parity": 1.4551915228366852e-11,
+      "offenders": [],
+      "verdict": "PASS"
+    },
+    {
+      "bar": "tier_equidistant_from_fp32_truth",
+      "tier": "2",
+      "fasttree": "0",
+      "cases_byte_identical_to_parity": 11,
+      "cases_compared_numerically": 1,
+      "worst_max_err_delta_vs_parity": 0.0,
+      "worst_mean_err_delta_vs_parity": 1.4551915228366852e-11,
+      "offenders": [],
+      "verdict": "PASS"
+    },
+    {
+      "bar": "tier_equidistant_from_fp32_truth",
+      "tier": "2",
+      "fasttree": "1",
+      "cases_byte_identical_to_parity": 11,
+      "cases_compared_numerically": 1,
+      "worst_max_err_delta_vs_parity": 0.0,
+      "worst_mean_err_delta_vs_parity": 1.4551915228366852e-11,
+      "offenders": [],
+      "verdict": "PASS"
+    }
+  ]
+}

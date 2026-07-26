@@ -114,7 +114,25 @@ __device__ __forceinline__ WelfordLN welford_ln_combine(const WelfordLN dataB,
 // compute_stats over the fp16 row held in registers (vals[n_own] = this
 // thread's vec chunks, chunk i covers row vecs thrx, thrx+numx, ...), matching
 // aten's per-thread order + warp/block trees. blockDim must be (32, NW).
-template <int MaxVecPerThread>
+//
+// F0068 (FastTree=true): the aten inter-warp tree costs 2 __syncthreads PER
+// LEVEL — 9 block-wide syncs at the deployed WIDE (32,16) config. Measured on
+// the 3090 that sync chain is ~1.63 us of add_ln's 4.41 us/call (37%; the
+// width-INDEPENDENT residual after subtracting the 1.07 us graph-node dispatch
+// floor and the 4.18e-4 us/element width term — bench/bench_kernel_floor.py).
+// It is pure latency, not work: only ONE partial per warp ever crosses smem.
+// FastTree lands every warp's partial in smem ONCE (1 sync), replays the
+// IDENTICAL halving schedule inside warp 0 with __shfl_down (lane y holds warp
+// y's partial, so offset=NW/2..1 combines the same operand pairs in the same
+// order as the smem tree), then publishes (1 sync) => 2 syncs, any NW.
+// BIT-IDENTICAL by construction (same combine sequence, same operands, no
+// reassociation) — gated torch.equal vs FastTree=false in
+// bench/test_addln_fasttree.py, so it carries no numerics risk of its own.
+// NOTE the smem contract differs: the aten tree only ever fills HALF the slots
+// (writers are y in [offset, 2*offset), slots [0, offset)), so its launcher
+// allocates blockDim.y*3/2 floats; FastTree writes ALL blockDim.y slots and
+// needs blockDim.y*3 floats. The launchers below size shared memory per config.
+template <int MaxVecPerThread, bool FastTree = false>
 __device__ WelfordLN ln_compute_stats(const half4* vals, int n_own, int N,
                                       float* buf) {
   WelfordLN wd{0.f, 0.f, 0.f};
@@ -134,6 +152,37 @@ __device__ WelfordLN ln_compute_stats(const half4* vals, int n_own, int N,
   // inter-warp tree via smem (transcribed; blockDim.y power of two)
   if (blockDim.y > 1) {
     float* meansigmabuf = buf;
+    if (FastTree) {
+      // one store per warp, then the same halving schedule inside warp 0
+      float* countbuf = buf + 2 * blockDim.y;
+      if (threadIdx.x == 0) {
+        meansigmabuf[2 * threadIdx.y] = wd.mean;
+        meansigmabuf[2 * threadIdx.y + 1] = wd.sigma2;
+        countbuf[threadIdx.y] = wd.count;
+      }
+      __syncthreads();
+      if (threadIdx.y == 0) {
+        const unsigned y = threadIdx.x;  // lane y <-> warp y of the smem tree
+        WelfordLN v{0.f, 0.f, 0.f};
+        if (y < blockDim.y) {
+          v = WelfordLN{meansigmabuf[2 * y], meansigmabuf[2 * y + 1], countbuf[y]};
+        }
+        // y < offset <= blockDim.y/2 => the partner lane y+offset is always a
+        // real warp slot, so the out-of-range lanes above never feed a result.
+        for (unsigned offset = blockDim.y / 2; offset > 0; offset /= 2) {
+          WelfordLN vB{__shfl_down_sync(0xffffffff, v.mean, offset),
+                       __shfl_down_sync(0xffffffff, v.sigma2, offset),
+                       __shfl_down_sync(0xffffffff, v.count, offset)};
+          if (y < offset) v = welford_ln_combine(v, vB);
+        }
+        if (y == 0) {
+          meansigmabuf[0] = v.mean;
+          meansigmabuf[1] = v.sigma2 / float(N);
+        }
+      }
+      __syncthreads();
+      return WelfordLN{meansigmabuf[0], meansigmabuf[1], 0.f};
+    }
     float* countbuf = buf + blockDim.y;
     for (int offset = blockDim.y / 2; offset > 0; offset /= 2) {
       if (threadIdx.x == 0 && threadIdx.y >= offset && threadIdx.y < 2 * offset) {
@@ -164,7 +213,8 @@ __device__ WelfordLN ln_compute_stats(const half4* vals, int n_own, int N,
 
 // x_new = round_fp16(x + delta); y = LayerNorm(x_new) — torch bit order.
 // One block per row, blockDim (32, 4); N % 4 == 0; N <= MaxVecPerThread*128*4.
-template <int MaxVecPerThread>
+// FastTree selects the F0068 2-sync inter-warp reduction (bit-identical).
+template <int MaxVecPerThread, bool FastTree = false>
 __global__ void add_ln_kernel(int N, float eps,
                               const dtype* __restrict__ x,
                               const dtype* __restrict__ delta,
@@ -204,7 +254,7 @@ __global__ void add_ln_kernel(int N, float eps,
     own[n_own++] = s;
   }
 
-  WelfordLN wd = ln_compute_stats<MaxVecPerThread>(own, n_own, N, s_data);
+  WelfordLN wd = ln_compute_stats<MaxVecPerThread, FastTree>(own, n_own, N, s_data);
   float rstd_val = rsqrtf(wd.sigma2 + eps);
 
   // affine apply, aten expression (fp32 compute, one implicit round at store)
@@ -562,12 +612,41 @@ at::Tensor relu_sq(at::Tensor x) {
 // order. Numerics bar: fp32-reference oracle tolerance + greedy-EXACT e2e
 // (the fp16-state WKV precedent), gated before any default flip; default
 // remains the parity config.
-static bool addln_wide_enabled() {
-  static const bool v = []() {
+// Tier ladder (RWKV_ADDLN_WIDE): 0 = torch-parity (32,4); 1 = F0065 WIDE
+// (32,16); 2 = F0068 WIDER (32,32). Each step halves the elements each thread
+// owns, which is where the measured time actually goes: on the 3090 at T=1 the
+// per-call cost fits dispatch (1.07 us) + a width-INDEPENDENT residual + a
+// width term of ~0.21 us per element-per-thread (bench_addln_configs.py —
+// N 4096->2048 at fixed 512 threads is -0.84 us = 4 fewer elements/thread).
+// WIDER trades that against a 5-level (vs 4) inter-warp tree, which FastTree
+// has already made nearly free.
+static int addln_wide_tier() {
+  static const int v = []() {
     const char* e = getenv("RWKV_ADDLN_WIDE");
+    if (!e) return 0;
+    if (e[0] == '2') return 2;
+    return e[0] == '1' ? 1 : 0;
+  }();
+  return v;
+}
+
+// F0068: 2-sync inter-warp Welford reduction (bit-identical to the aten tree —
+// same combine schedule, just carried in warp-0 registers instead of 4 rounds
+// of smem ping-pong). Kills 7 of the 9 block-wide syncs at the WIDE config.
+// Default OFF until bench/test_addln_fasttree.py shows torch.equal on the
+// deployed stack; flip via RWKV_ADDLN_FASTTREE=1.
+static bool addln_fasttree_enabled() {
+  static const bool v = []() {
+    const char* e = getenv("RWKV_ADDLN_FASTTREE");
     return e && e[0] == '1';
   }();
   return v;
+}
+
+// smem floats: the aten tree fills only half the slots (blockDim.y*3/2);
+// FastTree stores every warp's partial (blockDim.y*3).
+static inline int addln_nshared(int ny, bool fast) {
+  return (fast ? ny * 3 : ny * 3 / 2) * static_cast<int>(sizeof(float));
 }
 
 std::tuple<at::Tensor, at::Tensor> add_ln(at::Tensor x, at::Tensor delta,
@@ -592,31 +671,57 @@ std::tuple<at::Tensor, at::Tensor> add_ln(at::Tensor x, at::Tensor delta,
   if (T == 0) return {x_new, y};
   auto stream = at::cuda::getCurrentCUDAStream();
   const bool pdl = rwkv7_pdl_enabled("ln");
+  const bool fast = addln_fasttree_enabled();
+  const int tier = addln_wide_tier();
+  // WIDER small-T path (F0068): (32,32)=1024 threads, 1 vec/thread => N<=4096.
+  if (tier == 2 && T <= 32 && N <= 1 * 1024 * kVec) {
+    const dim3 threads_x(32, 32, 1);
+    const int nshared_x = addln_nshared(threads_x.y, fast);
+#define RWKV7_ADDLN_LAUNCH_X(FT)                                               \
+    rwkv7_launch_maybe_pdl(pdl, add_ln_kernel<1, FT>,                          \
+        dim3(static_cast<unsigned>(T)), threads_x, nshared_x, stream.stream(), \
+        static_cast<int>(N), static_cast<float>(eps),                          \
+        static_cast<const dtype*>(x.data_ptr<dtype>()),                        \
+        static_cast<const dtype*>(delta.data_ptr<dtype>()),                    \
+        static_cast<const dtype*>(gamma.data_ptr<dtype>()),                    \
+        static_cast<const dtype*>(beta.data_ptr<dtype>()),                     \
+        x_new.data_ptr<dtype>(), y.data_ptr<dtype>())
+    if (fast) { RWKV7_ADDLN_LAUNCH_X(true); } else { RWKV7_ADDLN_LAUNCH_X(false); }
+#undef RWKV7_ADDLN_LAUNCH_X
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    return {x_new, y};
+  }
   // WIDE small-T path: (32,16) needs each thread to own <= 2 vecs => N <= 4096.
-  if (addln_wide_enabled() && T <= 32 && N <= 2 * 512 * kVec) {
+  if (tier >= 1 && T <= 32 && N <= 2 * 512 * kVec) {
     const dim3 threads_w(32, 16, 1);
-    const int nshared_w = threads_w.y * 3 / 2 * sizeof(float);
-    rwkv7_launch_maybe_pdl(pdl, add_ln_kernel<2>,
-        dim3(static_cast<unsigned>(T)), threads_w, nshared_w, stream.stream(),
-        static_cast<int>(N), static_cast<float>(eps),
-        static_cast<const dtype*>(x.data_ptr<dtype>()),
-        static_cast<const dtype*>(delta.data_ptr<dtype>()),
-        static_cast<const dtype*>(gamma.data_ptr<dtype>()),
-        static_cast<const dtype*>(beta.data_ptr<dtype>()),
-        x_new.data_ptr<dtype>(), y.data_ptr<dtype>());
+    const int nshared_w = addln_nshared(threads_w.y, fast);
+#define RWKV7_ADDLN_LAUNCH_W(FT)                                               \
+    rwkv7_launch_maybe_pdl(pdl, add_ln_kernel<2, FT>,                          \
+        dim3(static_cast<unsigned>(T)), threads_w, nshared_w, stream.stream(), \
+        static_cast<int>(N), static_cast<float>(eps),                          \
+        static_cast<const dtype*>(x.data_ptr<dtype>()),                        \
+        static_cast<const dtype*>(delta.data_ptr<dtype>()),                    \
+        static_cast<const dtype*>(gamma.data_ptr<dtype>()),                    \
+        static_cast<const dtype*>(beta.data_ptr<dtype>()),                     \
+        x_new.data_ptr<dtype>(), y.data_ptr<dtype>())
+    if (fast) { RWKV7_ADDLN_LAUNCH_W(true); } else { RWKV7_ADDLN_LAUNCH_W(false); }
+#undef RWKV7_ADDLN_LAUNCH_W
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     return {x_new, y};
   }
   const dim3 threads(32, 4, 1);
-  const int nshared = threads.y > 1 ? threads.y * 3 / 2 * sizeof(float) : 0;
-  rwkv7_launch_maybe_pdl(pdl, add_ln_kernel<kMaxVecPerThread>,
-      dim3(static_cast<unsigned>(T)), threads, nshared, stream.stream(),
-      static_cast<int>(N), static_cast<float>(eps),
-      static_cast<const dtype*>(x.data_ptr<dtype>()),
-      static_cast<const dtype*>(delta.data_ptr<dtype>()),
-      static_cast<const dtype*>(gamma.data_ptr<dtype>()),
-      static_cast<const dtype*>(beta.data_ptr<dtype>()),
-      x_new.data_ptr<dtype>(), y.data_ptr<dtype>());
+  const int nshared = threads.y > 1 ? addln_nshared(threads.y, fast) : 0;
+#define RWKV7_ADDLN_LAUNCH(FT)                                                 \
+  rwkv7_launch_maybe_pdl(pdl, add_ln_kernel<kMaxVecPerThread, FT>,             \
+      dim3(static_cast<unsigned>(T)), threads, nshared, stream.stream(),       \
+      static_cast<int>(N), static_cast<float>(eps),                            \
+      static_cast<const dtype*>(x.data_ptr<dtype>()),                          \
+      static_cast<const dtype*>(delta.data_ptr<dtype>()),                      \
+      static_cast<const dtype*>(gamma.data_ptr<dtype>()),                      \
+      static_cast<const dtype*>(beta.data_ptr<dtype>()),                       \
+      x_new.data_ptr<dtype>(), y.data_ptr<dtype>())
+  if (fast) { RWKV7_ADDLN_LAUNCH(true); } else { RWKV7_ADDLN_LAUNCH(false); }
+#undef RWKV7_ADDLN_LAUNCH
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return {x_new, y};
 }
