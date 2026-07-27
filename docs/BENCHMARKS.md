@@ -42,12 +42,20 @@ its numbers are ~2× lower for batched decode and are never quoted against the c
 > not §3/§5** — the 1.5B 397.3/447.3 and 7.2B 123.7 in §3/§5 are *pre*-megakernel values, kept only
 > for the step-by-step breakdown.
 
-**Speed · single-request bsz1 (RTX 5090, [steady-state](#g-bsz1) decode)**
+**Speed · single-request [bsz1](#g-bsz1) (RTX 5090, 64-in/256-out wall-clock at c=1)**
 
 | model · precision | current best | vs | source |
 |---|---:|---|---|
 | RWKV-7 **7.2B** fp16 | **142.8 tok/s** | = **92.0%** of Bo's official 155.2 | §7a-flagship · 2026-07-21 |
 | RWKV-7 **1.5B** fp16 | **514.5 tok/s** | same flagship ladder | §7a-flagship · 2026-07-21 |
+
+> **Two conventions, both current, never interchangeable.** The table above is wall-clock
+> over a 64-in/256-out request at c=1, prefill included (`bench/bsz_throughput.py`). The
+> other convention — ctx-1024 steady-state decode with prefill *subtracted*
+> (`bench/serving_scale.py`), which §3 and the README's speed table use — reads **535.2
+> tok/s** for 1.5B fp16 on the same stack and card. Quoting a number from one convention as
+> the other is the specific error [F0069](findings/0069-public-number-conventions.md) exists
+> to prevent; it nearly published a −3.3% regression that was not there.
 
 **Speed · [peak](#g-peak) serving throughput (wall-clock, 64-in/256-out)**
 
@@ -223,6 +231,32 @@ the 3090 column is the v0.5.10 historical ladder for lineage.
 | int4 (prequantized) | 259.1 | **548.8** | +109.5% |
 
 Raw: `bench/results/ladder_*_5090.log`. The 3090-on-main ladder is being re-measured.
+
+**Re-measured 2026-07-27 (F0069), same convention, same card, one session.** The rows
+above are a lineage — each adds one kernel set to the one before — and they stay as the
+history they record. What changed since is that the megakernel line (F0063–F0066c) landed
+on top, and that the tree beneath the W1' rung moved: re-running *its own* flag set today
+reads 7.8–8.9% higher across all three tiers, because later work landed unconditionally
+underneath it. Both columns below are `bench/serving_scale.py` at ctx-1024 bsz-1, matching
+the rows above; raw in `bench/results/f0069/ss_*.log`.
+
+| tier | W1' flag set, re-read today | published above | **+ megakernel stack (current)** |
+|---|---:|---:|---:|
+| fp16 | 442.3 | 409.8 | **535.2** |
+| int8 w8g64 | 498.1 | 461.9 | **596.8** |
+| int4 | 597.7 | 548.8 | **742.6** |
+
+Gated, not just timed: fp16 reproduces the oracle fixture greedy-EXACT, both quantized
+tiers emit token-identical output with the megakernel flags on and off, and w8g64 matches
+fp16 token-for-token (an independent confirmation of §4's greedy-lossless claim). The
+`RWKV_STATE_FP16` rung that once added +9.2% here (409.8 → 447.3, §5) now adds +0.1%
+(442.3 → 442.8) — the current stack already gets that by other means, so it is no longer a
+separate step. F0069 also found and fixed a harness defect that made the first pass of this
+table invalid: `serving_scale.py` was silently dropping the switch that disables prefill
+CUDA graphs after sglang renamed it, and RWKV-7 decodes from a state that graph never
+wrote. The published rows above are *not* affected — their recorded TTFT (36.0 / 37.3 /
+40.4 ms) matches the corrected re-measurement (37.2 / 38.8 / 40.7), not the broken
+configuration's ~23 ms.
 
 **Figure — the ladder as bars.** Same build order as the table, top to bottom; every value
 and every percentage is recomputed from the logs' own context-1024/bsz-1 rows, not copied

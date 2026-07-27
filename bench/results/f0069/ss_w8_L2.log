@@ -1,0 +1,25 @@
+Failed to load generation config for /ws/models/rwkv7-1.5b-w8g64: /ws/models/rwkv7-1.5b-w8g64 does not appear to have a file named generation_config.json. Checkout 'https://huggingface.co//ws/models/rwkv7-1.5b-w8g64/tree/main' for available files.. Proceeding without generation config.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+[rwkv7] M6 fused fp16 GEMV projection path armed (fp16 bsz1 decode only; inactive for other dtypes)
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00,  2.40it/s]Multi-thread loading shards: 100% Completed | 1/1 [00:00<00:00,  2.40it/s]
+  0%|          | 0/7 [00:00<?, ?it/s]Capturing batches (bs=24 avail_mem=17.26 GB):   0%|          | 0/7 [00:00<?, ?it/s][rwkv7_pdl] PDL chain ARMED (stage 'glue')
+[rwkv7] R2 fused paged shift+lerp6 glue ENABLED (decode, fp16)
+[rwkv7] W1' fused batched LoRA-gate activations ENABLED (fp16)
+[rwkv7_pdl] triton glue joined the PDL chain (kk_kmix + lora_gates)
+[rwkv7_wkv] hand-CUDA WKV decode ACTIVE (state=float16, H=32)
+[rwkv7] W1' fused GroupNorm+gate-corr ENABLED (fp16)
+[rwkv7] W1' fused residual-add+LayerNorm ENABLED (fp16)
+[rwkv7] R2 fused paged shift+lerp1 (ffn) glue ENABLED (decode, fp16)
+[rwkv7] W1 fused ffn sqrelu epilogue ENABLED (fp16 bsz1 decode)
+Capturing batches (bs=24 avail_mem=17.26 GB):  14%|█▍        | 1/7 [00:00<00:02,  2.60it/s]Capturing batches (bs=16 avail_mem=17.21 GB):  14%|█▍        | 1/7 [00:00<00:02,  2.60it/s]Capturing batches (bs=12 avail_mem=17.21 GB):  14%|█▍        | 1/7 [00:00<00:02,  2.60it/s]Capturing batches (bs=8 avail_mem=17.20 GB):  14%|█▍        | 1/7 [00:00<00:02,  2.60it/s] Capturing batches (bs=8 avail_mem=17.20 GB):  57%|█████▋    | 4/7 [00:00<00:00,  9.73it/s]Capturing batches (bs=4 avail_mem=17.20 GB):  57%|█████▋    | 4/7 [00:00<00:00,  9.73it/s][rwkv7] M9 fused LoRA path ENABLED (fp16 decode, M1+batched)
+Capturing batches (bs=2 avail_mem=17.10 GB):  57%|█████▋    | 4/7 [00:00<00:00,  9.73it/s]Capturing batches (bs=1 avail_mem=17.10 GB):  57%|█████▋    | 4/7 [00:00<00:00,  9.73it/s][rwkv7] F0066c fused LoRA gate epilogue ENABLED (stage2-folded; byte-exact vs lora4_m1+gates)
+Capturing batches (bs=1 avail_mem=17.10 GB): 100%|██████████| 7/7 [00:00<00:00, 11.96it/s]
+==================================================================================
+SERVING-SCALE  model=rwkv7-1.5b-w8g64  dtype=float16  mode=batch  cuda_graph=ON  radix=OFF
+  decode=64tok steady-state (prefill-subtracted)  mem_fraction=0.85  baseline=2 MiB
+----------------------------------------------------------------------------------
+ context |  bsz |  decode tok/s |   ms/step |    TTFT ms | peak VRAM MiB
+----------------------------------------------------------------------------------
+    1024 |    1 |         596.8 |      1.68 |       37.0 |         14766
+==================================================================================
