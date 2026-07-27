@@ -1,0 +1,74 @@
+{
+  "device": "NVIDIA GeForce RTX 3090",
+  "H": 4096,
+  "inter": 16384,
+  "grid_blocks": 2048,
+  "rows": [
+    {
+      "density": 0.1,
+      "us_atomic": 19.384,
+      "us_plain_store_PROBE": 18.202,
+      "atomic_cost_us": 1.183,
+      "atomic_share": 0.061,
+      "us_full_with_finalize": 20.052,
+      "weight_MB": 13.42,
+      "achieved_GBps": 692.4,
+      "pct_of_peak_BW": 74.0
+    },
+    {
+      "density": 0.12,
+      "us_atomic": 22.192,
+      "us_plain_store_PROBE": 21.176,
+      "atomic_cost_us": 1.016,
+      "atomic_share": 0.046,
+      "us_full_with_finalize": 23.168,
+      "weight_MB": 16.11,
+      "achieved_GBps": 725.7,
+      "pct_of_peak_BW": 77.5
+    },
+    {
+      "density": 0.14,
+      "us_atomic": 25.246,
+      "us_plain_store_PROBE": 24.535,
+      "atomic_cost_us": 0.711,
+      "atomic_share": 0.028,
+      "us_full_with_finalize": 26.675,
+      "weight_MB": 18.79,
+      "achieved_GBps": 744.3,
+      "pct_of_peak_BW": 79.5
+    },
+    {
+      "density": 0.25,
+      "us_atomic": 42.522,
+      "us_plain_store_PROBE": 41.958,
+      "atomic_cost_us": 0.563,
+      "atomic_share": 0.013,
+      "us_full_with_finalize": 43.738,
+      "weight_MB": 33.55,
+      "achieved_GBps": 789.1,
+      "pct_of_peak_BW": 84.3
+    },
+    {
+      "density": 0.5,
+      "us_atomic": 81.382,
+      "us_plain_store_PROBE": 81.064,
+      "atomic_cost_us": 0.318,
+      "atomic_share": 0.004,
+      "us_full_with_finalize": 82.672,
+      "weight_MB": 67.11,
+      "achieved_GBps": 824.6,
+      "pct_of_peak_BW": 88.1
+    },
+    {
+      "density": 1.0,
+      "us_atomic": 156.984,
+      "us_plain_store_PROBE": 156.767,
+      "atomic_cost_us": 0.218,
+      "atomic_share": 0.001,
+      "us_full_with_finalize": 158.303,
+      "weight_MB": 134.22,
+      "achieved_GBps": 855.0,
+      "pct_of_peak_BW": 91.3
+    }
+  ]
+}

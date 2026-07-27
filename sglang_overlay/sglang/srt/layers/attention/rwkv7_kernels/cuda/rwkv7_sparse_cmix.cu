@@ -42,6 +42,18 @@ constexpr int NWARP = FFN_TILE / 32;
 }  // namespace
 
 // grid = (inter/FFN_TILE, H/C_TILE); block = THREADS.
+//
+// F0068 cut 3 — ATTRIBUTION PROBE (NoAtomic): every one of the inter/FFN_TILE
+// tiles atomicAdds into the SAME [H] fp32 buffer, so each output element takes
+// inter/FFN_TILE atomic adds per call (7.2B: 128 -> 4096*128 = 524k atomic f32
+// adds/call, ~2 MB of atomic traffic into 16 KB). Whether that contention or
+// the sparse weight stream is the binding cost cannot be reasoned out — it has
+// to be measured, so NoAtomic=true swaps the two atomicAdds for plain stores.
+// THAT PRODUCES WRONG RESULTS BY CONSTRUCTION (it drops every tile's partial
+// but the last writer) and exists ONLY to price the atomics. It is reachable
+// exclusively through the `_probe_cmix_noatomic` op below, never from
+// sparse_cmix(), so it cannot be switched on in a serving path by accident.
+template <bool NoAtomic = false>
 __global__ __launch_bounds__(THREADS, 4) void sparse_cmix_f32acc_kernel(
     int C,                                   // = H
     const half* __restrict__ preact,         // raw key preactivation k [inter]
@@ -95,8 +107,13 @@ __global__ __launch_bounds__(THREADS, 4) void sparse_cmix_f32acc_kernel(
     acc1 = fmaf(a, __half2float(wp[1]), acc1);
   }
   // combine partials across the inter-tiles (fb) in fp32
-  atomicAdd(&out_f32[c0], acc0);
-  atomicAdd(&out_f32[c0 + 1], acc1);
+  if (NoAtomic) {  // PROBE ONLY — see the template note above; results are wrong
+    out_f32[c0] = acc0;
+    out_f32[c0 + 1] = acc1;
+  } else {
+    atomicAdd(&out_f32[c0], acc0);
+    atomicAdd(&out_f32[c0 + 1], acc1);
+  }
   rwkv7_pdl_launch_dependents();  // next stage schedules early (no-op unarmed)
 }
 
@@ -152,7 +169,7 @@ at::Tensor sparse_cmix(at::Tensor preact, at::Tensor wt, int64_t H) {
   dim3 grid(static_cast<unsigned>(inter / FFN_TILE), static_cast<unsigned>(H / C_TILE));
   const bool pdl = rwkv7_pdl_enabled("sparse");
   // torch only instantiates data_ptr<> for its scalar types (at::Half), not __half.
-  rwkv7_launch_maybe_pdl(pdl, sparse_cmix_f32acc_kernel,
+  rwkv7_launch_maybe_pdl(pdl, sparse_cmix_f32acc_kernel<false>,
       grid, dim3(THREADS), 0, stream.stream(),
       static_cast<int>(H),
       reinterpret_cast<const half*>(pc.data_ptr<at::Half>()),
@@ -169,9 +186,45 @@ at::Tensor sparse_cmix(at::Tensor preact, at::Tensor wt, int64_t H) {
   return out16;
 }
 
+// F0068 attribution probe. Runs ONLY the cmix kernel (no finalize) with the
+// cross-tile atomicAdd replaced by a plain store, so the delta against
+// _probe_cmix_atomic prices the atomic contention. **The returned buffer is
+// NOT the channel-mix output** — it is missing every tile's partial but the
+// last writer. Never call this from a model path; it exists so that a claim
+// about where sparse_cmix's 12.95 us/call goes is measured, not argued.
+at::Tensor probe_cmix(at::Tensor preact, at::Tensor wt, int64_t H, bool no_atomic) {
+  const int64_t inter = preact.numel();
+  TORCH_CHECK(preact.scalar_type() == at::kHalf && wt.scalar_type() == at::kHalf,
+              "probe_cmix: fp16 inputs");
+  TORCH_CHECK((inter % FFN_TILE) == 0 && (H % C_TILE) == 0, "probe_cmix: shape");
+  auto pc = preact.contiguous();
+  auto wc = wt.contiguous();
+  auto out32 = sparse_acc_buffer(H, preact.options());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  dim3 grid(static_cast<unsigned>(inter / FFN_TILE), static_cast<unsigned>(H / C_TILE));
+  const bool pdl = rwkv7_pdl_enabled("sparse");
+  if (no_atomic) {
+    rwkv7_launch_maybe_pdl(pdl, sparse_cmix_f32acc_kernel<true>, grid, dim3(THREADS), 0,
+        stream.stream(), static_cast<int>(H),
+        reinterpret_cast<const half*>(pc.data_ptr<at::Half>()),
+        reinterpret_cast<const half*>(wc.data_ptr<at::Half>()),
+        out32.data_ptr<float>());
+  } else {
+    rwkv7_launch_maybe_pdl(pdl, sparse_cmix_f32acc_kernel<false>, grid, dim3(THREADS), 0,
+        stream.stream(), static_cast<int>(H),
+        reinterpret_cast<const half*>(pc.data_ptr<at::Half>()),
+        reinterpret_cast<const half*>(wc.data_ptr<at::Half>()),
+        out32.data_ptr<float>());
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return out32;
+}
+
 TORCH_LIBRARY(rwkv7_sparse_cmix, m) {
   m.def("sparse_cmix(Tensor preact, Tensor wt, int H) -> Tensor");
+  m.def("_probe_cmix_noatomic(Tensor preact, Tensor wt, int H, bool no_atomic) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(rwkv7_sparse_cmix, CUDA, m) {
   m.impl("sparse_cmix", &sparse_cmix);
+  m.impl("_probe_cmix_noatomic", &probe_cmix);
 }

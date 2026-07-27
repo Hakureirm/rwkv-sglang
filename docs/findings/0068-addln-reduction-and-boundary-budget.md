@@ -1,8 +1,8 @@
 ---
 doc_kind: finding
 finding_id: F0068
-title: "Stage-B cut 3 (#57): before building the banked inline-lerp GEMV, decompose what the boundary cluster actually costs. Measured on sm86 at decode T=1: add_ln = graph-node dispatch floor (1.07us) + a width-INDEPENDENT residual + ~0.21us per element-per-thread; the deployed (32,16) WIDE tier is the OPTIMUM of the thread ladder (bracketed both ways — (32,32) WIDER is SLOWER, so one block already saturates its SM and adding threads buys nothing). Two results: (1) FastTree — replay the aten inter-warp Welford schedule inside warp 0 with __shfl_down instead of 4 rounds of smem ping-pong, 9 block-wide syncs -> 2, BIT-IDENTICAL by construction, measured -6.5% (N=4096) / -7.1% (N=2048) on add_ln; (2) the banked F0066 §5 inline-lerp boundary kernel's -230us/step projection does NOT survive the arithmetic — its boundary kernel is a strict superset of add_ln, and F0066a's own failed J=6 kernel already measured the single-block marginal cost (~20 GB/s) that makes it a NET LOSS; (3) the cross-block row SPLIT this finding nominated as the next lever was then BUILT and measured in the same round — its parallelisation works (work term -26%) but sm86's second dispatch floor eats all of it, making it the one arm whose verdict genuinely requires sm120 (where PDL runs 96.8% overlapped with negative inter-kernel gaps)."
-status: PARTIAL (2026-07-27) — sm86 mechanism + gates GREEN, sm120 step-level effect UNMEASURED (the 5090 box was offline for this round; three independent reachability probes all failed). FastTree gates: bit-identity 96/96 torch.equal across both launcher tiers (bench/test_addln_fasttree.py) + the torch transcription contract preserved at the parity tier, 0 differing bytes, at FastTree=0 AND =1 (bench/test_addln_numerics.py). WIDER (32,32) tier landed in-tree, default OFF, published as an honest NEGATIVE; SPLIT (cross-block, tier 3) landed in-tree, default OFF, CONDITIONAL negative pending sm120. Both new knobs default OFF; nothing promoted to serve.sh defaults until a 5090 A/B runs
+title: "Stage-B cut 3 (#57): before building the banked inline-lerp GEMV, decompose what the boundary cluster actually costs. Measured on sm86 at decode T=1: add_ln = graph-node dispatch floor (1.07us) + a width-INDEPENDENT residual + ~0.21us per element-per-thread; the deployed (32,16) WIDE tier is the OPTIMUM of the thread ladder (bracketed both ways — (32,32) WIDER is SLOWER, so one block already saturates its SM and adding threads buys nothing). Two results: (1) FastTree — replay the aten inter-warp Welford schedule inside warp 0 with __shfl_down instead of 4 rounds of smem ping-pong, 9 block-wide syncs -> 2, BIT-IDENTICAL by construction, measured -6.5% (N=4096) / -7.1% (N=2048) on add_ln; (2) the banked F0066 §5 inline-lerp boundary kernel's -230us/step projection does NOT survive the arithmetic — its boundary kernel is a strict superset of add_ln, and F0066a's own failed J=6 kernel already measured the single-block marginal cost (~20 GB/s) that makes it a NET LOSS; (3) the cross-block row SPLIT this finding nominated as the next lever was then BUILT and measured in the same round — its parallelisation works (work term -26%) but sm86's second dispatch floor eats all of it, making it the one arm whose verdict genuinely requires sm120 (where PDL runs 96.8% overlapped with negative inter-kernel gaps); (4) cut 3 then measured the two largest UNEXAMINED items in the addressable pool — sparse_cmix (atomics REFUTED as the bound at 2.8-6.1%; it runs at 81-87% of the 91.3%-of-peak this kernel class actually achieves) and the LoRA pair (71.8% of achievable, the worst ratio in the kernel set, ~131us/step of headroom) — which CLOSES the budget: every headroom identified, taken in full and to unreachable ceilings, sums to ~240us/step against the -560us needed, so the remaining 8% to Bo is NOT in the per-kernel efficiency of this decode structure."
+status: PARTIAL (2026-07-27) — sm86 mechanism + gates GREEN, sm120 step-level effect UNMEASURED (the 5090 box was offline for this round; three independent reachability probes all failed). FastTree gates: bit-identity 96/96 torch.equal across both launcher tiers (bench/test_addln_fasttree.py) + the torch transcription contract preserved at the parity tier, 0 differing bytes, at FastTree=0 AND =1 (bench/test_addln_numerics.py). WIDER (32,32) tier landed in-tree, default OFF, published as an honest NEGATIVE; SPLIT (cross-block, tier 3) landed in-tree, default OFF, CONDITIONAL negative pending sm120. Cut 3 closes the #57 budget: the -560 us/step needed to pass Bo is not available in per-kernel efficiency (~240 us total headroom to unreachable ceilings) — the remaining gap is structural (Bo ~13 kernels/step vs our 469), which is a scope call for the user, not a kernel task. Both new knobs default OFF; nothing promoted to serve.sh defaults until a 5090 A/B runs
 discovered_by: Opus 5 (1M), 2026-07-27
 severity: info
 related: [F0066, F0065, F0064, F0063]
@@ -205,6 +205,86 @@ launch. It measured 5.04 us and looked like a clean refutation of the whole
 idea. It was a harness bug in the launcher, not a result. Sizing for 1
 vec/thread is what produced the numbers above.
 
+## 5c. Cut 3 — the rest of the addressable pool, measured: the −560 us/step is NOT there
+
+§1 established that only 1617 us/step of the 7202.5 us BUSY is not already at a
+DRAM wall, and that beating Bo needs −560 us — ~35% of that pool. This cut
+measures the two largest unexamined items in it, at the **real 7.2B geometry
+read from the checkpoint config** (hidden 4096, layers 32, intermediate 16384,
+LoRA low-rank dims decay/a/gate/v = 128/128/480/96 ⇒ R_total = 832).
+
+**A floor must mean ACHIEVABLE bandwidth, not peak.** The sparse_cmix dense
+case below tops out at **91.3% of peak** on the 3090; quoting peak-relative
+numbers overstates headroom, which is the error this section exists to avoid.
+
+### sparse_cmix (418.17 us/step, 25.9% of the pool) — atomics REFUTED, near its ceiling
+
+Every one of the inter/FFN_TILE = 128 tiles atomicAdds into the same [H] fp32
+buffer: 524k atomic f32 adds per call, ~2 MB of atomic traffic into 16 KB. That
+is the obvious suspect, so it was priced directly (`_probe_cmix_noatomic`, a
+probe op that swaps the atomicAdd for a plain store — **wrong results by
+construction**, unreachable from any model path):
+
+| density | atomic | plain-store probe | atomic cost | atomic share | % of peak BW |
+|---:|---:|---:|---:|---:|---:|
+| 0.10 | 19.384 | 18.202 | 1.183 | 6.1% | 74.0 |
+| 0.12 | 22.192 | 21.176 | 1.016 | 4.6% | 77.5 |
+| 0.14 | 25.246 | 24.535 | 0.711 | 2.8% | 79.5 |
+| 1.00 | 156.984 | 156.767 | 0.218 | 0.1% | **91.3** |
+
+**Refuted:** in the real 86–90%-zero band the atomics are 2.8–6.1% of the
+kernel. sparse_cmix is a weight-stream kernel running at 74–80% of peak, i.e.
+**81–87% of the 91.3% this kernel class actually achieves.** What the sparsity
+costs is coalescing (scattered 512 B row reads vs a dense burst), not the
+combine. Headroom to a ceiling it cannot reach: **≤63 us/step.**
+
+### the LoRA pair (463.4 us/step, 28.7% of the pool) — the largest real headroom
+
+`lora4_m1` (stage1 + stage2, two launches), same harness, 3090:
+
+| | value |
+|---|---:|
+| us/call | 24.412 |
+| dispatch floor × 2 | 2.19 (9.0%) |
+| work | 22.221 |
+| DRAM (d_cat + u_cat) | 13.63 MB |
+| achieved on work | 613.5 GB/s = **65.5% of peak = 71.8% of achievable** |
+
+**~28% off its own ceiling — the worst efficiency ratio in the kernel set, and
+the largest remaining headroom (~131 us/step if it could be closed).** A named
+suspect for the next round, not yet tested: stage1 launches ONE block per
+down-row, so the xs row is re-read by all 832 blocks — 6.82 MB of redundant xs
+traffic, exactly equal to d_cat's own 6.82 MB. Row-tiling (R rows per block)
+would amortise it, at the cost of dropping to 832/R blocks (on the 5090's 170
+SMs, R=4 leaves ~1.2 blocks/SM — the trade-off has to be measured, not argued).
+
+### The budget, closed
+
+| item | us/step | state |
+|---|---:|---|
+| GEMVs + lm_head | 5585 | bandwidth wall — floor, not a lever |
+| LoRA pair | 463 | 72% of achievable → ~131 headroom |
+| sparse_cmix | 418 | 81–87% of achievable → ≤63 |
+| add_ln | 255 | ladder bracketed; FastTree ≈ −17, SPLIT card-dependent |
+| shift_lerp6/1 | 104 | the inline-lerp arm → ~30 |
+| gn_gatecorr / wkv / kk_kmix / finalize / misc | 320 | unexamined |
+
+**Every headroom identified so far, taken IN FULL and to ceilings that are by
+definition unreachable, sums to ~240 us/step against the −560 us needed.** Even
+adding an optimistic share of the 320 us not yet decomposed, kernel-level
+optimisation of the current decode structure does not get from 142.8 to 155.2.
+
+This does not say the gap is unclosable — it says **it is not in the per-kernel
+efficiency of this structure.** Bo runs ~13 kernels/step against our 469; the
+remaining difference is structural (how the step is decomposed into kernels at
+all), not a matter of tightening the kernels we have. Whoever picks up #57
+should treat "find another 560 us in these kernels" as measured-and-refused,
+and price a structural change instead.
+
+⚠ Scope: percentages are 3090 measurements used as a proxy for sm120, and the
+"91.3% achievable" ceiling is taken from one kernel's dense case. Both should be
+re-measured on the 5090 before this budget is quoted publicly.
+
 ## 6. Disposition + what is next
 
 - FastTree: in-tree, `RWKV_ADDLN_FASTTREE=1`, **default OFF** pending a 5090
@@ -234,9 +314,11 @@ is made, and none may be published from this finding alone.
 
 `bench/results/f0068/`: `addln_sweep.jsonl` (16 configs × 50 reps),
 `split_nb_sweep.jsonl` (SPLIT NB ∈ {4,8,16,32}),
+`sparse_cmix_floor.json` (density × atomic-probe A/B), `lora_floor.json`,
 `kernel_floor.json` (dispatch-floor probe), `gate_fasttree.json`,
 `gate_numerics.json`. Harness: `bench/bench_addln_configs.py`,
-`bench/bench_kernel_floor.py`, `bench/addln_sweep.sh`. Gates:
+`bench/bench_kernel_floor.py`, `bench/addln_sweep.sh`,
+`bench/bench_sparse_cmix.py`, `bench/bench_lora_floor.py`. Gates:
 `bench/test_addln_fasttree.py`, `bench/test_addln_numerics.py` (both
 self-contained — they load `rwkv7_ln.cu` directly and do not need the installed
 sglang package, so they can gate a kernel without mutating a deployed tree).

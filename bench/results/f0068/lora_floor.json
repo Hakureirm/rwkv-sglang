@@ -1,0 +1,20 @@
+{
+  "device": "NVIDIA GeForce RTX 3090",
+  "H": 4096,
+  "ranks": [
+    128,
+    128,
+    480,
+    96
+  ],
+  "R_total": 832,
+  "stage1_blocks": 832,
+  "dispatch_floor_us": 1.096,
+  "lora4_m1_us_per_call": 24.412,
+  "dispatch_share": 0.09,
+  "work_us": 22.221,
+  "dram_MB": 13.63,
+  "achieved_GBps_on_work": 613.5,
+  "pct_of_peak_on_work": 65.5,
+  "pct_of_achievable_91p3": 71.8
+}
