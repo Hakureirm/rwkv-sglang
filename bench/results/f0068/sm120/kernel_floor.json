@@ -1,0 +1,1 @@
+{"device": "NVIDIA GeForce RTX 5090", "N": 4096, "null_1block_us": 0.6616320013999939, "null_16block_us": 0.7025279998779297, "addln_us": 2.856703996658325, "addln_minus_floor_us": 2.1950719952583313}

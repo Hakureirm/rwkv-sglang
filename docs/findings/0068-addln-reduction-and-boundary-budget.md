@@ -2,11 +2,11 @@
 doc_kind: finding
 finding_id: F0068
 title: "Stage-B cut 3 (#57): before building the banked inline-lerp GEMV, decompose what the boundary cluster actually costs. Measured on sm86 at decode T=1: add_ln = graph-node dispatch floor (1.07us) + a width-INDEPENDENT residual + ~0.21us per element-per-thread; the deployed (32,16) WIDE tier is the OPTIMUM of the thread ladder (bracketed both ways — (32,32) WIDER is SLOWER, so one block already saturates its SM and adding threads buys nothing). Two results: (1) FastTree — replay the aten inter-warp Welford schedule inside warp 0 with __shfl_down instead of 4 rounds of smem ping-pong, 9 block-wide syncs -> 2, BIT-IDENTICAL by construction, measured -6.5% (N=4096) / -7.1% (N=2048) on add_ln; (2) the banked F0066 §5 inline-lerp boundary kernel's -230us/step projection does NOT survive the arithmetic — its boundary kernel is a strict superset of add_ln, and F0066a's own failed J=6 kernel already measured the single-block marginal cost (~20 GB/s) that makes it a NET LOSS; (3) the cross-block row SPLIT this finding nominated as the next lever was then BUILT and measured in the same round — its parallelisation works (work term -26%) but sm86's second dispatch floor eats all of it, making it the one arm whose verdict genuinely requires sm120 (where PDL runs 96.8% overlapped with negative inter-kernel gaps); (4) cut 3 then measured the two largest UNEXAMINED items in the addressable pool — sparse_cmix (atomics REFUTED as the bound at 2.8-6.1%; it runs at 81-87% of the 91.3%-of-peak this kernel class actually achieves) and the LoRA pair (71.8% of achievable, the worst ratio in the kernel set, ~131us/step of headroom) — which CLOSES the budget: every headroom identified, taken in full and to unreachable ceilings, sums to ~240us/step against the -560us needed, so the remaining 8% to Bo is NOT in the per-kernel efficiency of this decode structure."
-status: PARTIAL (2026-07-27) — sm86 mechanism + gates GREEN, sm120 step-level effect UNMEASURED (the 5090 box was offline for this round; three independent reachability probes all failed). FastTree gates: bit-identity 96/96 torch.equal across both launcher tiers (bench/test_addln_fasttree.py) + the torch transcription contract preserved at the parity tier, 0 differing bytes, at FastTree=0 AND =1 (bench/test_addln_numerics.py). WIDER (32,32) tier landed in-tree, default OFF, published as an honest NEGATIVE; SPLIT (cross-block, tier 3) landed in-tree, default OFF, CONDITIONAL negative pending sm120. Cut 3 closes the #57 budget: the -560 us/step needed to pass Bo is not available in per-kernel efficiency (~240 us total headroom to unreachable ceilings) — the remaining gap is structural (Bo ~13 kernels/step vs our 469), which is a scope call for the user, not a kernel task. Both new knobs default OFF; nothing promoted to serve.sh defaults until a 5090 A/B runs
+status: CLOSED (2026-07-27, sm120 adjudicated on the 5090 after it came back) — **FastTree WIN, shipped-eligible**: BIT-IDENTICAL on BOTH architectures (96/96 torch.equal re-gated on sm120; parity tier still byte-exact vs torch at FastTree=0 AND =1), add_ln -3.5% (N=4096) / -5.1% (N=2048) on sm120, -6.5%/-7.1% on sm86. It ships on strictly-not-worse + bit-identity (F0064-V1 precedent), NOT as a throughput claim: -3.5% of add_ln is -8.9us/step = +0.13% e2e, BELOW the harness noise band, so no tok/s number may be attributed to it. **WIDER (32,32) REJECTED on both cards** (ladder optimum is (32,16)). **SPLIT REJECTED on both cards and mechanism closed**: work term -29% on sm120 / -26% on sm86 (the parallelisation is real and portable) but the extra graph node costs 0.663us against 0.614us saved = net +0.049us, break-even, still -1.8%; the 38%-cheaper sm120 dispatch floor narrowed +5.8% -> +1.8% without flipping it. **Cut 3 closed the #57 budget**: the -560us/step needed to pass Bo is not available in per-kernel efficiency (~240us of headroom to unreachable ceilings) — the remaining gap is structural (Bo ~13 kernels/step vs our 469), a scope call for the user, not a kernel task. All three knobs remain default OFF pending the user's call on promoting FastTree to serve.sh
 discovered_by: Opus 5 (1M), 2026-07-27
 severity: info
 related: [F0066, F0065, F0064, F0063]
-machine: authored on the Mac tree; ALL measurements on the 3090 box (sm86, CUDA 12.9) in container rwkvmain — the 5090 tower was offline for this round
+machine: authored on the Mac tree; sm86 measurements on the 3090 box (CUDA 12.9), sm120 close-out on the 5090 tower (driver 595.71.05, torch 2.11.0+cu129, one-shot container, card idle, sky queue empty)
 ---
 
 # Finding F0068: what the add_ln boundary actually costs, and why the banked inline-lerp projection does not survive it
@@ -285,6 +285,58 @@ and price a structural change instead.
 "91.3% achievable" ceiling is taken from one kernel's dense case. Both should be
 re-measured on the 5090 before this budget is quoted publicly.
 
+## 5d. sm120 CLOSE-OUT (2026-07-27, the 5090 came back) — all three arms adjudicated
+
+Same harness, same gates, on the target arch (5090, sm120, driver 595.71.05,
+torch 2.11.0+cu129), one-shot container, GPU otherwise idle. **`sky check` first:
+no in-progress managed jobs, no live clusters — the card was free.**
+
+**The dispatch floor is the quantity §5b said would decide SPLIT, and it moved:**
+
+| probe | 3090 (sm86) | 5090 (sm120) |
+|---|---:|---:|
+| null, 1 block | 1.073 | **0.662** (−38%) |
+| null, 16 blocks | 1.102 | 0.704 |
+
+Full ladder, us/call (median of 50):
+
+| tier | N=2048 FT=0 | FT=1 | N=4096 FT=0 | FT=1 |
+|---|---:|---:|---:|---:|
+| parity (32,4) | 2.710 | 2.709 | 4.103 | 4.106 |
+| **WIDE (32,16)** | 2.321 | **2.202** | 2.852 | **2.751** |
+| WIDER (32,32) | 2.645 | 2.353 | 3.062 | 2.791 |
+| SPLIT (NB=4) | 2.580 | 2.580 | 2.800 | 2.800 |
+
+**(1) FastTree — WIN, and bit-identical on BOTH architectures.** −5.1% (N=2048)
+/ **−3.5% (N=4096)** on sm120, about half the sm86 gain (the sync chain is
+cheaper on Blackwell, so there is less of it to remove). Gates re-run on sm120
+and green: 96/96 torch.equal, and the parity tier still byte-exact vs torch at
+FastTree=0 AND =1. Re-gating on the target arch was not ceremony — bit-identity
+is a claim about generated code, and sm120 codegen is not sm86 codegen.
+
+**(2) SPLIT — REJECTED on both cards, and the mechanism is now fully closed.**
+The prediction in §5b was that a cheaper second node might flip it. Decomposed
+on sm120: SPLIT = 2×0.662 dispatch + **1.474 work**; WIDE+FastTree = 0.662 +
+**2.088 work**. The work term falls **−29%** (sm86 measured −26% — the same
+number on two architectures, so the parallelisation is real and portable), but
+the saving of 0.614 us is spent on the extra node's 0.663 us: **net +0.049 us,
+break-even to three decimal places, still losing by 1.8%.** The −38% cheaper
+dispatch narrowed the gap from +5.8% (sm86) to +1.8% — it did not close it.
+This is no longer a conditional negative; it is adjudicated.
+
+**(3) WIDER — REJECTED on both cards.** (32,16) remains the ladder optimum.
+
+### What FastTree is actually worth end-to-end — stated before anyone quotes it
+
+add_ln is 255.09 us/step of a 7078.4 us span. −3.5% of it is **−8.9 us/step ≈
++0.13%**, which is *below* the ±2–3% run-to-run band of the serving harness.
+So: FastTree ships on the strength of being **bit-identical and strictly not
+worse** (the [[F0064]]-V1 precedent), **not** as a throughput claim. No tok/s
+number may be attributed to it, and no e2e A/B is worth spending a clean
+single-tenant window on — the effect is unmeasurable by construction. This is
+the §5c budget conclusion arriving exactly as predicted: the boundary cluster is
+5.0% of BUSY, so even a good win inside it cannot show up at the step level.
+
 ## 6. Disposition + what is next
 
 - FastTree: in-tree, `RWKV_ADDLN_FASTTREE=1`, **default OFF** pending a 5090
@@ -313,6 +365,7 @@ is made, and none may be published from this finding alone.
 ## 7. Artifacts
 
 `bench/results/f0068/`: `addln_sweep.jsonl` (16 configs × 50 reps),
+`sm120/` (the 5090 close-out: same sweep + dispatch-floor probe),
 `split_nb_sweep.jsonl` (SPLIT NB ∈ {4,8,16,32}),
 `sparse_cmix_floor.json` (density × atomic-probe A/B), `lora_floor.json`,
 `kernel_floor.json` (dispatch-floor probe), `gate_fasttree.json`,
