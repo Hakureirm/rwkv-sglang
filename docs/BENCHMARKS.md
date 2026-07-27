@@ -965,10 +965,18 @@ so these ratios are conservative lower bounds.
 | A100-80GB | 385.5 | 278.9 | 0.7235 |
 | RTX 3090 | 309.2 (we re-tuned it for this card) | 230.7 | 0.7461 |
 | RTX PRO 6000 | 457.4 | 315.0 | 0.6887 |
-| RTX 5090 (author's own card) | 553.9 | 397.3 | 0.7173 |
+| RTX 5090 (author's own card) | 553.9 → **554.11** ‡ | 397.3 → **513.3** ‡ | 0.7173 → **0.9264** ‡ |
 | H100 | 607.3 | 361.1 | 0.5946 |
 | H200 | 684.3 | 399.3 | 0.5835 |
 | B200 | 744.0 | 381.6 | 0.5129 |
+
+‡ **This row alone was re-measured 2026-07-27 (F0069), both sides in one session on the same
+card**; the other nine rows are still the original fleet run and are pre-megakernel on our side.
+Albatross re-read 554.11 against its recorded 553.9 (0.04% — the card is in the same state), and
+our column moved because the megakernel line (F0063–F0066c) landed since. Both numbers keep their
+original harness: Albatross's own B=1/T=1 loop, ours the prefill-*included* 64-in/256-out c=1
+figure, which is why the note above still applies and this ratio is still a conservative lower
+bound. Raw: `bench/results/f0069/`.
 
 † The T4 gap is the *shipped* Albatross WKV kernel's `cp.async` (an sm80+ instruction); BlinkDL
 notes this is removable — a patched kernel runs on T4 — so it's a packaging limit, not a fundamental
@@ -979,9 +987,11 @@ How to read it: the gap tracks memory bandwidth ([bandwidth-bound](#g-bound) ter
 L4); on HBM monsters its whole-layer fused kernel stretches ahead (0.51 on B200) because our
 per-operator launch overhead grows in relative terms as compute gets faster — which is
 precisely what our next speed increment (CUDA graphs + deeper fusion) targets. Meanwhile our
-**int4 path reaches 0.9908× of Albatross's fp16 on the author's own 5090** (548.8 vs 553.9,
-cross-precision), and the T4 row shows the coverage difference. Raw:
-`bench/results/albatross_fleet_10cards.json` + per-run logs.
+**int4 path now reaches 1.3402× of Albatross's fp16 on the author's own 5090** (742.6 vs 554.11,
+cross-precision, both re-measured in one session 2026-07-27 — it read 0.9908× at 548.8 vs 553.9
+before the megakernel line landed), and the T4 row shows the coverage difference. Raw:
+`bench/results/albatross_fleet_10cards.json` + per-run logs, and `bench/results/f0069/` for the
+re-measured 5090 pair.
 
 One more finding: on CUDA 12.9 the constants Albatross ships are no longer optimal even on
 the 5090 they were tuned for. We went further and **re-tuned Albatross for this card
