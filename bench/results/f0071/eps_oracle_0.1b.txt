@@ -1,0 +1,31 @@
+RWKV-7 HuggingFace port -- ln_x GroupNorm epsilon, checked against the fp32 numpy oracle
+=========================================================================================
+2026-07-29, RTX 5090, lmsysorg/sglang:dev-cu12 container, fp32 both sides.
+
+Weights: rwkv7-g1d-0.1b-20260129-ctx8192.pth (768 / 12 heads / head_dim 64) and its
+converted HF copy. emb.weight verified bit-identical between the two, so the two sides
+are the same model and not two checkpoints that resemble each other.
+
+Reference: bench/oracle_numpy.py, which hardcodes the RWKV-7 reference's eps=64e-5.
+Prompt: "\nThe Eiffel Tower is located in the city of"  (12 tokens), 32 greedy tokens.
+
+  oracle greedy text:
+    ' Paris, France. It is a tower that was built in 1889 and is one of the most
+     recognizable landmarks in the world. The tower is made of steel'
+
+  arm "head_dim (fixed)"  eps=6.4e-4   32/32 token-identical   max|logit delta| = 5e-05
+  arm "num_heads (old)"   eps=1.2e-4   11/32, diverges at 9    max|logit delta| = 4.318
+    old-arm text: ' Paris, France. It is a tower that stands on the site of the'
+
+Why it mattered so much at this width: on trained weights the per-head variance going
+into ln_x is tiny -- median 1.345e-06 at layer 0, min 4.2e-12, 84.4% of heads below the
+epsilon itself -- so sqrt(var + eps) is essentially sqrt(eps) and the wrong constant
+rescales the whole normalisation by sqrt(64/12) = 2.31x instead of perturbing it.
+
+Same 0.1B, fp16, 512-token forward, the two epsilons against each other:
+  max|logit delta| 2.797 on a magnitude of 48.03 (5.8% relative), mean 0.154,
+  42 of 512 positions change their argmax, greedy agreement 18.75% over 64 tokens.
+
+num_heads and head_dim coincide only at hidden_size 4096 (head_dim 64), which is the
+7.2B -- the checkpoint every earlier accuracy measurement of the port used, and the one
+width where this bug is invisible.
