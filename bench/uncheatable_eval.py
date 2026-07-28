@@ -190,7 +190,18 @@ def eval_dataset(name, texts, tokenizer, sess, gen_url, chunk_size, concurrency,
 
 
 def launch_server(args):
-    """Spawn a sglang server as a child process and wait for /health."""
+    """Spawn a sglang server as a child process and wait for /health.
+
+    KNOWN BROKEN on current sglang for the RWKV-7 overlay (F0070, 2026-07-28): the
+    argument set below is not enough for that model and the server dies during
+    warmup with a device-side assert in `logits_processor._get_pruned_states`,
+    surfacing here only as `exited early with code -9`. Nobody had hit it because
+    the server is normally started by hand. Until the flags are reconciled, start
+    it with `scripts/serve.sh` and point this harness at it:
+
+        MODEL=<dir> PORT=30070 bash scripts/serve.sh -- --max-running-requests 4 &
+        python3 bench/uncheatable_eval.py --model <dir> --host 127.0.0.1 --port 30070 ...
+    """
     cmd = [
         sys.executable, "-m", "sglang.launch_server",
         "--model-path", args.model,
