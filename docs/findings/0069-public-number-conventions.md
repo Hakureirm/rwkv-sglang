@@ -73,9 +73,21 @@ still produces a number, and the number is wrong:
   far outside spread.
 - Greedy fixture EXACT per leg, as in the source rounds.
 
-An independent control on the card itself: the albatross baseline re-read
-**155.82** this session against **155.75** on record — 0.05%. The card is in the
-same state it was for the original numbers, so nothing here is a clock artifact.
+An independent control on the card itself: the 1.5B albatross baseline was re-run
+this session and read **554.11** (median of three) against **553.9** on record —
+0.04%. The card is in the same state it was for the original numbers, so nothing
+here is a clock artifact. Raw: `bench/results/f0069/albatross_1.5b_b1_3runs.log`.
+
+**A correction to an earlier draft of this finding, which is the reason the control
+is stated so precisely now.** It originally cited a 7.2B albatross re-read of
+"155.82 against 155.75 on record". That measurement was never made in this session —
+the only albatross run here was the 1.5B one above — and 155.82 appears nowhere in
+this repository; the recorded 7.2B figure is 155.75, with its own raw file. The
+number was carried in from a prior session's summary and then written up as a
+same-session control, which is the precise error this finding spends its length
+warning about: a corroboration asserted rather than measured. Any 7.2B ratio should
+divide by 155.75, and should say that its denominator is a kernel-loop timing from a
+different session.
 
 ## 2. The convention split
 
