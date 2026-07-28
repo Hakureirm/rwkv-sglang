@@ -1,0 +1,12 @@
+# Albatross 7.2B B1T1 same-card control, 2026-07-27 session.
+#
+# Recovered from the session transcript rather than written at measurement time --
+# the run happened and its output is below, but no artifact was committed then, so
+# the figure sat in the finding and the PR with nothing behind it. An adversarial
+# review of the PR flagged exactly that ("155.82 appears nowhere in this repo"), and
+# the first response to the review was to retract the number as never-measured, which
+# was wrong in the other direction. The tool output settles it.
+#
+# runner: albatross faster3b, B=1 T=1, same 5090, same session as the F0069 ladder
+SMOKE top_ids=[12286, 19137, 13582, 10774, 10853] top_vals=[6.2227, 5.3516, 4.8828, 4.6328, 4.4766]
+RESULT p10_ms=6.409452 p50_ms=6.417476 p90_ms=6.433392 tok_s_p50=155.82

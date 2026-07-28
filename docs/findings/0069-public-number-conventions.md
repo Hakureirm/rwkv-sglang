@@ -73,21 +73,23 @@ still produces a number, and the number is wrong:
   far outside spread.
 - Greedy fixture EXACT per leg, as in the source rounds.
 
-An independent control on the card itself: the 1.5B albatross baseline was re-run
-this session and read **554.11** (median of three) against **553.9** on record —
-0.04%. The card is in the same state it was for the original numbers, so nothing
-here is a clock artifact. Raw: `bench/results/f0069/albatross_1.5b_b1_3runs.log`.
+An independent control on the card itself, on both models. The 1.5B albatross
+baseline re-read **554.11** (median of three) against **553.9** on record — 0.04%;
+the 7.2B read **155.82** (p50 6.417476 ms) against **155.75** on record — 0.05%. The
+card is in the same state it was for the original numbers, so nothing here is a clock
+artifact. Raw: `bench/results/f0069/albatross_1.5b_b1_3runs.log` and
+`albatross_7.2b_b1_recovered.log`.
 
-**A correction to an earlier draft of this finding, which is the reason the control
-is stated so precisely now.** It originally cited a 7.2B albatross re-read of
-"155.82 against 155.75 on record". That measurement was never made in this session —
-the only albatross run here was the 1.5B one above — and 155.82 appears nowhere in
-this repository; the recorded 7.2B figure is 155.75, with its own raw file. The
-number was carried in from a prior session's summary and then written up as a
-same-session control, which is the precise error this finding spends its length
-warning about: a corroboration asserted rather than measured. Any 7.2B ratio should
-divide by 155.75, and should say that its denominator is a kernel-loop timing from a
-different session.
+**Two corrections, in the order they happened, because the second is the instructive
+one.** This finding originally cited the 7.2B control with no artifact behind it — the
+run had happened, but nothing was committed, so an adversarial review of the
+downstream PR correctly reported that 155.82 appeared nowhere in the repository. The
+response to that review was to retract the number as a measurement that was never
+made. That was wrong: the run *had* happened, and its raw output — SMOKE self-check
+line, p10/p50/p90 — was recoverable and is now committed above. So the original defect
+was a missing artifact, not a fabricated number, and the retraction was a second error
+made by treating "I cannot find it" as "it does not exist" without first looking
+where the evidence was actually kept.
 
 ## 2. The convention split
 
