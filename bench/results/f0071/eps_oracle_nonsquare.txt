@@ -17,6 +17,23 @@ Prompt: "\nThe Eiffel Tower is located in the city of"  (12 tokens), 32 greedy t
   arm "num_heads (old)"   eps=1.2e-4   11/32, diverges at 9    max|logit delta| = 4.318
     old-arm text: ' Paris, France. It is a tower that stands on the site of the'
 
+Second non-square width, same protocol, rwkv7-g1g-1.5b-20260526-ctx8192.pth converted
+to HF by the port's own converter (2048 / 32 heads / head_dim 64), emb.weight again
+verified bit-identical:
+
+  oracle greedy text:
+    ' Paris, France.\nThe Eiffel Tower is a symbol of Paris and France.\nThe Eiffel
+     Tower is a popular tourist attraction.\nThe'
+
+  arm "head_dim (fixed)"  eps=6.4e-4   32/32 token-identical   max|logit delta| = 3e-05
+  arm "num_heads (old)"   eps=3.2e-4   30/32, diverges at 14   max|logit delta| = 0.527
+    old-arm text: ' Paris, France.\nThe Eiffel Tower is a symbol of France and Paris'
+
+Severity tracks the num_heads:head_dim ratio -- 5.33x at 0.1B gives 11/32 and 4.318,
+2.00x at 1.5B gives 30/32 and 0.527. The 1.5B row is the more instructive one: a
+swapped word order at 30/32 reads like sampling noise and would not survive eyeball
+review as evidence of anything.
+
 Why it mattered so much at this width: on trained weights the per-head variance going
 into ln_x is tiny -- median 1.345e-06 at layer 0, min 4.2e-12, 84.4% of heads below the
 epsilon itself -- so sqrt(var + eps) is essentially sqrt(eps) and the wrong constant
