@@ -51,6 +51,7 @@ is the honest, dated trail of how each result was reached + verified.
 | [F0019](findings/0019-tp-pp-parallel.md) | TP+PP: full matrix greedy-EXACT on real L4 fleets (tp 2/4/8, pp 2/4/8, mixed tp2×pp2 after the v_first full-width fix); documents sglang's PP chunk-send pitfall for non-replicated proxy tensors |
 | [F0022](findings/0022-state-prefix-cache.md) | State prefix cache (req#3) — RWKV-7 via MambaRadixCache, greedy-EXACT shared-prefix (was corrupt with plain radix), ~30% cache hits (was 0) |
 | [F0020](findings/0020-fused-lora.md) | Fused LoRA (2 launches vs ~12/layer) — fp16 bsz1 203.0→226.5 tok/s (+11.6%), greedy EXACT; profile: lm_head now 58.5% of the step (fp16 bandwidth wall) |
+| [F0074](findings/0074-rwkv-lightning-survey.md) | rwkv_lightning survey — albatross's designated "full backend", so the closest structural analogue to this overlay; publishes **no absolute throughput number at all**, no licence, no CI, and documents its own batched-decode CUDA-graph capture as numerically wrong. Names the one gap worth closing: staggered-finish batches, where they measure 20.6% (bsz 96) / 41.2% (bsz 160) and every lane we publish is uniform-shape |
 
 See **[`../bench/results/`](../bench/results/)** for the committed measurement artifacts each
 finding cites (`comparison_clean.md`, `lm_eval.md`, `sparse_ffn/`, `best2/`, …).
