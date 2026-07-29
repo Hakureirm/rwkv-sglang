@@ -7,6 +7,7 @@
 set -uo pipefail
 OUT="${1:?out dir}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+MODELS="${MODELS:-/ws/models}"   # where the run found them; override to reproduce elsewhere
 mkdir -p "$OUT"
 W1="RWKV_FAST_LINEAR=1 RWKV_SPARSE_FFN=1 RWKV_FUSED_LORA=1 RWKV_FUSED_GLUE=1 RWKV_GEMV_AUTOTUNE=1"
 FULL="$W1 RWKV_FUSED_GATES=1 RWKV_FUSED_SQRELU=1 RWKV_FUSED_ADDLN=1 RWKV_FUSED_GNGC=1 RWKV_FUSED_RELUSQ=1 RWKV_FUSED_VRESGATE=1"
@@ -19,8 +20,8 @@ run() { # $1 leg, $2 model, rest env
     --mode batch --context 1024 --batch-sizes 1 --decode-tokens 64 --mem-fraction 0.85 \
     2>&1 | tee "$OUT/${LEG}.log" | grep -E "SERVING-SCALE|^ *1024"
 }
-run w4_W1   /ws/models/rwkv7-1.5b-w4     RWKV_W4=1 $W1
-run w4_L2   /ws/models/rwkv7-1.5b-w4     RWKV_W4=1 $FULL $MEGA RWKV_STATE_FP16=1
-run w8_W1   /ws/models/rwkv7-1.5b-w8g64  RWKV_W8=1 $W1
-run w8_L2   /ws/models/rwkv7-1.5b-w8g64  RWKV_W8=1 $FULL $MEGA RWKV_STATE_FP16=1
+run w4_W1   $MODELS/rwkv7-1.5b-w4     RWKV_W4=1 $W1
+run w4_L2   $MODELS/rwkv7-1.5b-w4     RWKV_W4=1 $FULL $MEGA RWKV_STATE_FP16=1
+run w8_W1   $MODELS/rwkv7-1.5b-w8g64  RWKV_W8=1 $W1
+run w8_L2   $MODELS/rwkv7-1.5b-w8g64  RWKV_W8=1 $FULL $MEGA RWKV_STATE_FP16=1
 echo "QUANT LEGS DONE -> $OUT"

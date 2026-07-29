@@ -14,7 +14,8 @@
 # script did not, every leg died at engine init, and `diff` duly reported three
 # passing gates on three empty files.
 set -uo pipefail
-OUT="${1:?out dir}"; REPO="$(cd "$(dirname "$0")/.." && pwd)"; mkdir -p "$OUT"
+OUT="${1:?out dir}"; REPO="$(cd "$(dirname "$0")/.." && pwd)"
+MODELS="${MODELS:-/ws/models}"   # where the run found them; override to reproduce elsewhere; mkdir -p "$OUT"
 FIX="$REPO/bench/fixtures/oracle_rwkv7_15b_eiffel.json"
 W1="RWKV_FAST_LINEAR=1 RWKV_SPARSE_FFN=1 RWKV_FUSED_LORA=1 RWKV_FUSED_GLUE=1 RWKV_GEMV_AUTOTUNE=1"
 FULL="$W1 RWKV_FUSED_GATES=1 RWKV_FUSED_SQRELU=1 RWKV_FUSED_ADDLN=1 RWKV_FUSED_GNGC=1 RWKV_FUSED_RELUSQ=1 RWKV_FUSED_VRESGATE=1"
@@ -27,11 +28,11 @@ gen() { # $1 tag, $2 model, rest env
   echo "$TAG -> $(cat "$OUT/greedy_$TAG.json" 2>/dev/null || echo '<<NO OUTPUT>>')"
 }
 
-gen fp16_L2 /ws/models/rwkv7-1.5b-fla                $FULL $MEGA RWKV_STATE_FP16=1
-gen w8_W1   /ws/models/rwkv7-1.5b-w8g64  RWKV_W8=1   $W1
-gen w8_L2   /ws/models/rwkv7-1.5b-w8g64  RWKV_W8=1   $FULL $MEGA RWKV_STATE_FP16=1
-gen w4_W1   /ws/models/rwkv7-1.5b-w4     RWKV_W4=1   $W1
-gen w4_L2   /ws/models/rwkv7-1.5b-w4     RWKV_W4=1   $FULL $MEGA RWKV_STATE_FP16=1
+gen fp16_L2 $MODELS/rwkv7-1.5b-fla                $FULL $MEGA RWKV_STATE_FP16=1
+gen w8_W1   $MODELS/rwkv7-1.5b-w8g64  RWKV_W8=1   $W1
+gen w8_L2   $MODELS/rwkv7-1.5b-w8g64  RWKV_W8=1   $FULL $MEGA RWKV_STATE_FP16=1
+gen w4_W1   $MODELS/rwkv7-1.5b-w4     RWKV_W4=1   $W1
+gen w4_L2   $MODELS/rwkv7-1.5b-w4     RWKV_W4=1   $FULL $MEGA RWKV_STATE_FP16=1
 
 echo "=== ADJUDICATION ==="
 rc=0
