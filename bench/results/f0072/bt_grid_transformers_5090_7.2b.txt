@@ -1,0 +1,75 @@
+RWKV-7 HuggingFace port on F0067's B x T grid — RTX 5090, 7.2B, 2026-07-29
+==========================================================================
+Config: max-autotune + CUDA graphs + sparse channel-mix (the one the 86.5% came
+from). Two WKV paths: the in-tree portable one, and vllm-rwkv's kernels reached
+through RWKV7_WKV_FUNCTIONS with a ~20 line adapter and no model change.
+
+Denominator is albatross faster3a_2607, same card, from F0067 — chosen because it
+is the baseline vllm-rwkv's own harness uses (ALBATROSS_IMPL = "faster3a_2605" in
+benchmarks/rwkv7/benchmark_faster3a.py, cuda_event, model-forward only), so the
+three columns are commensurable.
+
+  B x T   portable            + vllm-rwkv kernel    albatross 3a
+  1x1     138.9  ( 94.3%)     135.8  ( 92.2%)          147.29
+  1x16    1492   ( 87.8%)     1542   ( 90.7%)         1699.84
+  1x32    2689   ( 91.8%)     2958   (101.0%)         2927.72
+  1x128   6693   ( 74.2%)     9002   ( 99.8%)         9019.60
+  1x256   7154   ( 73.4%)    10251   (105.1%)         9750.43
+  32x1    2694   ( 92.2%)     2753   ( 94.2%)         2923.54
+  128x1   5157   ( 57.0%)     6431   ( 71.1%)         9044.14
+  256x1   5290   ( 55.1%)     6010   ( 62.6%)         9600.18
+  16x16  10153   ( 88.6%)    10909   ( 95.2%)        11462.50
+
+Three readings.
+
+Prefill is where the third-party kernel earns everything: 1x128 74.2 -> 99.8%,
+1x256 73.4 -> 105.1%. Single-sequence prefill goes from clearly behind to slightly
+ahead of albatross.
+
+B1T1 it is worth nothing, and is fractionally slower (138.9 -> 135.8). A decode
+step reads ~13.9 GB of weights and is bound by that; the same result the
+hand-written CUDA projection got. Measured in eager the same swap looks worth
++12.6%, which is what happens when a kernel is judged outside the configuration it
+would ship in.
+
+Batched decode is the weak cell and it is ours, not a missing kernel: 55-57%
+portable, still only 63-71% with the kernel. Profiling B=256 eager: the time-mix is
+77.0% of the step while its own projections are 5.5% of it, so the cost is the
+recurrent state, not the weights. At B=256 that state is [256, 64, 64, 64] =
+268 MB per layer in fp32, 8.6 GB across 32 layers, read and written every step --
+more traffic than the weights. That points at `wkv_state_dtype`, measured
+separately.
+
+Also found here rather than by a test: a compiled forward with batch and seq_len
+both greater than one raised "Cannot view a tensor with shape [16, 16, 2, 64] and
+strides (2048, 64, 1024, 1)". The WKV returns whatever layout its implementation
+produced and inductor may pick its own; the code used `view`. Fixed with `reshape`
+(transformers-rwkv 73157fa). Nothing in the test suite compiles, so nothing caught
+it, and 1xT and Bx1 both pass either way.
+
+
+wkv_state_dtype on batched decode — the fix for the weak cell
+-------------------------------------------------------------
+Same card, same config, our own WKV, only the recurrent state's precision changed:
+
+  B x 1    fp32 state          fp16 state          albatross 3a
+  1x1      139.2  ( 94.5%)     138.9  ( 94.3%)        147.29
+  32x1     2702   ( 92.4%)     2748   ( 94.0%)       2923.54
+  128x1    5144   ( 56.9%)     6147   ( 68.0%)       9044.14
+  256x1    5291   ( 55.1%)     6313   ( 65.8%)       9600.18
+
++19% at B>=128 and nothing at B=1, which is the signature of a bandwidth cost: at
+B=1 the state is 1 MB a layer and invisible next to 13.9 GB of weights; at B=256 it
+is 268 MB a layer and 8.6 GB a step.
+
+6313 also beats the vllm-rwkv kernel arm's 6010 in the same cell, so this cell never
+needed a third-party kernel — it needed the state to be half as wide.
+
+What it costs, measured on identical inputs (one model, two state dtypes; an earlier
+attempt ran the arms in separate processes with unseeded inputs and compared
+different prompts): 64-token prompt plus 32 carried decode steps at batch 8, max abs
+logit delta 0.0469 against a magnitude of 31.4, and argmax agreement 1.0000 — 0 of
+264 positions differ. 32 steps is short for a recurrent state, whose error
+compounds; the port's existing test that fp32 stays closer to a float64 rollout than
+fp16 does is the statement about long runs, and it still stands. This is a serving
+knob for batched decode, not a new default.
