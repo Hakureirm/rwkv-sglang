@@ -1,0 +1,16 @@
+{"dataset": "ao3_english", "bpb": 0.7629, "docs": 20, "elapsed_s": 20}
+{"dataset": "ao3_nonenglish", "bpb": 1.0286, "docs": 20, "elapsed_s": 35}
+{"dataset": "arxiv_cs", "bpb": 0.5293, "docs": 20, "elapsed_s": 58}
+{"dataset": "arxiv_math", "bpb": 0.5094, "docs": 20, "elapsed_s": 80}
+{"dataset": "arxiv_other", "bpb": 0.4861, "docs": 20, "elapsed_s": 104}
+{"dataset": "arxiv_physics", "bpb": 0.5551, "docs": 20, "elapsed_s": 130}
+{"dataset": "bbc_news", "bpb": 0.6308, "docs": 20, "elapsed_s": 136}
+{"dataset": "biorxiv_all", "bpb": 0.5547, "docs": 20, "elapsed_s": 162}
+{"dataset": "github_cpp", "bpb": 0.2847, "docs": 20, "elapsed_s": 180}
+{"dataset": "github_javascript", "bpb": 0.2659, "docs": 20, "elapsed_s": 199}
+{"dataset": "github_markdown", "bpb": 0.5395, "docs": 20, "elapsed_s": 217}
+{"dataset": "github_other", "bpb": 0.3009, "docs": 20, "elapsed_s": 233}
+{"dataset": "github_python", "bpb": 0.2823, "docs": 20, "elapsed_s": 246}
+{"dataset": "wikipedia_english", "bpb": 0.6129, "docs": 20, "elapsed_s": 252}
+{"dataset": "wikipedia_nonenglish", "bpb": 0.578, "docs": 20, "elapsed_s": 264}
+{"stage": "summary", "mean_bpb": 0.5281, "n_datasets": 15, "docs_per_dataset": 20, "per_dataset": {"ao3_english": 0.7629, "ao3_nonenglish": 1.0286, "arxiv_cs": 0.5293, "arxiv_math": 0.5094, "arxiv_other": 0.4861, "arxiv_physics": 0.5551, "bbc_news": 0.6308, "biorxiv_all": 0.5547, "github_cpp": 0.2847, "github_javascript": 0.2659, "github_markdown": 0.5395, "github_other": 0.3009, "github_python": 0.2823, "wikipedia_english": 0.6129, "wikipedia_nonenglish": 0.578}}
