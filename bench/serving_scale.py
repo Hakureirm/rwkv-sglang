@@ -175,8 +175,6 @@ def main():
         model_path=args.model,
         skip_tokenizer_init=True,
         disable_cuda_graph=False,          # production decode path
-        disable_piecewise_cuda_graph=True,
-        disable_radix_cache=True,          # REQUIRED for correct RWKV-7 dynamic batching
         dtype=args.dtype,
         tp_size=1,
         mem_fraction_static=args.mem_fraction,
@@ -185,10 +183,36 @@ def main():
         engine_kwargs["cuda_graph_max_bs"] = args.cuda_graph_max_bs
     if args.max_context is not None:
         engine_kwargs["context_length"] = args.max_context
-    # keep the same invocation across sglang versions (e.g. main dropped
-    # disable_piecewise_cuda_graph): only pass kwargs ServerArgs still accepts
+
     from sglang.srt.server_args import ServerArgs
-    engine_kwargs = {k: v for k, v in engine_kwargs.items() if k in ServerArgs.__dataclass_fields__}
+
+    fields = ServerArgs.__dataclass_fields__
+    # Two settings are correctness requirements for RWKV-7, not tuning: the radix
+    # cache is wrong for a recurrent state carry, and so is the prefill CUDA graph
+    # (with it on, decode starts from a state the graph never wrote, and the model
+    # emits fluent, completely different text -- greedy output diverges from the
+    # oracle fixture on the FIRST token).
+    #
+    # sglang renames these. This file used to drop any kwarg ServerArgs no longer
+    # accepted, which is fine for a tuning knob and fatal for a correctness one:
+    # `disable_piecewise_cuda_graph` became `disable_prefill_cuda_graph`, the old
+    # name was filtered out in silence, and every number this harness produced
+    # afterwards was measured on a configuration whose greedy output is wrong.
+    # So: try the known spellings, and REFUSE TO RUN if none of them exists.
+    for names in (("disable_radix_cache",), ("disable_prefill_cuda_graph", "disable_piecewise_cuda_graph")):
+        for name in names:
+            if name in fields:
+                engine_kwargs[name] = True
+                break
+        else:
+            raise RuntimeError(
+                f"this sglang build accepts none of {names}; RWKV-7 cannot be measured "
+                "without it — fix the alias list rather than dropping the switch"
+            )
+
+    unknown = [k for k in engine_kwargs if k not in fields]
+    if unknown:
+        raise RuntimeError(f"ServerArgs does not accept {unknown}; update this harness")
     engine = sgl.Engine(**engine_kwargs)
 
     rows = []

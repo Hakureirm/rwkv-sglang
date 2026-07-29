@@ -1,0 +1,27 @@
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 12.9.1
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+=== ALBATROSS RUN 1 ===
+[rwkv7_fast_v3a] start model=/ws/models/rwkv7-g1/rwkv7-g1g-1.5b-20260526-ctx8192.pth wkv=fp16 emb=cpu batched_rkv=off cmix_sparse=no-fc lowrank_weight=both orig_linear_groups=att_c2c,ffn_key,head pp=off
+RESULT B=1 T=1 iters=20 p10_ms=1.8015 p50_ms=1.8046 p90_ms=1.8078 tok_s_p50=554.13
+csv,rwkv7_fast_v3a,1,1,20,1.801533,1.804624,1.807830,554.132045
+=== ALBATROSS RUN 2 ===
+[rwkv7_fast_v3a] start model=/ws/models/rwkv7-g1/rwkv7-g1g-1.5b-20260526-ctx8192.pth wkv=fp16 emb=cpu batched_rkv=off cmix_sparse=no-fc lowrank_weight=both orig_linear_groups=att_c2c,ffn_key,head pp=off
+RESULT B=1 T=1 iters=20 p10_ms=1.8022 p50_ms=1.8047 p90_ms=1.8109 tok_s_p50=554.11
+csv,rwkv7_fast_v3a,1,1,20,1.802214,1.804704,1.810874,554.107485
+=== ALBATROSS RUN 3 ===
+[rwkv7_fast_v3a] start model=/ws/models/rwkv7-g1/rwkv7-g1g-1.5b-20260526-ctx8192.pth wkv=fp16 emb=cpu batched_rkv=off cmix_sparse=no-fc lowrank_weight=both orig_linear_groups=att_c2c,ffn_key,head pp=off
+RESULT B=1 T=1 iters=20 p10_ms=1.8017 p50_ms=1.8055 p90_ms=1.8081 tok_s_p50=553.87
+csv,rwkv7_fast_v3a,1,1,20,1.801667,1.805472,1.808138,553.871780

@@ -42,12 +42,20 @@ its numbers are ~2× lower for batched decode and are never quoted against the c
 > not §3/§5** — the 1.5B 397.3/447.3 and 7.2B 123.7 in §3/§5 are *pre*-megakernel values, kept only
 > for the step-by-step breakdown.
 
-**Speed · single-request bsz1 (RTX 5090, [steady-state](#g-bsz1) decode)**
+**Speed · single-request [bsz1](#g-bsz1) (RTX 5090, 64-in/256-out wall-clock at c=1)**
 
 | model · precision | current best | vs | source |
 |---|---:|---|---|
 | RWKV-7 **7.2B** fp16 | **142.8 tok/s** | = **92.0%** of Bo's official 155.2 | §7a-flagship · 2026-07-21 |
 | RWKV-7 **1.5B** fp16 | **514.5 tok/s** | same flagship ladder | §7a-flagship · 2026-07-21 |
+
+> **Two conventions, both current, never interchangeable.** The table above is wall-clock
+> over a 64-in/256-out request at c=1, prefill included (`bench/bsz_throughput.py`). The
+> other convention — ctx-1024 steady-state decode with prefill *subtracted*
+> (`bench/serving_scale.py`), which §3 and the README's speed table use — reads **535.2
+> tok/s** for 1.5B fp16 on the same stack and card. Quoting a number from one convention as
+> the other is the specific error [F0069](findings/0069-public-number-conventions.md) exists
+> to prevent; it nearly published a −3.3% regression that was not there.
 
 **Speed · [peak](#g-peak) serving throughput (wall-clock, 64-in/256-out)**
 
@@ -223,6 +231,32 @@ the 3090 column is the v0.5.10 historical ladder for lineage.
 | int4 (prequantized) | 259.1 | **548.8** | +109.5% |
 
 Raw: `bench/results/ladder_*_5090.log`. The 3090-on-main ladder is being re-measured.
+
+**Re-measured 2026-07-27 (F0069), same convention, same card, one session.** The rows
+above are a lineage — each adds one kernel set to the one before — and they stay as the
+history they record. What changed since is that the megakernel line (F0063–F0066c) landed
+on top, and that the tree beneath the W1' rung moved: re-running *its own* flag set today
+reads 7.8–8.9% higher across all three tiers, because later work landed unconditionally
+underneath it. Both columns below are `bench/serving_scale.py` at ctx-1024 bsz-1, matching
+the rows above; raw in `bench/results/f0069/ss_*.log`.
+
+| tier | W1' flag set, re-read today | published above | **+ megakernel stack (current)** |
+|---|---:|---:|---:|
+| fp16 | 442.3 | 409.8 | **535.2** |
+| int8 w8g64 | 498.1 | 461.9 | **596.8** |
+| int4 | 597.7 | 548.8 | **742.6** |
+
+Gated, not just timed: fp16 reproduces the oracle fixture greedy-EXACT, both quantized
+tiers emit token-identical output with the megakernel flags on and off, and w8g64 matches
+fp16 token-for-token (an independent confirmation of §4's greedy-lossless claim). The
+`RWKV_STATE_FP16` rung that once added +9.2% here (409.8 → 447.3, §5) now adds +0.1%
+(442.3 → 442.8) — the current stack already gets that by other means, so it is no longer a
+separate step. F0069 also found and fixed a harness defect that made the first pass of this
+table invalid: `serving_scale.py` was silently dropping the switch that disables prefill
+CUDA graphs after sglang renamed it, and RWKV-7 decodes from a state that graph never
+wrote. The published rows above are *not* affected — their recorded TTFT (36.0 / 37.3 /
+40.4 ms) matches the corrected re-measurement (37.2 / 38.8 / 40.7), not the broken
+configuration's ~23 ms.
 
 **Figure — the ladder as bars.** Same build order as the table, top to bottom; every value
 and every percentage is recomputed from the logs' own context-1024/bsz-1 rows, not copied
@@ -931,10 +965,18 @@ so these ratios are conservative lower bounds.
 | A100-80GB | 385.5 | 278.9 | 0.7235 |
 | RTX 3090 | 309.2 (we re-tuned it for this card) | 230.7 | 0.7461 |
 | RTX PRO 6000 | 457.4 | 315.0 | 0.6887 |
-| RTX 5090 (author's own card) | 553.9 | 397.3 | 0.7173 |
+| RTX 5090 (author's own card) | 553.9 → **554.11** ‡ | 397.3 → **513.3** ‡ | 0.7173 → **0.9264** ‡ |
 | H100 | 607.3 | 361.1 | 0.5946 |
 | H200 | 684.3 | 399.3 | 0.5835 |
 | B200 | 744.0 | 381.6 | 0.5129 |
+
+‡ **This row alone was re-measured 2026-07-27 (F0069), both sides in one session on the same
+card**; the other nine rows are still the original fleet run and are pre-megakernel on our side.
+Albatross re-read 554.11 against its recorded 553.9 (0.04% — the card is in the same state), and
+our column moved because the megakernel line (F0063–F0066c) landed since. Both numbers keep their
+original harness: Albatross's own B=1/T=1 loop, ours the prefill-*included* 64-in/256-out c=1
+figure, which is why the note above still applies and this ratio is still a conservative lower
+bound. Raw: `bench/results/f0069/`.
 
 † The T4 gap is the *shipped* Albatross WKV kernel's `cp.async` (an sm80+ instruction); BlinkDL
 notes this is removable — a patched kernel runs on T4 — so it's a packaging limit, not a fundamental
@@ -945,9 +987,11 @@ How to read it: the gap tracks memory bandwidth ([bandwidth-bound](#g-bound) ter
 L4); on HBM monsters its whole-layer fused kernel stretches ahead (0.51 on B200) because our
 per-operator launch overhead grows in relative terms as compute gets faster — which is
 precisely what our next speed increment (CUDA graphs + deeper fusion) targets. Meanwhile our
-**int4 path reaches 0.9908× of Albatross's fp16 on the author's own 5090** (548.8 vs 553.9,
-cross-precision), and the T4 row shows the coverage difference. Raw:
-`bench/results/albatross_fleet_10cards.json` + per-run logs.
+**int4 path now reaches 1.3402× of Albatross's fp16 on the author's own 5090** (742.6 vs 554.11,
+cross-precision, both re-measured in one session 2026-07-27 — it read 0.9908× at 548.8 vs 553.9
+before the megakernel line landed), and the T4 row shows the coverage difference. Raw:
+`bench/results/albatross_fleet_10cards.json` + per-run logs, and `bench/results/f0069/` for the
+re-measured 5090 pair.
 
 One more finding: on CUDA 12.9 the constants Albatross ships are no longer optimal even on
 the 5090 they were tuned for. We went further and **re-tuned Albatross for this card

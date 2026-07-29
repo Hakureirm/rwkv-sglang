@@ -45,7 +45,7 @@ of extra VRAM. High concurrency and long context are where this architecture win
 | GPU (1.5B) | single request | peak serving throughput |
 |---|---|---|
 | RTX 3090 | 230.7 tok/s | 7,205 tok/s fp16 · **9,851 tok/s int8** |
-| RTX 5090 | **409.8 tok/s** fp16 · **548.8** int4 | **22,175 tok/s** |
+| RTX 5090 | **535.2 tok/s** fp16 · **742.6** int4 | **22,175 tok/s** |
 
 **7.2B, one RTX 5090 (32 GB):** single request **142.8 tok/s** (fp16) — the megakernel
 flagship ladder (2026-07-21, F0066c), full step-by-step story in
