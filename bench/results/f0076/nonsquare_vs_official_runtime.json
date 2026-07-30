@@ -1,0 +1,16 @@
+{
+  "checkpoint": "RWKV-x070-World-0.1B-v2.8-20241210-ctx4096.pth",
+  "reference": "rwkv pip package, cpu fp32, RWKV_V7_ON=1 (BlinkDL's own runtime)",
+  "hidden_size": 768,
+  "num_heads": 12,
+  "head_dim": 64,
+  "non_square": true,
+  "prompt_tokens": 11,
+  "logits_max_abs_diff": 7.05718994140625e-05,
+  "logits_max_rel_diff": 1.9714689187821932e-06,
+  "argmax_agreement_over_prompt": "11/11",
+  "greedy_32_token_agreement": "32/32",
+  "note": "free-running greedy on both sides; teacher-forced argmax agreement over the same 32 steps is 32/32",
+  "greedy_text_identical": true,
+  "greedy_text": " Paris, France. It is the tallest building in the world and is the world's tallest structure. It was built in 1889 by Gustave E"
+}
