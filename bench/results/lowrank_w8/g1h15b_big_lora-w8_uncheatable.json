@@ -1,0 +1,69 @@
+{
+ "datasets": {
+  "ao3_english": {
+   "docs": 20,
+   "pooled_bpb": 0.8334687843746393
+  },
+  "ao3_nonenglish": {
+   "docs": 20,
+   "pooled_bpb": 1.124561606297871
+  },
+  "arxiv_cs": {
+   "docs": 20,
+   "pooled_bpb": 0.5837112566036984
+  },
+  "arxiv_math": {
+   "docs": 20,
+   "pooled_bpb": 0.5730178536479327
+  },
+  "arxiv_other": {
+   "docs": 20,
+   "pooled_bpb": 0.54539144510499
+  },
+  "arxiv_physics": {
+   "docs": 20,
+   "pooled_bpb": 0.6122760671635447
+  },
+  "bbc_news": {
+   "docs": 20,
+   "pooled_bpb": 0.6947240828358795
+  },
+  "biorxiv_all": {
+   "docs": 20,
+   "pooled_bpb": 0.6091535529520062
+  },
+  "github_cpp": {
+   "docs": 20,
+   "pooled_bpb": 0.3367199177871394
+  },
+  "github_javascript": {
+   "docs": 20,
+   "pooled_bpb": 0.3165692204349492
+  },
+  "github_markdown": {
+   "docs": 20,
+   "pooled_bpb": 0.6182353858643094
+  },
+  "github_other": {
+   "docs": 20,
+   "pooled_bpb": 0.35374358643873793
+  },
+  "github_python": {
+   "docs": 20,
+   "pooled_bpb": 0.33550039359492856
+  },
+  "wikipedia_english": {
+   "docs": 20,
+   "pooled_bpb": 0.6847040208378631
+  },
+  "wikipedia_nonenglish": {
+   "docs": 20,
+   "pooled_bpb": 0.6960345301917997
+  }
+ },
+ "overall": {
+  "pooled_bpb": 0.5871595905579308,
+  "pooled_compression_rate": 7.339494881974135,
+  "total_docs": 300
+ }
+}
