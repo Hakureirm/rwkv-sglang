@@ -215,7 +215,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 | F0014 | Clean same-precision standing — raw speed loses, accuracy TIES, VRAM/int8/serving win; CUDA endgame chosen | info | open |
 | F0015 | CUDA endgame result — fused fp16 GEMV greedy-EXACT, +5-9% bsz1 decode @1.5B/7.2B; cuda-graph amortizes the eager win; mega-kernel to match albatross DECLINED | info | open |
 | F0016 | Serving-scale measured — ~50× concurrency throughput at flat VRAM; context-invariant memory (O(1)-state wedge) | info | open |
-| F0022 | State prefix cache via MambaRadixCache (req#3) — greedy-EXACT shared-prefix at 0.1B+1.5B; ~98% cache hit rate on a high-reuse load (was 0, radix forced off); only RWKV serving stack with a state cache | info | open |
+| F0022 | State prefix cache via MambaRadixCache (req#3) — greedy-EXACT shared-prefix at 0.1B+1.5B; ~98% cache hit rate on a high-reuse load (was 0, radix forced off); state-keyed rather than token-prefix-keyed; NOT unique — see F0074 on rwkv_lightning's three-tier state cache | info | open |
 | F0023 | Albatross-vs-ours kernel audit (GEMV/GEMM/LoRA/glue): Bo's hypothesis tested line-by-line | info | open |
 | F0024 | MATH500 avg@64 = 40.60% (greedy 39.2%); HEAD drift-gate CLOSED (compression bit-identical 0.6085; probe: divergence = serving nondeterminism); w8a8 39.8% + 0.6161 | info | open |
 | F0025 | PD-mixed serving + w8a8 large-M (peak 9152 @512, +33%) + GEMV launch autotune | info | open |
