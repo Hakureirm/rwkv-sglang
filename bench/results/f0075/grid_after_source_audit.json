@@ -1,0 +1,26 @@
+{
+  "environment": {
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "torch": "2.11.0+cu129",
+    "cuda": "12.9",
+    "python": "3.12.3",
+    "dtype": "float16",
+    "wkv_implementation": "fused",
+    "wkv_state_dtype": "float32",
+    "sparse_channel_mix": true,
+    "compile_mode": "max-autotune",
+    "seed": 0
+  },
+  "baseline_label": "albatross faster3a_2607",
+  "tok_per_s": {
+    "1x1": 138.66539626107817,
+    "1x16": 1493.8606413008047,
+    "1x32": 2841.325962658561,
+    "1x128": 8180.3553611767475,
+    "1x256": 9207.84106995039,
+    "32x1": 2923.3539029883345,
+    "128x1": 7762.332126770558,
+    "256x1": 8203.440304613128,
+    "16x16": 10225.07047637015
+  }
+}
