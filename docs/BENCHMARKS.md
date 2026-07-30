@@ -1469,6 +1469,44 @@ describes, including the 3090's overload caveat carried into its group label.
 `realload/{sglang,vllm}_{5090,3090}_{inf,r16}.json`. Regenerate:
 `python bench/plots/make_benchmark_plots.py`.*
 
+## 7d. The HuggingFace port on the same grid — three-way, one RTX 5090
+
+The transformers port this project wrote (rwkv-rs/transformers-rwkv PR#2) put on
+F0067's B x T grid, against the same `albatross faster3a_2607` denominator that
+vllm-rwkv's own harness uses — so the three columns are commensurable. Snapshot of
+2026-07-29 (artifact: [`bench/results/f0072/`](../bench/results/f0072/)); the port's
+portable path was re-measured twice since, by the benchmark committed inside the PR
+itself ([`f0073/`](../bench/results/f0073/), [`f0075/`](../bench/results/f0075/),
+environment recorded in each JSON).
+
+| B x T | portable (07-29) | + vllm-rwkv kernel | albatross 3a |
+|---|---:|---:|---:|
+| 1x1 | 138.9 (94.3%) | 135.8 (92.2%) | 147.29 |
+| 1x16 | 1,492 (87.8%) | 1,542 (90.7%) | 1,699.84 |
+| 1x32 | 2,689 (91.8%) | 2,958 (101.0%) | 2,927.72 |
+| 1x128 | 6,693 (74.2%) | 9,002 (99.8%) | 9,019.60 |
+| 1x256 | 7,154 (73.4%) | 10,251 (105.1%) | 9,750.43 |
+| 32x1 | 2,694 (92.2%) | 2,753 (94.2%) | 2,923.54 |
+| 128x1 | 5,157 (57.0%) | 6,431 (71.1%) | 9,044.14 |
+| 256x1 | 5,290 (55.1%) | 6,010 (62.6%) | 9,600.18 |
+| 16x16 | 10,153 (88.6%) | 10,909 (95.2%) | 11,462.50 |
+
+Two things moved after that snapshot, both re-measured same-card in the PR's own
+four-column table:
+
+- The portable path closed most of its prefill gap in-tree (1x128 74.2% → 90.2%,
+  1x256 73.4% → 94.0%: chunk size 16 → 64 off the corrected overflow bound, the serial
+  loop reduced to the state carry, a compile-layout fix) — and its fp16-state variant
+  took **every batched-decode shape past both the reference and the third-party
+  kernel**: 32x1 104.0%, 128x1 104.3% (kernel: 71.4%), 256x1 104.7% (kernel: 62.5%).
+- The vllm-rwkv kernel stays the prefill winner (100–105%). The port looks the WKV up
+  by name, so per-shape kernel choice is a config value, not a fork.
+
+`1x1` is bound by streaming ~13.9 GB of weights and no recurrence swap moves it;
+both columns sit at 92–94% there, and the sparse channel-mix (§4-style, exact on
+squared-ReLU zeros) is what carries the port's own 1x1 to the 86.5%-of-`faster3b`
+figure its PR quotes.
+
 ## 8. Launch autotune across cards (why hardcoded constants don't travel)
 
 Kernel-level A/B of our GEMV launch autotune vs the built-in heuristic, on the **RWKV-7 1.5B**
@@ -1539,7 +1577,13 @@ peak 9,845.6 output / 27,527.7 total tok/s; at 16 req/s median TTFT 32.3 ms. Raw
 
 A Transformer's [KV cache](#g-kv-cache) grows on both axes; RWKV-7's [state](#g-state) does not. This is why a single
 32 GB 5090 serves **640 concurrent 7.2B streams** with w8a8 (§4) — the state pool is the only
-thing that scales with concurrency, and it is tiny and fixed-per-request. (The VRAM-growth
+thing that scales with concurrency, and it is tiny and fixed-per-request. One qualifier
+belongs next to these numbers rather than in F0016 alone: sglang pre-allocates the state
+pool from `mem_fraction_static`, so the +202/+4/+0 MiB deltas are movements *inside* a
+fixed budget. The load-bearing claim is not "the pool is fixed" (that is configuration)
+but that the pool holds hundreds of arbitrary-length RWKV states because each one is a
+fixed-size constant — which is exactly what a KV-cache engine with the same budget
+cannot do at 256×64K. (The VRAM-growth
 rows above are v0.5.10 measurements; unchanged by design on main.)
 
 **Figure — the same equation, drawn.** RWKV-7's per-request state is `L·(2D+64D)` — a flat line
@@ -1557,7 +1601,9 @@ Qwen3.5-2B = constant GDN state + its 6 attention layers' KV cache, ∝ context.
 
 ## 11. Speculative decoding
 
-**Updated 2026-07-07 — correctness done, speed a real partial win.** A 0.1B RWKV-7 draft
+**Updated 2026-07-07 — correctness done, speed a real partial win.** (Harnesses now
+committed: `bench/spec_decode.py` and `bench/spec_speed.py` — the negative result
+below is reproducible, not just recorded.) A 0.1B RWKV-7 draft
 proposes K tokens; the target verifies them in one pass via sglang main's own spec-V2
 plugin architecture (`RWKV_SPEC`, modeled on the `NGRAMWorker` template — reusing upstream's
 verify+commit machinery rather than a bespoke worker, per the [2026-07-06 pivot in
