@@ -7,6 +7,16 @@ token-exact against the reference implementation, quantized (int8/int4), and run
 11 platforms — 10 CUDA GPU models (2018's T4 through B200 and RTX 5090) plus Apple Silicon.
 Every number below has its raw log committed in [`bench/results/`](bench/results/).
 
+**How this was built.** Most of the code, kernels, measurements and documents in this
+project were produced by AI agents (Claude — Opus, Sonnet and Fable models) working
+under human direction; each finding under `docs/findings/` names the model that
+produced it in its `discovered_by` field. This is stated here rather than left in the
+findings' front-matter because it should change how you read the claims: nothing here
+asks to be taken on the author's word. The benchmark scripts, the baselines they are
+quoted against, the raw logs and the numpy oracle are committed, and the correctness
+claims are checked against implementations this project did not write — BlinkDL's own
+runtime and reference above all.
+
 **➡ Full benchmark reference: [docs/BENCHMARKS.md](docs/BENCHMARKS.md)** — every measured
 axis in readable tables (correctness gates, accuracy rulers, per-GPU speeds, the Albatross
 comparison, quantization trade-offs, latency under load), each linked to its raw log.

@@ -7,6 +7,8 @@
 (从 2018 年的 T4 到 B200、RTX 5090)加 Apple Silicon。
 下文每一个数字的原始日志都在 [`bench/results/`](bench/results/) 里。
 
+**关于产出方式。**本项目的代码、核、测量与文档大部分由 AI agent(Claude 的 Opus / Sonnet / Fable 模型)在人工指挥下完成;`docs/findings/` 下每份 finding 的 `discovered_by` 字段都写明了产出它的模型。写在这里而不是埋在 front-matter 里,是因为这件事应当改变你读这些数字的方式:这里没有任何结论要求你凭作者的信誉接受——benchmark 脚本、对照基线、原始日志和 numpy oracle 全部在库,正确性结论对照的是本项目没有写过的实现,首先是 BlinkDL 自己的运行时与参考。
+
 **➡ 完整基准文档:[docs/BENCHMARKS.zh-CN.md](docs/BENCHMARKS.zh-CN.md)**——所有测过的
 指标轴,可读的表格形式(正确性验证、精度指标、逐卡速度、与 Albatross 的对比、量化
 取舍、真实负载延迟),每张表链接到原始日志。

@@ -1,5 +1,7 @@
 # Contributions — RWKV-7 on SGLang
 
+**Authorship**: predominantly AI-agent-produced under human direction (see the note at the top of the README and the `discovered_by` fields in every finding); evidence is committed so the claims can be checked rather than trusted.
+
 This repo delivers the production-grade **RWKV-7 serving adaptation for SGLang**
 (dynamic batching + chunked prefill + O(1) recurrent-state pool, greedy
 token-exact vs the BlinkDL rwkv-lm numpy reference), with **zero FLA
