@@ -1,7 +1,7 @@
 ---
 doc_kind: finding
 finding_id: F0071
-title: "The HuggingFace RWKV-7 port scaled the ln_x GroupNorm epsilon by num_heads where the reference hardcodes 64e-5 = head_dim x 1e-5. Those agree at exactly one width — hidden_size 4096 — which is the 7.2B, which is the checkpoint every accuracy measurement of that port had used. Scored here against bench/oracle_numpy.py at the two non-square widths it was never scored at: with head_dim the port is 32/32 token-identical to the oracle at both 0.1B and 1.5B (logits within 5e-05); with num_heads it is 11/32 and 30/32, and the text it produces is different and wrong. Not a precision wobble — trained per-head variances are ~500x below the epsilon, so the constant is the whole denominator and a wrong one rescales the normalisation by up to 2.31x."
+title: "OUR OWN HuggingFace RWKV-7 port (transformers-rwkv PR#2, written by this project) scaled the ln_x GroupNorm epsilon by num_heads where the reference hardcodes 64e-5 = head_dim x 1e-5. Those agree at exactly one width — hidden_size 4096 — which is the 7.2B, which is the checkpoint every accuracy measurement of that port had used. Scored here against bench/oracle_numpy.py at the two non-square widths it was never scored at: with head_dim the port is 32/32 token-identical to the oracle at both 0.1B and 1.5B (logits within 5e-05); with num_heads it is 11/32 and 30/32, and the text it produces is different and wrong. Not a precision wobble — trained per-head variances are ~500x below the epsilon, so the constant is the whole denominator and a wrong one rescales the normalisation by up to 2.31x."
 status: CLOSED (2026-07-29) — fixed in transformers-rwkv PR#2 (commit 6a56130), verified against the oracle at 0.1B and 1.5B
 discovered_by: Opus 5 (1M), 2026-07-29, while clearing a flagged-but-unverified audit item
 severity: P0 (wrong output on every width except 7.2B)
@@ -11,7 +11,21 @@ machine: 5090 tower, one-shot lmsysorg/sglang:dev-cu12 containers, fp32 on both 
 
 # Finding F0071: the epsilon that was only right on the model we measured
 
-## 0. Why this one is worth writing up
+## 0. Whose bug this is
+
+Ours. The port in question is `transformers-rwkv` PR#2, written by this project two days
+before this finding; the bug went in with its first commit and came out a day later in
+`6a56130`, before anyone outside had read it. This document originally led with "the
+HuggingFace RWKV-7 port", which reads as an audit of somebody else's code, and that
+framing is corrected here rather than left to a reader to work out from the status line.
+
+The correct reading was also never obscure. BlinkDL's reference carries
+`nn.GroupNorm(H, C, eps=64e-5)` with `# !!! notice eps value !!!` beside it, fla has
+shipped `eps=self.head_dim * norm_eps` for months, and two implementations in this very
+repository already had it right. Getting it wrong was not subtle and finding it is not a
+discovery.
+
+## 0b. Why it is still worth writing up
 
 The bug itself is one multiplication. What makes it worth a finding is the shape of
 the miss: **the port was measured, the measurement was sound, and the measurement was
