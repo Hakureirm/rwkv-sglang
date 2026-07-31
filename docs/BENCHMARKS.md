@@ -61,7 +61,7 @@ its numbers are ~2× lower for batched decode and are never quoted against the c
 
 | config | peak tok/s | source |
 |---|---:|---|
-| 1.5B fp16 (RTX 5090) | **22,175** (512 [concurrency](#g-concurrency)) | §5 |
+| 1.5B fp16 (RTX 5090) | **29,533** (320 [concurrency](#g-concurrency)) | §5 · re-measured 2026-08-01 on sglang main, F0078 |
 | 1.5B int8 [w8a8](#g-tiers) (RTX 3090) | **9,851** (256 concurrency) | §5 |
 | 7.2B (RTX 5090) | **8,277** (320 concurrency) | §5 · re-measured 2026-08-01 on sglang main, F0078 |
 
@@ -82,14 +82,22 @@ its numbers are ~2× lower for batched decode and are never quoted against the c
 > to a uniform "fully-optimized, same-precision" bar; the bsz1 flagship (142.8 / 514.5) and
 > accuracy/correctness are current. When a number looks off, trust the dated section with its raw file.
 >
-> The 7.2B row is now off that list: re-measured 2026-08-01 on the megakernel-round stack, on
-> sglang main, peak **8,277 tok/s @ c320** (greedy fixture 8/8 EXACT on the same server before
-> timing). Two things worth carrying with it. The published `c128 = 7,087` reproduces at
-> **7,078.5** — 0.12% apart, so the large-batch figures transfer to main as they stand, unlike
-> the bsz1 number, which needed the F0078 graft repair to get there. And the top is a plateau,
-> not a peak: c256 through c512 all read 7.9–8.3k (8277 / 7887 / 8181 / 7944), so 320 is where
-> the best sample landed rather than a sharp optimum, and quoting it as "the" peak overstates
-> the precision of the maximum by roughly the width of that band.
+> Both fp16 rows are now off that list, re-measured 2026-08-01 on the megakernel-round stack,
+> on sglang main, each with the greedy fixture gate passed on the same server before timing:
+> **7.2B 8,277 tok/s @ c320** and **1.5B 29,533 @ c320**.
+>
+> They came back differently, which is the useful part. The 7.2B's published `c128 = 7,087`
+> reproduces at **7,078.5** — 0.12% apart — so that figure transferred to main as it stood,
+> unlike the bsz1 number, which needed the F0078 graft repair to reach parity. The 1.5B's
+> published peak did **not** hold: 22,175 @ c512 was a pre-megakernel value and the same
+> protocol now reads 29,533 (+33%), with c512 alone at 28,617. Its bsz1 reads 516.0 against
+> the published 514.5, which is what confirms the two runs are the same configuration rather
+> than a different stack flattering itself.
+>
+> Both tops are plateaus, not peaks. 7.2B c256–c512: 7663 / 8277 / 7887 / 8181 / 7944; 1.5B:
+> 28338 / 29533 / 27411 / 29010 / 28617. c320 is where the best sample landed both times, in
+> a band about 5–7% wide, so quoting it as "the" peak claims more precision about the location
+> of the maximum than a single sweep supports.
 
 ---
 
