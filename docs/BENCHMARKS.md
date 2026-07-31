@@ -1185,6 +1185,13 @@ Every row below traces to one finding; nothing here is a fresh measurement for t
 | 3 | + sparse-path finalize (persistent fp32 accumulator replaces `at::zeros`+cast; closes the sparse path's two remaining PDL chain breaks flagged in F0063 §4 — step-level overlap jumps 79.1%→96.8%) | 142.0 | — | 91.5% | F0066b |
 | 4 (headline) | + LoRA-gate epilogue folded into `lora_stage2`'s own launch | **142.8** | — | **92.0%** | F0066c |
 
+**Reproduced on sglang main (2026-07-31, F0078): 141.7 tok/s**, same harness, same model
+dir, same flags, 0.8% under the 0.5.10 reading above — and main's *anchor* leg reads 139.8
+against 0.5.10's ~133.4, so the newer runtime is not the slower one. That re-measurement is
+also what found the ladder had been returning nothing on main for weeks: the graft was
+missing the megakernel line and the fp16-state knob, and the fused paged token-shift was a
+`return None` stub. Read F0078 before quoting any main-line number measured before it.
+
 Net: **+7.0%** end to end (133.4→142.8). Every step is bit-exact-gated (greedy 24/24 @1.5B +
 8/8 @7.2B under CUDA graph) and its speed effect isolated by an A/B leg pair inside one clean
 single-tenant window (this project's sky-yield discipline — see the findings for the co-
