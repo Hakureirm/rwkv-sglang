@@ -170,6 +170,41 @@ The same server on `bench/bsz_throughput.py`'s synthetic shape reads 249.0 vs 14
 Do not quote that as a workload number: random `input_ids` with `ignore_eos` decode into
 degenerate repetition, which a draft model predicts almost perfectly.
 
+## Speculation has never run under concurrency, and does not
+
+Every speculative number in this project — tonight's and F0077's — is bsz1 and sequential.
+Pointing 8 concurrent clients at the same server kills it on the **first prefill**, before
+any model code runs:
+
+```
+RuntimeError: The size of tensor a (19) must match the size of tensor b (109)
+  eager_runner._execute_extend -> load_batch
+  -> cuda_graph_buffer_registry.fill_from -> _grouped_foreach_copy_
+```
+
+`fill_from` slices each registered destination to the batch (`slot.buffer[:raw_n]`, raw_n =
+19 tokens here) and copies the ForwardBatch field into it; the source is 109 rows, which is
+the request-pool size at this memory fraction, not anything batch-shaped. So a slot whose
+source is pool-sized is being filled as if it were per-batch.
+
+Three runs pin it down. Adaptive K is **not** the cause — fixed K=8 dies identically (a=19
+vs the adaptive run's a=16, same b=109) — and neither is anything repaired tonight: restoring
+the pre-repair model file, config and backend from backup reproduces the identical error.
+This is a pre-existing defect in how the speculative integration meets main's
+`cuda_graph_buffer_registry`, a piece of machinery the 0.5.10 line did not have, and it was
+invisible because no benchmark or gate in this project has ever sent overlapping requests to
+a speculative server.
+
+Consequence for the numbers above: they are correct for what they measure and they measure
+single-stream. Speculative decoding is not deployable behind a real load until this is fixed,
+and that is a stronger caveat than the ratios alone suggest.
+
+Same run cleared adaptive K of the other charge: the illegal memory access that made it
+EXPERIMENTAL in F0077 does not reproduce on the repaired stack (40/40 sequential requests
+clean, K distribution {4: 589, 6: 2005, 8: 206}, so it was genuinely switching). Cannot
+reproduce is not fixed — the soak that would settle it is the concurrent one, which the
+crash above blocks — so the default stays off.
+
 ## Corrected elsewhere
 
 BENCHMARKS called the 142.8 flagship an `sgl.Engine` measurement in four places. The
