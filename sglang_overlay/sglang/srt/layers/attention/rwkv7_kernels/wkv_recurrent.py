@@ -245,6 +245,12 @@ def wkv_recurrent(
         and T == 1
         and K == 64
         and V == 64
+        # The kernel indexes heads with shift/mask, so it TORCH_CHECKs H to be a
+        # power of two (rwkv7_wkv.cu). That check has to be mirrored HERE or an
+        # otherwise-eligible model kills the server instead of taking the Triton
+        # path: RWKV-7 0.1B is 12 heads (768/64), and as a spec-decode draft it
+        # boots into the same armed stack as its 64-head target and raised.
+        and (H & (H - 1)) == 0
         and r.dtype == torch.float16
         and v.dtype == torch.float16
         and state_pool.dtype in (torch.float16, torch.float32)
