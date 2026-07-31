@@ -107,6 +107,19 @@ export RWKV_ADDLN_WIDE=1
 export RWKV_FUSED_GNGC=1           # fused GroupNorm + gate-corr epilogue (attn output)
 export RWKV_FUSED_RELUSQ=1         # fused relu(k)^2 on the M>1 dense ffn path
 export RWKV_FUSED_VRESGATE=1       # fused batched LoRA-gate activations (w/a/v)
+# lm_head through the same shared-weight GEMV as every other projection. It was the
+# lone cuBLAS holdout, and only because speculative verify had to match it: the worker
+# re-projected each of its bs*K rows one at a time to reproduce cuBLAS's M=1 reduction
+# order, re-reading a 512 MiB weight per row (1.90 ms/round at M=6, linear in bs*K).
+# Moving both sides here makes the invariance structural at one weight pass and lets
+# that recompute go. Gated at three tiers with the flag ON: numeric oracle
+# (verify_batch.py, 1.5B fp16 cuda-graph, full stack) OVERALL PASS all batches exact;
+# greedy fixture 8/8 EXACT on the 7.2B plain AND speculative servers; spec_gate.py
+# 10/10 token-identical with accept length unchanged (3.39). Measured 7.2B long-form:
+# speculation 175.1 -> 193.5 tok/s median (+10.5%), plain decode unchanged (M=1 is one
+# weight pass either way). Scope note, same disclosure style as the rest: the oracle
+# ran at 1.5B; 7.2B is covered by the fixture gate, not the full oracle.
+export RWKV_FAST_LMHEAD=1
 # NOT exported: RWKV_STATE_FP16 (fp16 temporal WKV state). It leaves the
 # bitwise-oracle tier (a numerics change, not a reordering), so it stays a
 # deliberate per-deployment opt-in despite passing its lossy-tier gates
