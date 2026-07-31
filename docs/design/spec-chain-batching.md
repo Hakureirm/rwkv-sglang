@@ -121,6 +121,28 @@ M=1**, which is what the plain decode's lm_head actually runs. Swapping it in wo
 verify agree with a baseline we do not have, and the identity gate would fail — the same trap
 in the opposite direction from the sparse finding in F0078.
 
+**Update, 2026-08-01: option 1 shipped, and measuring it moved the goalposts for batching.**
+Both paths now run the shared-weight GEMV at M<=8 (`RWKV_FAST_LMHEAD`, on in serve.sh),
+the worker's recompute is gone, and speculation went 175.1 -> 193.5 tok/s median, 1.23x ->
+1.36x, with story/explain recovering from 0.89x/0.97x to 0.98x/1.07x. Gates: numeric oracle
+all-batches-exact, greedy fixture 8/8 on both servers, spec gate 10/10 with accept unchanged.
+
+Two corrections to what this note said before, both from measuring rather than reasoning:
+
+- **The win was never "our kernel beats cuBLAS".** At M<=8 they are within 2%. What it beats
+  is *M separate cuBLAS calls*, which is what the invariance requirement forced. Above M=8 a
+  real GEMM reads the weight once for every row and wins enormously (0.345 vs 2.593 ms at
+  M=64; 0.812 vs 12.968 at M=320), so the fast path is capped there. The first version of this
+  change chunked above the cap instead, which would have cost large-batch serving ~16x on the
+  lm_head — caught by asking what the gates had NOT covered, since every one of them ran at
+  M<=8.
+- **Batching's identity problem is harder than "replace the loop".** At bs=1 the argument
+  closes because plain decode is M=1 and verify is M=K<=8, and one kernel serves both. At
+  bs>1 plain decode is M=bs and verify is M=bs*K — neither is M=1, both are above the cap,
+  and a batched GEMM's row does not match a differently-shaped batched GEMM's row. So a
+  batched chain needs invariance between two *different* large shapes, which the current
+  kernel does not provide at any M. That is a real design question, not a port.
+
 The honest options, in order of preference:
 
 1. Route the lm_head through the same batch-invariant kernel on **both** paths — plain decode

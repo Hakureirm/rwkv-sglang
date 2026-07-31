@@ -315,7 +315,7 @@ index eef80dc..fe59858 100644
  import torch
  from torch import nn
  
-@@ -905,9 +906,50 @@
+@@ -905,9 +906,46 @@
                      hidden_states.bfloat16(), lm_head.weight.T.bfloat16()
                  )
              else:
@@ -344,20 +344,16 @@ index eef80dc..fe59858 100644
 +                ):
 +                    from sglang.srt.layers.attention.rwkv7_kernels import fast_linear
 +
-+                    if fast_linear.available():
-+                        _rows = hidden_states.shape[0]
-+                        if _rows <= 8:
-+                            logits = fast_linear.gemv_mb(hidden_states, _w)
-+                        else:
-+                            # the shared-weight variant is capped at M<=8; chunk so a
-+                            # wide verify still costs ceil(M/8) weight passes, not M
-+                            logits = torch.cat(
-+                                [
-+                                    fast_linear.gemv_mb(hidden_states[i : i + 8], _w)
-+                                    for i in range(0, _rows, 8)
-+                                ],
-+                                dim=0,
-+                            )
++                    # M<=8 ONLY. Above that the shared-weight variant does not apply
++                    # and chunking loses badly to a real GEMM, which reads the weight
++                    # once for ALL rows: measured on the 7.2B head (65536x4096),
++                    # cuBLAS vs chunked is 0.345 vs 2.593 ms at M=64 and 0.812 vs
++                    # 12.968 ms at M=320. The win here was never "our kernel beats
++                    # cuBLAS" -- at M<=8 they are within 2% -- it is "one call instead
++                    # of M", so it only exists where the alternative was M calls.
++                    # Large-batch decode keeps the GEMM it always had.
++                    if fast_linear.available() and hidden_states.shape[0] <= 8:
++                        logits = fast_linear.gemv_mb(hidden_states, _w)
 +                    else:
 +                        logits = torch.matmul(
 +                            hidden_states.to(_w.dtype), _w.T
