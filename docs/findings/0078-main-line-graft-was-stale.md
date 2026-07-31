@@ -1,6 +1,6 @@
 # F0078 — the main-line graft was stale, and the profile said so
 
-**Status:** OPEN (numbers below are measured; the last leg is re-measuring)
+**Status:** CLOSED — repaired and re-measured end to end (7.2B bsz1 118.6 → 141.7)
 **Date:** 2026-07-31 · 5090 (sm120), 7.2B fp16, `lmsysorg/sglang:dev-cu13` + fork worktree
 **Supersedes:** the postscript in [F0077](0077-spec-decode-draft-desync-fix.md), whose
 attribution of the main-vs-0.5.10 gap to "main-branch per-step runtime overhead" was wrong.
@@ -98,26 +98,27 @@ mirroring the check at the dispatch site.
 
 ## Speculative decoding, re-measured at the corrected baseline
 
-**Superseded — read the caveat.** The table below was taken against the 122.9 baseline,
-i.e. after the model/config graft but BEFORE the fused glue was restored. The plain leg has
-since moved to ~141, so every ratio here is optimistic by roughly that factor and is being
-re-measured at the final configuration. It is kept because the accept lengths and the
-shape of the workload dependence are unaffected by the baseline.
+K=6, greedy fixture 8/8 EXACT, long-form prompts, plain median **142.2**:
 
-K=6, greedy fixture 8/8 EXACT, long-form prompts, against the 122.9 baseline:
+| prompt | plain | spec | accept | ratio |
+|---|---:|---:|---:|---:|
+| story | 142.2 | 126.5 | 2.51 | **0.89x** |
+| explain | 142.2 | 137.1 | 2.72 | **0.96x** |
+| history | 142.5 | 178.2 | 3.56 | 1.25x |
+| math | 138.6 | 209.2 | 4.40 | 1.51x |
+| code | 142.3 | 220.2 | 4.41 | 1.55x |
 
-| prompt | tok/s | accept | vs plain |
-|---|---:|---:|---:|
-| story | 114.5 | 2.51 | **0.93x** |
-| explain | 125.3 | 2.75 | 1.02x |
-| history | 158.9 | 3.51 | 1.29x |
-| math | 189.6 | 4.40 | 1.54x |
-| code | 199.2 | 4.41 | 1.62x |
+Median **1.25x**, and two of five prompts are now net losses. Measured against the 122.9
+baseline an hour earlier the same server read median 1.29x with only one loss — **the accept
+lengths are identical to two decimals** (2.51/2.72→2.75/3.51→3.56/4.40/4.41). Nothing about
+the draft changed; the target got 16% cheaper per token while the draft chain cost did not,
+so the same acceptance buys less. Speculation is a ratio against a baseline, and improving
+the baseline is a way to lose it: any future decode-side win moves these ratios down, and
+the low-acceptance prompts fall through 1.0x first.
 
-Median **1.29x**. The story prompt is a net loss and is reported as one. The same server on
-`bench/bsz_throughput.py`'s synthetic shape reads 225.6 vs 122.8 (1.84x) — do not quote
-that as a workload number: random `input_ids` with `ignore_eos` decode into degenerate
-repetition, which a draft model predicts almost perfectly.
+The same server on `bench/bsz_throughput.py`'s synthetic shape reads 249.0 vs 141.9 (1.75x).
+Do not quote that as a workload number: random `input_ids` with `ignore_eos` decode into
+degenerate repetition, which a draft model predicts almost perfectly.
 
 ## Corrected elsewhere
 
