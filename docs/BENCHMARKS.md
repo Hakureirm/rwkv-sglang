@@ -1432,9 +1432,22 @@ high concurrency on both cards (up to 1.26×)** — that is the real result of t
 and rwkv-sglang's next kernel target. Two counters already exist: on the 3090 rwkv-sglang's int8 w8a8 peak
 (9,851) beats vllm-rwkv's fp16 peak (8,583) by **1.1477×**; on the 5090 the upstream cutlass
 int8 op does not exist; rwkv-sglang's own s8-wmma kernel (V2) now runs the tier there end-to-end
-(20,991 @c512 = 0.9466× fp16; the int8 GEMM itself is 1.03–1.55× fp16 at M≥512) — the
-availability gap is closed; at 1.5B its end-to-end sits just under our own highly-optimized
-fp16, and int8's decisive win is at 7.2B (the memory-bound tier, §4). Raw:
+(the int8 GEMM itself is 1.03–1.55× fp16 at M≥512) — the availability gap is closed.
+
+**Both tiers re-measured on sglang main, 2026-08-01**, which turns "int8's decisive win is at
+7.2B" from a claim into a number:
+
+| model | fp16 peak | int8 peak | int8 / fp16 |
+|---|---:|---:|---:|
+| 1.5B | 29,533 @ c320 | 28,027 @ c768 | 0.949× |
+| 7.2B | 8,277 @ c320 | **8,756 @ c640** | **1.058×** |
+
+So the crossover is real and it sits between the two sizes: at 1.5B int8 pays the
+activation-quant tax without enough weight traffic to pay it back, and at 7.2B — the
+memory-bound tier — it wins outright. The pattern is consistent on the other axis too: int8
+needs about twice fp16's concurrency to plateau (fp16 flat by c320, int8 at c640–768) and it
+is far behind at bsz1 (7.2B: 63.9 vs 143.2 tok/s), because that is the same per-token
+quantisation launch cost seen from where nothing amortises it. Raw:
 `bench/results/vllmrwkv/` (correctness JSONs with full token ids + both sweeps per card).
 
 
