@@ -126,8 +126,10 @@ export RWKV_FUSED_VRESGATE=1       # fused batched LoRA-gate activations (w/a/v)
 # cuda-graph, full stack) OVERALL PASS all batches exact; greedy fixture 8/8 EXACT on
 # the 7.2B plain AND speculative servers; spec_gate.py 10/10 token-identical with
 # accept length unchanged (3.39). Measured 7.2B long-form: speculation 175.1 -> 193.5
-# tok/s median (+10.5%), plain decode unchanged. Scope note, same disclosure style as
-# the rest: the oracle ran at 1.5B; 7.2B is covered by the fixture gate.
+# tok/s median (+10.5%), plain decode unchanged. The oracle was run at BOTH sizes with
+# the flag off and on as its own control -- 1.5B and 7.2B, OVERALL PASS all batches
+# exact in all four legs -- so the usual "verified at one size" scope note does not
+# apply here.
 export RWKV_FAST_LMHEAD=1
 # NOT exported: RWKV_STATE_FP16 (fp16 temporal WKV state). It leaves the
 # bitwise-oracle tier (a numerics change, not a reordering), so it stays a
