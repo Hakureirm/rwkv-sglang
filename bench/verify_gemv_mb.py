@@ -46,6 +46,9 @@ def gate(dev):
                 if N % ot != 0:
                     continue
                 yb = torch.ops.rwkv7_fast.gemv_mb_cfg(x, w, t, ot)
+                # shared-weight variant: same bit-identity contract, one
+                # weight pass; must hold at every config the autotuner can pick
+                ybs = torch.ops.rwkv7_fast.gemv_mbs_cfg(x, w, t, ot)
                 # reference: per-row gemv_m1_cfg with the SAME config
                 rows = [torch.ops.rwkv7_fast.gemv_m1_cfg(x[m:m + 1].contiguous(), w, t, ot)
                         for m in range(M)]
@@ -54,6 +57,11 @@ def gate(dev):
                     nbad = (yb != y1).sum().item()
                     md = (yb.float() - y1.float()).abs().max().item()
                     print(f"  FAIL N{N} K{K} M{M} cfg({t},{ot}): {nbad} mismatch, maxdiff {md:.3e}")
+                    ok = False
+                if not torch.equal(ybs, y1):
+                    nbad = (ybs != y1).sum().item()
+                    md = (ybs.float() - y1.float()).abs().max().item()
+                    print(f"  FAIL(shared) N{N} K{K} M{M} cfg({t},{ot}): {nbad} mismatch, maxdiff {md:.3e}")
                     ok = False
         print(f"  N{N:5d} K{K:5d}: all M×cfg bit-identical to gemv_m1" if ok
               else f"  N{N} K{K}: FAIL")

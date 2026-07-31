@@ -305,4 +305,12 @@ def gemv_mb(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
     xc = x.contiguous()
     N, K = weight.size(0), weight.size(1)
     t, ot = _select_config(N, K)
+    # Shared-weight variant when M fits its register budget: same bit-identity
+    # contract (bench/verify_gemv_mb.py gates both), one weight pass instead of
+    # M. RWKV_GEMV_MB_SHARED=0 forces the original per-row-grid kernel.
+    if xc.shape[0] <= 8 and os.environ.get("RWKV_GEMV_MB_SHARED", "1") != "0":
+        try:
+            return torch.ops.rwkv7_fast.gemv_mbs_cfg(xc, weight, t, ot)
+        except Exception:
+            pass
     return torch.ops.rwkv7_fast.gemv_mb_cfg(xc, weight, t, ot)

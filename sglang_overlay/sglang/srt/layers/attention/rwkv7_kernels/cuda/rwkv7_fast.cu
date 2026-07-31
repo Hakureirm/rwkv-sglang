@@ -458,6 +458,122 @@ __global__ __launch_bounds__(Threads, 1) void gemv_mb_kernel(
       static_cast<int>(K), static_cast<int>(N), static_cast<int>(M),         \
       x.data_ptr<dtype>(), weight.data_ptr<dtype>(), y.data_ptr<dtype>())
 
+
+// ---------------------------------------------------------------------------
+// gemv_mbs: shared-weight M-row variant of gemv_mb. ONE block per OutTile of N
+// (no M in the grid): each weight fragment is loaded once per k-chunk and
+// applied to all M rows, whose accumulators live in registers. Row m's fp32
+// reduction is the EXACT gemv_m1 sequence (same k striding, same fmaf order,
+// same warp and cross-warp summation order at the same (Threads, OutTile)),
+// so row-for-row bit-identity with gemv_m1 is preserved -- gated by the same
+// bench/verify_gemv_mb.py -- while the weight bandwidth drops from M full
+// passes (gemv_mb's grid puts M in blockIdx.y, so every row re-reads the
+// whole matrix) to one. That M-fold read is why the chain-spec verify cost
+// ~2.7 decode-steps per round at M=K=4. MaxM caps the register footprint;
+// the host dispatches MaxM in {4,8} and refuses M>8 (the Python wrapper
+// falls back to gemv_mb there).
+// ---------------------------------------------------------------------------
+template <int Threads, int OutTile, int MaxM>
+__global__ __launch_bounds__(Threads, 1) void gemv_mbs_kernel(
+    int K, int N, int M,
+    const dtype* __restrict__ x,        // [M, K]
+    const dtype* __restrict__ weight,   // [N, K]
+    dtype* __restrict__ y) {            // [M, N]
+  const int n0 = blockIdx.x * OutTile;
+  float acc[MaxM][OutTile];
+#pragma unroll
+  for (int m = 0; m < MaxM; ++m)
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) acc[m][j] = 0.0f;
+  for (int k = threadIdx.x << 2; k < K; k += Threads << 2) {
+    float2 xs0[MaxM], xs1[MaxM];
+#pragma unroll
+    for (int m = 0; m < MaxM; ++m) {
+      // rows >= M read row 0 (cheap, cached); their results are never stored
+      const dtype* xm = x + static_cast<int64_t>(m < M ? m : 0) * K + k;
+      xs0[m] = __half22float2(*reinterpret_cast<const __half2*>(xm));
+      xs1[m] = __half22float2(*reinterpret_cast<const __half2*>(xm + 2));
+    }
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      const dtype* wj = weight + static_cast<int64_t>(n0 + j) * K + k;
+      const float2 w0 = __half22float2(*reinterpret_cast<const __half2*>(wj));
+      const float2 w1 = __half22float2(*reinterpret_cast<const __half2*>(wj + 2));
+#pragma unroll
+      for (int m = 0; m < MaxM; ++m) {
+        acc[m][j] = fmaf(xs0[m].x, w0.x, acc[m][j]);
+        acc[m][j] = fmaf(xs0[m].y, w0.y, acc[m][j]);
+        acc[m][j] = fmaf(xs1[m].x, w1.x, acc[m][j]);
+        acc[m][j] = fmaf(xs1[m].y, w1.y, acc[m][j]);
+      }
+    }
+  }
+  __shared__ float partial[Threads / 32][MaxM][OutTile];
+  const int lane = threadIdx.x & 31;
+  const int warp = threadIdx.x >> 5;
+#pragma unroll
+  for (int m = 0; m < MaxM; ++m)
+#pragma unroll
+    for (int j = 0; j < OutTile; ++j) {
+      const float v = warp_sum(acc[m][j]);
+      if (lane == 0) partial[warp][m][j] = v;
+    }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    for (int m = 0; m < M && m < MaxM; ++m) {
+#pragma unroll
+      for (int j = 0; j < OutTile; ++j) {
+        float sum = 0.0f;
+#pragma unroll
+        for (int w = 0; w < Threads / 32; ++w) sum += partial[w][m][j];
+        y[static_cast<int64_t>(m) * N + n0 + j] = __float2half_rn(sum);
+      }
+    }
+  }
+}
+
+#define RWKV7_GEMBS_LAUNCH(T, OT, MM)                                         \
+  gemv_mbs_kernel<T, OT, MM><<<static_cast<int>(N) / (OT), (T), 0, stream>>>( \
+      static_cast<int>(K), static_cast<int>(N), static_cast<int>(M),          \
+      x.data_ptr<dtype>(), weight.data_ptr<dtype>(), y.data_ptr<dtype>())
+
+#define RWKV7_GEMBS_CASE(T, OT)                                               \
+  case (T)*100 + (OT):                                                        \
+    if (M <= 4) { RWKV7_GEMBS_LAUNCH(T, OT, 4); }                             \
+    else        { RWKV7_GEMBS_LAUNCH(T, OT, 8); }                             \
+    break
+
+at::Tensor gemv_mbs_cfg(at::Tensor x, at::Tensor weight, int64_t threads,
+                        int64_t out_tile) {
+  const int64_t M = x.size(0);
+  const int64_t K = x.size(1);
+  const int64_t N = weight.size(0);
+  TORCH_CHECK(x.dim() == 2 && x.is_contiguous(), "gemv_mbs_cfg x must be [M,K] contiguous");
+  TORCH_CHECK(weight.size(1) == K, "gemv_mbs_cfg weight [N,K] mismatch");
+  TORCH_CHECK((K % 4) == 0, "gemv_mbs_cfg requires K%4==0");
+  TORCH_CHECK((N % out_tile) == 0, "gemv_mbs_cfg requires N % out_tile == 0");
+  TORCH_CHECK(M >= 1 && M <= 8, "gemv_mbs_cfg supports 1<=M<=8, got ", M);
+  auto y = at::empty({M, N}, x.options());
+  if (N == 0) return y;
+  if (K == 0) return y.zero_();
+  auto stream = at::cuda::getCurrentCUDAStream();
+  switch (threads * 100 + out_tile) {
+    RWKV7_GEMBS_CASE(64, 1);
+    RWKV7_GEMBS_CASE(64, 2);
+    RWKV7_GEMBS_CASE(64, 4);
+    RWKV7_GEMBS_CASE(128, 1);
+    RWKV7_GEMBS_CASE(128, 2);
+    RWKV7_GEMBS_CASE(128, 4);
+    RWKV7_GEMBS_CASE(256, 1);
+    RWKV7_GEMBS_CASE(256, 2);
+    RWKV7_GEMBS_CASE(256, 4);
+    default: TORCH_CHECK(false, "gemv_mbs_cfg unsupported (threads,out_tile)=(",
+                         threads, ",", out_tile, ")");
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return y;
+}
+
 at::Tensor gemv_mb_cfg(at::Tensor x, at::Tensor weight, int64_t threads,
                        int64_t out_tile) {
   const int64_t M = x.size(0);
@@ -494,10 +610,12 @@ TORCH_LIBRARY(rwkv7_fast, m) {
   m.def("gemv_m1_cfg(Tensor x, Tensor weight, int threads, int out_tile) -> Tensor");
   m.def("gemv_m1_sqrelu_cfg(Tensor x, Tensor weight, int threads, int out_tile) -> Tensor");
   m.def("gemv_mb_cfg(Tensor x, Tensor weight, int threads, int out_tile) -> Tensor");
+  m.def("gemv_mbs_cfg(Tensor x, Tensor weight, int threads, int out_tile) -> Tensor");
 }
 TORCH_LIBRARY_IMPL(rwkv7_fast, CUDA, m) {
   m.impl("gemv_m1", &gemv_m1);
   m.impl("gemv_m1_cfg", &gemv_m1_cfg);
   m.impl("gemv_m1_sqrelu_cfg", &gemv_m1_sqrelu_cfg);
   m.impl("gemv_mb_cfg", &gemv_mb_cfg);
+  m.impl("gemv_mbs_cfg", TORCH_FN(gemv_mbs_cfg));
 }

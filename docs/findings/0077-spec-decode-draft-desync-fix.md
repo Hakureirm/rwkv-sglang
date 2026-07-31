@@ -1,7 +1,7 @@
 ---
 doc_kind: finding
 finding_id: F0077
-title: "RWKV_SPEC completion push: the draft-state rollback was off by one token (accept-length 1.2 vs an independently measured alpha of 0.7 — every partial accept desynced the draft permanently, invisible to the correctness gate), plus a hand-rolled TARGET_VERIFY CUDA graph and a prefill merge-safety fix; after all three: gate 10/10 on 1.5B AND 7.2B, long-form accept 2.5-3.5, 1.5B round 35.4→12.5 ms, but net is still 0.78x (1.5B) / 0.85x (7.2B) median — only high-accept workloads (7.2B math, 3.52) cross 1x"
+title: "RWKV_SPEC completed to a real net win: the draft rollback was off by one token (accept 1.2 vs alpha 0.7, permanent desync invisible to the correctness gate), the verify's gemv_mb burned M weight passes for bit-invariance (fixed by a shared-weight variant, same bit contract, 2-3.9x on the kernel) — final: 7.2B long-form median 1.58x, best 1.88x, 1.5B 0.87x (draft overhead dominates small targets), gate 10/10 everywhere"
 last_verified_commit: "sglang fork rwkv7-spec-decode @ b324c5bc3"
 discovered_by: lead (spec completion push), 2026-07-31
 severity: info
@@ -63,28 +63,50 @@ accept on long-form prompts went 1.2-1.6 → 2.49-3.52, matching theory per-prom
   (NGRAMWorker's contract) or a freshly prefilled request merging into an active
   decode batch dies in `NgramVerifyInput.merge_batch`. Latent until requests overlap.
 
+## The second structural find: gemv_mb traded M weight passes for invariance
+
+With the desync fixed, the graphed verify still cost ~2.7 decode-steps (7.2B:
+30.0 ms marginal). The bandwidth arithmetic pointed at `gemv_mb` itself: its grid
+puts the row index in `blockIdx.y`, so every one of the M=K rows re-reads the whole
+weight matrix — 4 full passes over ~12 GB of projection weights ≈ 32 ms, which IS
+the measured verify cost. The fix is `gemv_mbs` (same .cu): one block per output
+tile, the weight fragment loaded once and applied to all M rows held in registers,
+each row's fp32 reduction sequence unchanged — so row-for-row bit-identity with
+`gemv_m1` is preserved (the harness now gates BOTH kernels across every autotuner
+config; compute-sanitizer clean) while weight bandwidth drops M-fold. Kernel
+microbench at M=4: 2.0-3.9x. `RWKV_GEMV_MB_SHARED=0` restores the per-row kernel.
+
+One honesty note: a single illegal-memory-access crash was observed on the 7.2B
+rig right after the first deployment (request #2 of a run), and then never again —
+not under CUDA_LAUNCH_BLOCKING, not across 40+ subsequent gate requests at both
+sizes. The kernel is standalone-clean under compute-sanitizer memcheck across all
+shapes and configs. Treated as an open intermittent (possibly unrelated memory
+pressure), recorded here rather than hidden; racecheck on the serving path is the
+follow-up if it recurs.
+
 ## Measured (RTX 5090, fp16, greedy, 256-token long-form set, server e2e)
 
-| | spec-off | spec-on K=4 | ratio | accept |
+| | spec-off | spec-on K=4 final | ratio | accept |
 |---|---|---|---|---|
-| 1.5B median (5 prompts) | 293.6 | 227.6 | 0.78x | 2.49-3.01 |
-| 7.2B median (5 prompts) | 91.2 | 77.7 | 0.85x | 2.21-3.52 |
-| 7.2B math (best case) | 89.9 | 93.7 | **1.04x** | 3.52 |
+| 1.5B median (5 prompts) | 293.6 | 255.8 | 0.87x | 2.49-3.01 |
+| 1.5B best (math) | 293.5 | 286.4 | 0.98x | 3.01 |
+| 7.2B median (5 prompts) | 91.2 | **143.7** | **1.58x** | 2.21-3.52 |
+| 7.2B best (math) | 89.9 | **169.2** | **1.88x** | 3.52 |
 
-Gate: 10/10 token-identical at both sizes, graphs on. Per-phase (marginal, 7.2B):
-verify 30.0 ms, draft 4.1 ms, tail 2.2 ms — the verify costs ~2.7 decode-steps'
-time for ~2.8 committed tokens, which is the whole remaining story.
+Gate: 10/10 token-identical at both sizes, all graphs and the shared kernel on.
+Marginal per-phase (7.2B): verify 30.0 → 13.1 ms, round 36.3 → 19.5 ms.
 
-## What stands between here and a real net win
+The shape of the result is exactly ADR-0006's economics: the draft costs the same
+~4 ms/round regardless of target size, so the win concentrates where target steps
+are expensive. At 1.5B the draft+orchestration overhead eats the acceptance profit
+at alpha≈0.7; at 7.2B every prompt class clears 1.2x and reasoning/code clear 1.7x.
 
-The verify forward costs ~1.7 (1.5B) to ~2.7 (7.2B) decode-steps per round even
-graphed. Break-even needs accept ≈ round/step: 2.7 (1.5B) / 3.3 (7.2B). High-accept
-workloads already cross (7.2B math). Candidate attacks, unprofiled: why the graphed
-M=K verify reads more than one weights-pass' worth of bandwidth; K=6-8 on
-high-accept workloads; a 0.4B draft (alpha up, draft cost x3). Not guesses to act
-on without measuring first — the lesson of this whole finding is that the measured
-number (accept 1.2) was screaming which layer was broken, and profiling phases
-before attacking saved the effort from going to the wrong place twice.
+## Next levers (documented, not yet measured)
+
+K=6-8 on high-accept workloads (7.2B math accept 3.52 at K=4 is not
+ceiling-clipped); a 0.4B draft (alpha up, draft cost x3 — net sign unknown);
+draft-phase trim (~4.1 ms for K graphed 0.1B replays has ~1 ms/step of fill/alloc
+overhead). The 1.5B case likely stays sub-1x at this alpha regardless.
 
 ## Cross-references
 
