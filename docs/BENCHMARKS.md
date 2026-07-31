@@ -1473,6 +1473,25 @@ all 8 runs processed exactly 168,913 input tokens and generated exactly 109,861 
 *The 3090 can't actually sustain 16 req/s on this model (both engines top out ~11–12 req/s),
 so this row is mild overload, not true steady state. The 5090 handles 16 req/s comfortably.
 
+> **2026-08-01, our side re-run on sglang main (F0078) — and why the table above is NOT updated
+> from it.** Same client, same file, same 500 prompts, same flags: peak **11,365 tok/s** (median
+> TTFT 2,609 ms, p99 ITL 29.2 ms), steady 16 req/s **3,347 tok/s** (TTFT 26.9 ms, p99 ITL
+> 25.1 ms). Against our own recorded column that is +18.4% at peak and better on both steady
+> latencies.
+>
+> It does not go in the table, because the thing that made this comparison worth publishing was
+> the equal-conditions proof — every run processing *exactly* the same tokens — and that proof
+> does not survive the session boundary. Tonight's runs generated 110,378 tokens against the
+> recorded 109,861 (0.5% apart, fine) but consumed **198,233 input tokens against 168,913**, a
+> 17% difference in what was fed in. Same dataset file and same `--num-prompts 500`, so the
+> divergence is in prompt selection or filtering inside a newer `bench_serving`, not in the
+> engine. Quoting 11,365 against the opposing column's 8,865 would be comparing our new number
+> to someone else's old one across a protocol that has visibly shifted underneath both.
+>
+> To actually update §7c: re-run **both** engines in one session and re-establish the token-count
+> equality first. Until then the table stands as measured, and this note is the record that our
+> side has moved since.
+
 **The reversal — and it's the point.** On the *synthetic fixed-shape* sweep, vllm-rwkv led
 high concurrency (its Albatross kernels + decode-wave batching like uniform shapes). On
 *real variable-length* load at peak, **rwkv-sglang leads throughput on both cards** (1.08× on
