@@ -126,7 +126,10 @@ explicit `--dtype float16` (+`--attention-backend triton
 --disable-piecewise-cuda-graph`), the main-line 7.2B baseline is **115.1
 tok/s** with all three engagement banners in the log (fused GEMV armed, fused
 LoRA enabled, sparse channel-mix enabled). The remaining gap to the 0.5.10
-line's 142.8 is main-branch per-step runtime overhead, not kernels — unprofiled,
+line's 142.8 is main-branch per-step runtime overhead, not kernels — **WRONG, see
+[F0078](0078-main-line-graft-was-stale.md)**: the graft was stale (no megakernel line, no
+fp16-state knob) and the fused paged token-shift was a `return None` stub, which is where
+the whole gap was; repaired, main reaches 141.7. The original wording follows — unprofiled,
 next on the list. Ratios against the stronger baseline compress accordingly:
 spec K=4 median 1.25x, math 1.53x (absolute spec numbers barely move, because
 sparse FFN accelerates plain bsz1 decode, which the spec path never executes).
