@@ -98,23 +98,73 @@ mirroring the check at the dispatch site.
 
 ## Speculative decoding, re-measured at the corrected baseline
 
-K=6, greedy fixture 8/8 EXACT, long-form prompts, plain median **142.2**:
+### First, the identity gate fails — and the bisect says which flag
 
-| prompt | plain | spec | accept | ratio |
+The per-leg smoke gate is 8 tokens. The real gate is `bench/spec_gate.py`: 10 prompts,
+128 tokens, spec output must be byte-identical to the plain server's. At the repaired
+configuration it came back **9/10** — one prompt (`def fibonacci(n):`) diverging at a
+single position, everything after it a different-but-plausible continuation, accept length
+a healthy 3.38. That is the F0031 near-tie signature, not a desync (a desync shows up as
+accept ≈ 1.2, not 3.4).
+
+Two hypotheses died to their own measurement before the third stuck:
+
+| run | config | verdict |
+|---|---|---|
+| fp16 state | flagship, `RWKV_STATE_FP16=1` | FAIL at pos 126 |
+| fp32 state | same, state fp32 | FAIL at pos 90 — **fp16 state exonerated** |
+| anchor | `MEGA=WKV_CUDA=PDL=0`, fp32 | FAIL at pos **90, identical** — the whole megakernel line exonerated, and positive evidence its three kernels really are bit-identical |
+| no sparse | `RWKV_SPARSE_FFN=0` | **PASS 10/10**, accept 3.39 (vs 3.38) |
+
+The sparse channel-mix SpMV skips zero rows, so its fp32 summation *order* differs from the
+dense projection — mathematically equal, not bitwise. A plain server runs it on every decode
+step; a speculating server's target never decodes at all, it only verifies, and verify is
+M>1, which the sparse kernel does not serve. So the two servers disagree by ~1 ULP and a
+near-tie argmax eventually flips.
+
+### The decision this forces
+
+| config | plain | spec (K=6) | ratio | gate |
+|---|---:|---:|---:|---|
+| sparse ON | **142.2** | 178.2 | 1.25x | **FAIL 9/10** |
+| sparse OFF | 109.1 | 175.1 | 1.61x | **PASS 10/10** |
+
+Read across, not down. Sparse is worth +30% on plain decode and **nothing** on the
+speculative path (178.2 vs 175.1) — under speculation the only sparse work left is the
+0.1B draft's own decode. So the choice a user actually faces is *best correct spec* against
+*best plain*: **175.1 vs 142.2 = 1.23x**, with the identity gate passing. On the gate's
+short prompts the same comparison is 130.9 vs 107.0 = 1.22x; with sparse on there it is
+131.5 vs 139.0, i.e. **speculation is a net loss AND fails the gate** — that combination is
+strictly the worst of the three and is the one our own `serve.sh` defaults would have picked.
+
+We warn rather than auto-disable. Turning sparse off inside the speculating process would
+not restore the guarantee — the mismatch is against a *separate* plain server we do not
+control — and it would cost ~1.8% by slowing the draft. The warning fires once, on the
+target's first FFN forward, and is gated: verified present on a spec server and absent on a
+plain one with identical flags. The guarantee, stated precisely, is against a plain server
+in the **same kernel configuration**; to verify it, run both with `RWKV_SPARSE_FFN=0`.
+
+### Speed, at the gate-passing configuration
+
+K=6, greedy fixture 8/8 EXACT, long-form prompts, plain median **142.2** (sparse on; the
+spec column below is sparse-off, i.e. the configuration that passes the identity gate):
+
+| prompt | plain (sparse on) | spec (sparse off) | accept | ratio |
 |---|---:|---:|---:|---:|
-| story | 142.2 | 126.5 | 2.51 | **0.89x** |
-| explain | 142.2 | 137.1 | 2.72 | **0.96x** |
-| history | 142.5 | 178.2 | 3.56 | 1.25x |
-| math | 138.6 | 209.2 | 4.40 | 1.51x |
-| code | 142.3 | 220.2 | 4.41 | 1.55x |
+| story | 142.2 | 126.4 | 2.51 | **0.89x** |
+| explain | 142.2 | 138.4 | 2.75 | **0.97x** |
+| history | 142.5 | 175.1 | 3.51 | 1.23x |
+| math | 138.6 | 208.4 | 4.40 | 1.50x |
+| code | 142.3 | 219.0 | 4.41 | 1.54x |
 
-Median **1.25x**, and two of five prompts are now net losses. Measured against the 122.9
-baseline an hour earlier the same server read median 1.29x with only one loss — **the accept
-lengths are identical to two decimals** (2.51/2.72→2.75/3.51→3.56/4.40/4.41). Nothing about
-the draft changed; the target got 16% cheaper per token while the draft chain cost did not,
+Median **1.23x**, and two of five prompts are net losses. Measured against the 122.9
+baseline earlier in the same session the ratios read 1.29x median with one loss — **the
+accept lengths are identical to two decimals across all of it** (2.51/2.72/3.51/4.40/4.41,
+in every configuration tried tonight, sparse on or off, fp16 state or fp32). Nothing about
+the draft ever changed; the target got cheaper per token while the draft chain cost did not,
 so the same acceptance buys less. Speculation is a ratio against a baseline, and improving
-the baseline is a way to lose it: any future decode-side win moves these ratios down, and
-the low-acceptance prompts fall through 1.0x first.
+the baseline is a way to lose it: tonight's decode-side repair moved the median from 1.29x
+to 1.23x, and the low-acceptance prompts fall through 1.0x first.
 
 The same server on `bench/bsz_throughput.py`'s synthetic shape reads 249.0 vs 141.9 (1.75x).
 Do not quote that as a workload number: random `input_ids` with `ignore_eos` decode into
@@ -145,3 +195,17 @@ performance gate. The flag-ladder A/B is the performance gate, and it was not re
 the graft — the graft was verified by "does it boot and answer correctly", which it did.
 The banners are an activity gate for flags, but a stub that returns `None` announces
 nothing, so the banner set looked complete while two of its members were missing.
+
+And the correctness gate that did exist was run at the wrong size: the per-leg smoke is 8
+tokens, the divergence sat at token 90. Every performance number in this session was taken
+on a configuration whose 128-token identity gate had not been re-run, and when it finally
+was, it failed. The rule that comes out of this is narrow and cheap: **any configuration
+whose numbers get quoted has to have run the full-length gate in that exact configuration**,
+not a shorter relative of it.
+
+One more, on the fix rather than the bug: the first version of the sparse/spec repair was a
+guard that disabled sparse whenever speculation was on. It would have passed review — it is
+two lines, it reads as obviously right, and it is useless: under speculation the target
+never decodes, so the only sparse work it removes is the draft's, which is not where the
+divergence comes from. It would have cost 1.8% and fixed nothing. The question that killed
+it was asking what the code actually does, rather than what it is named after.

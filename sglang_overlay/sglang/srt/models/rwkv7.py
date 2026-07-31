@@ -534,6 +534,57 @@ def _linear_backend(forward_batch: ForwardBatch):
     return ab.linear_attn_backend
 
 
+def _spec_enabled(forward_batch) -> bool:
+    """True when this server runs speculative decoding (any algorithm).
+
+    Read off the batch rather than the server args so it also covers the draft
+    worker's own forwards, and written defensively: a batch without the attribute
+    (older sglang, synthetic cuda-graph dummy) reports False."""
+    alg = getattr(forward_batch, "spec_algorithm", None)
+    if alg is None:
+        return False
+    is_none = getattr(alg, "is_none", None)
+    return not is_none() if callable(is_none) else True
+
+
+_SPARSE_SPEC_WARNED = False
+
+
+def _warn_sparse_under_spec(forward_batch) -> None:
+    """Warn once when sparse channel-mix and speculation are on together.
+
+    F0078. The sparse SpMV skips zero rows, so its fp32 summation ORDER differs
+    from the dense projection — mathematically equal, not bitwise. The target
+    model under speculation only ever runs verify (M>1, always dense), while a
+    plain server runs the sparse kernel every decode step, so the two disagree by
+    ~1 ULP and a near-tie argmax eventually flips: measured 9/10 on the 10-prompt
+    token-identity gate with sparse on, 10/10 with it off, accept length unchanged
+    (3.38 vs 3.39). Nothing is silently switched here on purpose. Disabling sparse
+    inside this process would NOT restore the guarantee — the mismatch is against
+    a separate plain server we do not control — and it would cost ~1.8%, since the
+    only sparse work left under speculation is the draft model's own decode
+    (7.2B long-form: spec 178.2 tok/s with sparse, 175.1 without). The guarantee
+    is against a plain server in the SAME kernel configuration; to verify it, run
+    both with RWKV_SPARSE_FFN=0."""
+    global _SPARSE_SPEC_WARNED
+    if _SPARSE_SPEC_WARNED or not _spec_enabled(forward_batch):
+        return
+    _SPARSE_SPEC_WARNED = True
+    import sys
+
+    print(
+        "[rwkv7] WARNING: RWKV_SPARSE_FFN=1 with speculative decoding. The sparse "
+        "channel-mix is bsz1-decode-only, so the target's verify path (M>1) uses the "
+        "dense projection instead — a different fp32 summation order. Output stays "
+        "self-consistent, but it is NOT guaranteed token-identical to a plain server "
+        "that has sparse ON (measured 9/10 on the identity gate; 10/10 with sparse "
+        "off on both). Set RWKV_SPARSE_FFN=0 on both servers to verify identity. "
+        "F0078.",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _proj_gemv(
     layer, x: torch.Tensor, fast: bool, is_target_verify: bool = False
 ) -> torch.Tensor:
@@ -1214,6 +1265,11 @@ class Rwkv7FeedForward(nn.Module):
         k = _proj_gemv(self.key, xk, self._fast, itv)
         # M6 sparse value-projection on the eligible bsz1-decode path (kernel applies
         # relu()^2 to k internally, then a sparse fp32-accum SpMV skipping zero rows).
+        #
+        # F0078: this path is why speculation cannot be token-compared against a
+        # sparse plain server — see the warning raised in _warn_sparse_under_spec.
+        if self._sparse and self.layer_id == 0:
+            _warn_sparse_under_spec(forward_batch)
         if self._sparse and k.shape[0] == 1 and k.dtype == torch.float16:
             if self._value_tiled is None:
                 if sparse_cmix.available() and sparse_cmix.conforms(self.value.weight):
