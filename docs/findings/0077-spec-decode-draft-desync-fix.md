@@ -1,7 +1,7 @@
 ---
 doc_kind: finding
 finding_id: F0077
-title: "RWKV_SPEC completed to a real net win: the draft rollback was off by one token (accept 1.2 vs alpha 0.7, permanent desync invisible to the correctness gate), the verify's gemv_mb burned M weight passes for bit-invariance (fixed by a shared-weight variant, same bit contract, 2-3.9x on the kernel) — final: 7.2B long-form median 1.58x, best 1.88x, 1.5B 0.87x (draft overhead dominates small targets), gate 10/10 everywhere"
+title: "RWKV_SPEC completed to a real net win: the draft rollback was off by one token (accept 1.2 vs alpha 0.7, permanent desync invisible to the correctness gate), the verify's gemv_mb burned M weight passes for bit-invariance (fixed by a shared-weight variant, same bit contract, 2-3.9x on the kernel) — final: 7.2B long-form median 1.62x (K=6), math 2.44x (K=8), 1.5B 0.87x (draft overhead dominates small targets), gate 10/10 at every size and K"
 last_verified_commit: "sglang fork rwkv7-spec-decode @ b324c5bc3"
 discovered_by: lead (spec completion push), 2026-07-31
 severity: info
@@ -101,12 +101,21 @@ The shape of the result is exactly ADR-0006's economics: the draft costs the sam
 are expensive. At 1.5B the draft+orchestration overhead eats the acceptance profit
 at alpha≈0.7; at 7.2B every prompt class clears 1.2x and reasoning/code clear 1.7x.
 
-## Next levers (documented, not yet measured)
+## K sweep (7.2B, measured; gate 10/10 at every K)
 
-K=6-8 on high-accept workloads (7.2B math accept 3.52 at K=4 is not
-ceiling-clipped); a 0.4B draft (alpha up, draft cost x3 — net sign unknown);
-draft-phase trim (~4.1 ms for K graphed 0.1B replays has ~1 ms/step of fill/alloc
-overhead). The 1.5B case likely stays sub-1x at this alpha regardless.
+| K | story | explain | math | code | history | median |
+|---|---|---|---|---|---|---|
+| 4 | 1.23x | 1.35x | 1.88x | 1.77x | 1.57x | **1.58x** |
+| 6 | 1.11x | 1.28x | 1.96x | 2.03x | 1.62x | **1.62x** |
+| 8 | 1.04x | 1.18x | **2.44x** (219.7 tok/s, accept 6.29) | 2.01x | 1.54x | 1.54x |
+
+Textbook workload dependence: bigger K trades low-accept prompts (story falls
+toward 1x) for reasoning/code (math 2.44x at K=8). K=6 is the best fixed
+median; adaptive K is the obvious follow-up. A 0.4B draft was considered and
+rejected by arithmetic at these settings: its ~2.5x draft cost (+~13 ms/round
+at K=8) cannot be repaid by the at-most (K+1 - 6.29) additional accepted
+tokens per round. Draft-phase trim (~1 ms/step fill/alloc overhead) remains
+open. The 1.5B case stays sub-1x at this alpha regardless of K.
 
 ## Cross-references
 
