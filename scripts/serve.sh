@@ -31,6 +31,18 @@
 #       by M (wins <=4, cuBLAS fallback above), so all-envs-on is optimal per bsz.
 #   statecache: state-aware MambaRadixCache ON (req#3, ~98% high-reuse hit,
 #       TTFT 784->200ms; F0022) + cuda-graph OFF (the pairing F0022 verified).
+#
+# ONE COMBINATION TO AVOID (F0078): speculative decoding with RWKV_SPARSE_FFN=1.
+# The sparse channel-mix is a bsz1-decode kernel whose fp32 summation order differs
+# from the dense projection; a speculating server's target only ever verifies (M>1,
+# always dense), so its output is not token-identical to a plain server that HAS
+# sparse on -- measured 9/10 on bench/spec_gate.py, 10/10 with sparse off on both,
+# accept length unchanged. It is also slower: sparse buys +30% on plain decode and
+# nothing under speculation (7.2B long-form: spec 178.2 vs 175.1 tok/s), so with it
+# on, speculation loses to plain on short prompts (131.5 vs 139.0) while also being
+# ungated. Run speculation with RWKV_SPARSE_FFN=0; the model prints a one-time
+# warning if you do not. The best CORRECT speculative config still beats the best
+# plain one (175.1 vs 142.2 = 1.23x, gate 10/10).
 set -euo pipefail
 
 MODEL="${MODEL:?set MODEL=/path/to/rwkv7-model-dir}"
