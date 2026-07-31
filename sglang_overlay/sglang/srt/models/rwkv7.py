@@ -534,58 +534,73 @@ def _linear_backend(forward_batch: ForwardBatch):
     return ab.linear_attn_backend
 
 
-def _proj_gemv(layer, x: torch.Tensor, fast: bool) -> torch.Tensor:
+def _proj_gemv(
+    layer, x: torch.Tensor, fast: bool, is_target_verify: bool = False
+) -> torch.Tensor:
     """r/k/v/o/ffn projection. W4Linear self-dispatches (int4 GEMV at M==1). Otherwise
     uses the fused fp16 GEMV ONLY on the eligible single-row decode path; anything the
     kernel can't handle falls back to the quant-aware sglang linear (never crashes).
     All these projections are bias-free, so gemv_m1 (no bias) is a drop-in. Eligibility
     mirrors the kernel's requirements so an odd-shaped checkpoint degrades gracefully:
-    fast + M==1 + fp16 activation + fp16 contiguous weight + K%4==0 + N even."""
+    fast + M==1 + fp16 activation + fp16 contiguous weight + K%4==0 + N even.
+
+    `is_target_verify` (default False, so every existing call site is byte-for-byte
+    unchanged unless explicitly opted in): chain speculative decoding's TARGET_VERIFY
+    forward feeds M = bs*K rows through this same projection in one call. Plain
+    `layer(x)[0]` there is a batched cuBLAS GEMM whose reduction order can differ from
+    the M==1 GEMV that produced the tokens being verified against — occasionally
+    flipping a near-tie argmax (F0077: spec_gate.py's residual 9/10 flip, diagnosed to
+    this call). `gemv_mb` is row-for-row bit-identical to `gemv_m1` at the same (N,K)
+    config (bench/verify_gemv_mb.py), so routing M>1 through it makes the verify path
+    agree with the M==1 baseline by construction."""
     if _CALIB and getattr(layer, "_qname", None):
         _calib_accumulate(layer._qname, x)
     if isinstance(layer, (W4Linear, W8Linear)):
         return layer(x)
-    if (
-        fast
-        and x.shape[0] == 1
-        and x.dtype == torch.float16
-        and (x.shape[-1] % 4) == 0
-    ):
+    if fast and x.dtype == torch.float16 and (x.shape[-1] % 4) == 0:
         w = layer.weight
         if (
             w.dtype == torch.float16
             and w.is_contiguous()
             and (w.shape[0] % 2) == 0
         ):
-            return fast_linear.gemv_m1(x, w)
+            if x.shape[0] == 1:
+                return fast_linear.gemv_m1(x, w)
+            if is_target_verify and x.shape[0] > 1:
+                return fast_linear.gemv_mb(x, w)
     return layer(x)[0]
 
 
-def _proj_gemv_sqrelu(layer, x: torch.Tensor, fast: bool) -> torch.Tensor:
+def _proj_gemv_sqrelu(
+    layer, x: torch.Tensor, fast: bool, is_target_verify: bool = False
+) -> torch.Tensor:
     """FFN channel-mix key projection FOLLOWED BY relu(.)**2, with the activation fused
     into the GEMV epilogue on the eligible unquantized fp16 M==1 decode path. Drop-in
     for ``torch.relu(_proj_gemv(layer, x, fast)) ** 2``: identical eligibility (mirrors
     _proj_gemv exactly), and bit-identical output (bench/test_sqrelu_gate.py — the fused
     kernel reproduces torch's two-step fp16 rounding). Any path the fused kernel can't
     take falls back to the plain projection + torch sqrelu, so bsz>1 / quantized /
-    odd-shaped checkpoints behave exactly as before."""
+    odd-shaped checkpoints behave exactly as before.
+
+    `is_target_verify` routes the M>1 verify rows through `gemv_mb` + torch sqrelu for
+    the same batch-invariance reason as `_proj_gemv` — and it composes: the fused
+    epilogue is bit-identical to torch's two-step rounding (bench/test_sqrelu_gate.py),
+    so gemv_mb + torch sqrelu at verify reproduces gemv_m1_sqrelu at decode exactly."""
     if _CALIB and getattr(layer, "_qname", None):
         _calib_accumulate(layer._qname, x)
     if isinstance(layer, (W4Linear, W8Linear)):
         return torch.relu(layer(x)) ** 2
-    if (
-        fast
-        and x.shape[0] == 1
-        and x.dtype == torch.float16
-        and (x.shape[-1] % 4) == 0
-    ):
+    if fast and x.dtype == torch.float16 and (x.shape[-1] % 4) == 0:
         w = layer.weight
         if (
             w.dtype == torch.float16
             and w.is_contiguous()
             and (w.shape[0] % 2) == 0
         ):
-            return fast_linear.gemv_m1_sqrelu(x, w)
+            if x.shape[0] == 1:
+                return fast_linear.gemv_m1_sqrelu(x, w)
+            if is_target_verify and x.shape[0] > 1:
+                return torch.relu(fast_linear.gemv_mb(x, w)) ** 2
     return torch.relu(layer(x)[0]) ** 2
 
 
@@ -920,9 +935,13 @@ class Rwkv7Attention(nn.Module):
                 y3 = mega.gemv_rkv_m1(xr, xk, xv, wr, wk, wv)  # [3, H]
                 r, k, v = y3[0:1], y3[1:2], y3[2:3]
         if r is None:
-            r = _proj_gemv(self.r_proj, xr, self._fast)
-            k = _proj_gemv(self.k_proj, xk, self._fast)
-            v = _proj_gemv(self.v_proj, xv, self._fast)
+            # F0077: TARGET_VERIFY feeds M = bs*K rows here; gemv_mb keeps those rows
+            # bit-identical to the M==1 decode GEMV the verified tokens came from.
+            # The mega grouped path above is T==1-only, so verify never reaches it.
+            itv = forward_batch.forward_mode.is_target_verify()
+            r = _proj_gemv(self.r_proj, xr, self._fast, itv)
+            k = _proj_gemv(self.k_proj, xk, self._fast, itv)
+            v = _proj_gemv(self.v_proj, xv, self._fast, itv)
 
         if self.layer_id == 0:
             v_first = v
@@ -1115,7 +1134,10 @@ class Rwkv7Attention(nn.Module):
             ):
                 out = mega.gemv_o_m1(o, wo)  # [1, H]
         if out is None:
-            out = _proj_gemv(self.o_proj, o, self._fast)
+            out = _proj_gemv(
+                self.o_proj, o, self._fast,
+                forward_batch.forward_mode.is_target_verify(),
+            )
         return out, v_first
 
 
@@ -1160,6 +1182,9 @@ class Rwkv7FeedForward(nn.Module):
         # boundary kernel; when given, x is None and the shift stage is skipped.
         if xk_pre is None and x.shape[0] == 0:
             return x
+        # F0077: see _proj_gemv — the verify rows must reduce the same way the M==1
+        # decode rows did, or a near-tie argmax can flip and the gate loses a prompt.
+        itv = forward_batch.forward_mode.is_target_verify()
         be = _linear_backend(forward_batch)
         # R2: fused paged token-shift + 1-way lerp (falls back to token_shift + torch lerp)
         xk = xk_pre if xk_pre is not None else be.try_fused_shift_lerp1(x, self.layer_id, 1, self.x_k, forward_batch)
@@ -1184,9 +1209,9 @@ class Rwkv7FeedForward(nn.Module):
                 _SQRELU_ANNOUNCED = True
                 print("[rwkv7] W1 fused ffn sqrelu epilogue ENABLED (fp16 bsz1 decode)",
                       file=sys.stderr, flush=True)
-            act = _proj_gemv_sqrelu(self.key, xk, self._fast)
-            return _proj_gemv(self.value, act, self._fast)
-        k = _proj_gemv(self.key, xk, self._fast)
+            act = _proj_gemv_sqrelu(self.key, xk, self._fast, itv)
+            return _proj_gemv(self.value, act, self._fast, itv)
+        k = _proj_gemv(self.key, xk, self._fast, itv)
         # M6 sparse value-projection on the eligible bsz1-decode path (kernel applies
         # relu()^2 to k internally, then a sparse fp32-accum SpMV skipping zero rows).
         if self._sparse and k.shape[0] == 1 and k.dtype == torch.float16:
@@ -1224,7 +1249,7 @@ class Rwkv7FeedForward(nn.Module):
             zf = (act == 0).float().mean().item()
             print(f"[sparsity] L{self.layer_id} rows={act.shape[0]} zero_frac={zf:.4f}",
                   file=sys.stderr, flush=True)
-        out = _proj_gemv(self.value, act, self._fast)
+        out = _proj_gemv(self.value, act, self._fast, itv)
         return out
 
 

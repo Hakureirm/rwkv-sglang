@@ -1171,8 +1171,9 @@ official/README reference numbers (bottom panel). Regenerate:
 
 §7 and §7a compare per-card single-stream and large-batch numbers against Albatross at a fixed
 point in time. This section tracks one number over time instead: **7.2B bsz1 on a single RTX
-5090** — fp16 weights + fp32 WKV state, sgl.Engine end-to-end serving (the real request path,
-scheduler included), cuda-graph ON, radix cache OFF, our standard 64-in/256-out shape —
+5090** — fp16 weights + fp32 WKV state, sglang HTTP server (`launch_server` + `/generate`,
+timed by `bench/bsz_throughput.py` at c=1) end-to-end serving (the real request path, scheduler
+included), cuda-graph ON, radix cache OFF, our standard 64-in/256-out shape —
 through the whole megakernel/PDL/fusion effort (task #50/#57, 2026-07-18 through 2026-07-21).
 Every row below traces to one finding; nothing here is a fresh measurement for this table.
 
@@ -1233,7 +1234,7 @@ comparison point. Against this same-session number instead of the published one,
 **Framing caveat — read before quoting "92.0% of Bo" elsewhere.** Bo's 155.2 is
 kernel-harness event timing — his own forward-loop + CUDA-event benchmark, no scheduler, no
 API (the same class of measurement §7/§7a already characterize Albatross by). Our 142.8 is
-sgl.Engine end-to-end serving bsz1 — the real request path, scheduler included. These are not
+sglang HTTP-server end-to-end serving bsz1 — the real request path, scheduler included. These are not
 identical instrumentation. What narrows the gap: F0063 measured our own flagship config under
 both framings side by side and found them within ~1.4% of each other (137.8 tok/s serving vs
 136.43 tok/s kernel-loop) — at bsz1 the GPU timeline is contiguous with no inter-step host

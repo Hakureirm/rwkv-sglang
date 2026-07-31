@@ -1031,8 +1031,9 @@ cp.async 竞态修复(`ff144b6b`),并新增了 `faster3a_2607` 树("only tuned f
 ## 7a-flagship. 单流 megakernel 阶梯:对阵 Bo 的旗舰 bsz1 故事
 
 §7 和 §7a 是在某个时间点上比较逐卡单流与大批量数字。本节反过来追踪同一个数字随时间的
-变化:**单张 RTX 5090 上的 7.2B bsz1**——fp16 权重 + fp32 WKV state,sgl.Engine 全程计时
-服务口径(真实请求路径,含调度器),cuda-graph 开,radix cache 关,我们的标准 64 进/256 出
+变化:**单张 RTX 5090 上的 7.2B bsz1**——fp16 权重 + fp32 WKV state,sglang HTTP 服务端
+(`launch_server` + `/generate`,`bench/bsz_throughput.py` c=1)全程计时的服务口径(真实
+请求路径,含调度器),cuda-graph 开,radix cache 关,我们的标准 64 进/256 出
 形状——贯穿整个 megakernel/PDL/融合工作(task #50/#57,2026-07-18 到 2026-07-21)。下表
 每一行都能追到一篇具体 finding;本表本身不含任何新测。
 
@@ -1084,7 +1085,7 @@ D 腿起算,不挂接到某个具体的"1.5B 锚点"。这里不发布 1.5B 对 
 
 **口径护栏——引用"92.0% of Bo"之前先读这条。** Bo 的 155.2 是 kernel-harness 的
 event-timing——他自己的前向循环 + CUDA-event 基准,没有调度器、没有 API(和 §7/§7a 已经
-定性 Albatross 的那类测量是同一类)。我们的 142.8 是 sgl.Engine 全程计时服务下的
+定性 Albatross 的那类测量是同一类)。我们的 142.8 是 sglang HTTP 服务端全程计时下的
 bsz1——真实请求路径,含调度器。两者的测量装置并不完全相同。但缺口被这一点收窄:F0063
 曾把我们自己的旗舰配置同时放进这两种口径测,结果相差仅约 1.4%(137.8 tok/s 服务 对
 136.43 tok/s kernel-loop)——bsz1 时 GPU 时间线是连续的、步间没有 host 侧空闲,所以在
