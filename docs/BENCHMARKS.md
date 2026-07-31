@@ -63,7 +63,7 @@ its numbers are ~2× lower for batched decode and are never quoted against the c
 |---|---:|---|
 | 1.5B fp16 (RTX 5090) | **22,175** (512 [concurrency](#g-concurrency)) | §5 |
 | 1.5B int8 [w8a8](#g-tiers) (RTX 3090) | **9,851** (256 concurrency) | §5 |
-| 7.2B (RTX 5090) | same protocol c128 = 7,087; peak-concurrency pending a megakernel-round re-measure | §5 |
+| 7.2B (RTX 5090) | **8,277** (320 concurrency) | §5 · re-measured 2026-08-01 on sglang main, F0078 |
 
 **Accuracy (the two official [rulers](#g-bpb) + [correctness](#g-oracle))**
 
@@ -81,6 +81,15 @@ its numbers are ~2× lower for batched decode and are never quoted against the c
 > ⚠️ Framing note: some concurrency/peak values were measured pre-megakernel and are being re-measured
 > to a uniform "fully-optimized, same-precision" bar; the bsz1 flagship (142.8 / 514.5) and
 > accuracy/correctness are current. When a number looks off, trust the dated section with its raw file.
+>
+> The 7.2B row is now off that list: re-measured 2026-08-01 on the megakernel-round stack, on
+> sglang main, peak **8,277 tok/s @ c320** (greedy fixture 8/8 EXACT on the same server before
+> timing). Two things worth carrying with it. The published `c128 = 7,087` reproduces at
+> **7,078.5** — 0.12% apart, so the large-batch figures transfer to main as they stand, unlike
+> the bsz1 number, which needed the F0078 graft repair to get there. And the top is a plateau,
+> not a peak: c256 through c512 all read 7.9–8.3k (8277 / 7887 / 8181 / 7944), so 320 is where
+> the best sample landed rather than a sharp optimum, and quoting it as "the" peak overstates
+> the precision of the maximum by roughly the width of that band.
 
 ---
 
