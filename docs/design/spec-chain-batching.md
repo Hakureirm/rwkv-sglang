@@ -59,13 +59,79 @@ Fixed, the ratio holds near 1.5x. Linear in bs, it becomes 53.6 ms at bs=8, the 
 72.5 ms, and speculation lands at ~387 against plain's 731 — a 0.53x, i.e. a large loss. The
 two answers differ by a factor of three, so the number is not usable until this is settled.
 
-Structurally most of the round is the two forwards, both of which scale well, which argues
-for the optimistic branch — but that is an argument, not a measurement. A `RWKV_SPEC_TIMING=1`
-run was attempted and is **not** usable: it reported 95 ms/round with the draft phase at 70%,
-which cannot be right when five 0.1B forwards measure 2.5 ms, because the instrumentation
-syncs per phase and the 50-round window includes Triton first-compiles and graph warmup. The
-redo needs a steady-state window (discard the first hundred rounds) and ideally a
-sync-free accounting.
+### Settled: the phase that scales is a Python loop over the lm_head
+
+`RWKV_SPEC_TIMING=1` reports a **cumulative** average, so a long generation gives two windows
+whose difference is the steady state. Over 50 rounds it read 95.74 ms/round (Triton
+first-compiles and graph warmup dominating); over 100, 57.75. Differencing —
+`2·x(100) − x(50)` — gives rounds 51-100:
+
+| phase | steady ms/round | share | how it scales with bs |
+|---|---:|---:|---|
+| target_fwd | 13.91 | 70% | ~flat (48× the rows costs 46% more) |
+| draft | 3.11 | 16% | sublinear (0.50 → 1.08 ms for bs 1 → 8) |
+| **head_recompute** | **1.90** | **10%** | **linear in bs·K** |
+| sample_commit | 0.26 | 1% | vectorized upstream, ~flat |
+| rollback_glue / gap / prep | 0.56 | 3% | ~fixed |
+| **total** | **19.74** | | |
+
+That total is worth pausing on: an independent estimate from the measured throughput
+(175.1 tok/s ÷ accept 3.51) gives 20.05 ms/round. Two unrelated routes agreeing to 1.5% is
+what makes the split trustworthy — and it also retires the "95 ms/round, draft at 70%" reading,
+which was warmup, not signal. The draft's steady 3.11 ms across five 0.1B steps matches its
+independently measured 0.50 ms forward, which is the second consistency check.
+
+**`head_recompute` is the answer to the open question.** It is this, in `_verify_round`:
+
+```python
+logits_output.next_token_logits = torch.cat(
+    [torch.matmul(h[i:i+1], w.t()).float()[:, :vocab] for i in range(h.shape[0])], dim=0)
+```
+
+A Python loop over every one of the `bs·K` verify rows, each doing a separate `[1,H]@[H,V]`
+against the full lm_head — 4096×65536 fp16, 536 MB, **re-read once per row**. Six rows is
+3.2 GB of weight traffic, which at this card's bandwidth is ~1.9 ms: exactly what the timer
+measures. It exists for a correctness reason (a batched `[M,H]@[H,V]` has a different cuBLAS
+reduction order than the M=1 projection the baseline decode uses, and that flips near-ties —
+the F0031 class), and it is the one cost in the round that grows linearly with batch.
+
+Carrying each phase to bs=8, K=6 with its own scaling:
+
+| | bs=1 | bs=8, loop kept | bs=8, loop replaced |
+|---|---:|---:|---:|
+| target_fwd | 13.91 | ~18 | ~18 |
+| draft | 3.11 | ~6.7 | ~6.7 |
+| head_recompute | 1.90 | **~15.2** | ~0.5 |
+| rest | 0.82 | ~1.1 | ~1.1 |
+| round | 19.74 | ~41 | ~26.3 |
+| spec tok/s | 175 | ~685 | ~1068 |
+| plain tok/s (measured) | 108.2 | 731.1 | 731.1 |
+| **ratio** | **1.62x** | **0.94x** | **1.46x** |
+
+So the batching decision is not really about batching. **With that loop in place, speculation
+at bs=8 is a net loss; without it, it is 1.46x.** Everything in the section below is
+conditional on replacing it first.
+
+### Replacing it is not a one-liner, and here is the trap
+
+`gemv_mb` is the obvious candidate — it is exactly a shared-weight M-row GEMV that keeps one
+weight pass and is row-for-row bit-identical (bench/verify_gemv_mb.py). But its bit-identity
+contract is against **our** `gemv_m1`, while this loop's contract is against **cuBLAS at
+M=1**, which is what the plain decode's lm_head actually runs. Swapping it in would make
+verify agree with a baseline we do not have, and the identity gate would fail — the same trap
+in the opposite direction from the sparse finding in F0078.
+
+The honest options, in order of preference:
+
+1. Route the lm_head through the same batch-invariant kernel on **both** paths — plain decode
+   and verify. Then one weight pass serves all rows and identity is structural rather than
+   maintained by brute force. This changes plain decode's numerics (cuBLAS → our GEMV), so it
+   needs the numeric-oracle gate, not just the spec gate. It is also worth ~9% at bs=1 on its
+   own, independent of batching.
+2. Chunk the loop to `min(8, rows)` per `gemv_mb` call *if* option 1 lands, since the
+   shared-weight variant is capped at M≤8 (above it the kernel still burns M weight passes,
+   just in one launch).
+3. Leave it and cap speculation at bs=1, which is the status quo the F0078 guard enforces.
 
 Everything after this section assumes that check came back positive.
 
