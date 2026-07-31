@@ -22,6 +22,51 @@ So the first task is not implementation, it is an economics check:
 > predicted ratio is below ~1.1x at bs=4, the work below is not worth doing and the honest
 > product statement is "speculation is a single-stream latency feature".
 
+### The measurement, and how far it gets
+
+Cost-vs-batch, 7.2B target and 0.1B draft, sparse off, same card and session. A decode
+forward at concurrency C processes C rows, so this *is* the cost-vs-row-count curve, and a
+verify forward processes `bs*K` rows — which is why the target was swept past 32.
+
+| rows | target fwd | target agg | draft fwd |
+|---:|---:|---:|---:|
+| 1 | 9.24 ms | 108.2 tok/s | 0.50 ms |
+| 2 | 10.24 | 195.3 | 0.92 |
+| 4 | 10.71 | 373.5 | 0.91 |
+| 8 | 10.94 | 731.1 | 1.08 |
+| 16 | 11.54 | 1387.0 | — |
+| 24 | 11.95 | 2009.1 | — |
+| 32 | 12.37 | 2586.4 | — |
+| 48 | 13.49 | 3558.0 | — |
+
+The shape that matters: **the target's forward is nearly flat in row count** — 46% more time
+for 48× the rows. It is bandwidth-bound on weights, so a verify that checks `bs*K` rows costs
+barely more than one checking `K`. That is the structural reason speculation suits this model
+family, and it does not weaken with batch.
+
+Modelling a round as `(K-1)·draft_fwd(bs) + target_fwd(bs·K) + overhead`, and solving for
+`overhead` from the measured bs=1 point (175.1 tok/s at accept 3.51, K=6) gives ~6.7 ms:
+
+| bs | plain (measured) | spec (predicted) | ratio |
+|---:|---:|---:|---:|
+| 1 | 108.2 | 175.1 | 1.62 (calibration point) |
+| 2 | 195.3 | ~311 | ~1.59 |
+| 4 | 373.5 | ~605 | ~1.62 |
+| 8 | 731.1 | ~1097 | ~1.50 |
+
+**The whole table hangs on one unknown: whether that 6.7 ms/round is fixed or per-request.**
+Fixed, the ratio holds near 1.5x. Linear in bs, it becomes 53.6 ms at bs=8, the round costs
+72.5 ms, and speculation lands at ~387 against plain's 731 — a 0.53x, i.e. a large loss. The
+two answers differ by a factor of three, so the number is not usable until this is settled.
+
+Structurally most of the round is the two forwards, both of which scale well, which argues
+for the optimistic branch — but that is an argument, not a measurement. A `RWKV_SPEC_TIMING=1`
+run was attempted and is **not** usable: it reported 95 ms/round with the draft phase at 70%,
+which cannot be right when five 0.1B forwards measure 2.5 ms, because the instrumentation
+syncs per phase and the 50-round window includes Triton first-compiles and graph warmup. The
+redo needs a steady-state window (discard the first hundred rounds) and ideally a
+sync-free accounting.
+
 Everything after this section assumes that check came back positive.
 
 ## What is already batched, and must not be rebuilt
