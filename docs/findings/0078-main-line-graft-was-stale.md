@@ -170,6 +170,29 @@ The same server on `bench/bsz_throughput.py`'s synthetic shape reads 249.0 vs 14
 Do not quote that as a workload number: random `input_ids` with `ignore_eos` decode into
 degenerate repetition, which a draft model predicts almost perfectly.
 
+## Size dependence: speculation is a large-target feature, and 1.5B is past the edge
+
+Same protocol, same stack, same 0.1B draft, K=6, sparse off, measured 2026-08-01:
+
+| target | plain median | spec median | ratio |
+|---|---:|---:|---:|
+| 7.2B | 142.2 (sparse on, its best) | 193.5 | **1.36x** |
+| 1.5B | 435.0 | 285.7 | **0.66x** |
+
+Every 1.5B prompt is a loss, and not because the draft agrees less — accept lengths come
+back 2.81-3.61, the same band as the 7.2B's. The target is simply too cheap: a 1.5B plain
+step is 2.30 ms, so a round that spends the draft chain plus a verify to buy ~3 tokens cannot
+win. The ratio the draft has to overcome scales with how much bigger the target is, and
+0.1B against 1.5B is 6.7% where 0.1B against 7.2B is 1.4%.
+
+F0077 recorded this as 0.87x. It is worse now (0.66x) for the reason that keeps recurring in
+this finding: the plain baseline got faster while the draft chain did not. Against the 1.5B's
+*best* configuration (sparse on, 516 tok/s) it would read 0.55x.
+
+So the rule to ship with the feature is a size rule, not a tuning knob: speculation is for
+the large targets. Somewhere between 1.5B and 7.2B it crosses 1.0x, and nothing measured here
+locates that crossing.
+
 ## Speculation has never run under concurrency, and does not
 
 Every speculative number in this project — tonight's and F0077's — is bsz1 and sequential.
