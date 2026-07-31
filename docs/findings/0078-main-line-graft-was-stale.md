@@ -190,20 +190,45 @@ source is pool-sized is being filled as if it were per-batch.
 Three runs pin it down. Adaptive K is **not** the cause — fixed K=8 dies identically (a=19
 vs the adaptive run's a=16, same b=109) — and neither is anything repaired tonight: restoring
 the pre-repair model file, config and backend from backup reproduces the identical error.
-This is a pre-existing defect in how the speculative integration meets main's
-`cuda_graph_buffer_registry`, a piece of machinery the 0.5.10 line did not have, and it was
-invisible because no benchmark or gate in this project has ever sent overlapping requests to
-a speculative server.
+It was invisible because no benchmark or gate in this project has ever sent overlapping
+requests to a speculative server.
 
-Consequence for the numbers above: they are correct for what they measure and they measure
-single-stream. Speculative decoding is not deployable behind a real load until this is fixed,
-and that is a stronger caveat than the ratios alone suggest.
+**Cause, at source level.** Patching the registry to print the slot name instead of two bare
+numbers took one run: `slot=positions dst=(6,) src=(105,) raw_bs=1 raw_tokens=6`, and the
+source's first six entries were `[0,1,2,3,4,5]` with an uninitialized tail. `_build_forward`
+derives the draft's batch with `dataclasses.replace` and overrides `extend_lens` and
+`prefix_lens` but not `extend_num_tokens`; `ForwardBatch.init_new` passes that to
+`compute_position`, and `compute_position_triton` allocates `torch.empty(extend_seq_lens_sum)`
+while the kernel fills only what the per-sequence lengths cover. The draft therefore
+inherited the *target's* token count. At bsz1 the two counts coincide and nothing is wrong;
+at 8-way the target prefills ~105 tokens while the draft chunk is 6. One-line fix, and it is
+a contract worth stating generally: **a derived batch must override every field carrying a
+length, because `replace` silently keeps the parent's.**
 
-Same run cleared adaptive K of the other charge: the illegal memory access that made it
-EXPERIMENTAL in F0077 does not reproduce on the repaired stack (40/40 sequential requests
-clean, K distribution {4: 589, 6: 2005, 8: 206}, so it was genuinely switching). Cannot
-reproduce is not fixed — the soak that would settle it is the concurrent one, which the
-crash above blocks — so the default stays off.
+**Behind it, a limit rather than a bug.** With that fixed the batch reaches verify and dies
+on an asynchronous illegal memory access. This worker drives one request's chain at a time —
+snapshot buffers, hand-rolled draft/verify graphs and rollback bookkeeping are all bs=1 and
+worker-shared — so a batch of 2+ walks off the end of the snapshot stack. That is also, in
+hindsight, the failure F0077 recorded against adaptive K and could not explain: a **fixed**
+chain length reproduces it identically, so adaptive K was never the variable. It was
+concurrency all along, and adaptive K happened to be what was running when requests first
+overlapped.
+
+`_verify_round` now refuses a multi-request batch with a message that names the limitation,
+which turns memory corruption into an instruction. Verified both ways: the 8-way soak logs
+zero illegal-access lines and the refusal instead, and single-stream is unchanged — identity
+gate still 10/10, accept 3.39, 107.7 → 131.1 tok/s. The check is per-batch, not on
+`max_running_requests`: that is a capacity, every working single-stream deployment here
+passes 32, and rejecting on capacity would refuse configurations that are fine.
+
+Consequence for the numbers above: they are correct for what they measure and what they
+measure is one stream. Speculative decoding is single-request until the chain is batched,
+which is design work, not a patch.
+
+Adaptive K comes out of this cleared of the charge that made it EXPERIMENTAL, since the IMA
+was never its doing: 40/40 sequential requests clean on the repaired stack, K distribution
+{4: 589, 6: 2005, 8: 206}, genuinely switching. The default stays off anyway — the soak that
+would promote it is the concurrent one, and concurrency is now explicitly out of scope.
 
 ## Corrected elsewhere
 
