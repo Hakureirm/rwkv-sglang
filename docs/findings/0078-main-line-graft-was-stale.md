@@ -260,6 +260,25 @@ artifact (`bench/results/f0066c/c1_72b_F1.json`) records host 127.0.0.1 port 300
 the HTTP server via `bench/bsz_throughput.py` at c=1. The substance — real request path,
 scheduler included — was right; the API name was wrong. Relabelled in both languages.
 
+## The repair, checked at the kernel level
+
+The same trace, re-taken after both repairs, against the two earlier columns:
+
+| | 0.5.10 flagship | main, broken | main, repaired |
+|---|---:|---:|---:|
+| kernels/step | 469.1 | 968.6 | **464.4** |
+| SPAN/step | 7052.1 us | 8118.4 us | **6983.1 us** |
+| → kernel-loop framing | 141.80 tok/s | 123.18 | **143.20** |
+| gap/step | −115.7 us | +17.7 | **−30.3** |
+| overlapped transitions | 96.5% | 33.0% | **95.6%** |
+
+The kernel count lands within 1% of the line that had the glue all along, the PDL chain is
+back (negative gaps mean same-stream consecutive kernels overlapping, which is the signature
+programmatic launch leaves and nothing else does), and main's kernel loop now reads slightly
+*faster* than the 0.5.10 flagship's. This is the check that the e2e number alone cannot give:
+throughput could have been recovered by luck or by a different mechanism, and the kernel
+histogram is what says the specific thing that broke is the specific thing that got fixed.
+
 ## Why the ladder was flat, restated
 
 Once the glue is back the ladder works again (A 139.8 → D 141.7). It was never that the
