@@ -117,6 +117,29 @@ at K=8) cannot be repaid by the at-most (K+1 - 6.29) additional accepted
 tokens per round. Draft-phase trim (~1 ms/step fill/alloc overhead) remains
 open. The 1.5B case stays sub-1x at this alpha regardless of K.
 
+## Post-script: the unified-stack numbers, and adaptive K (experimental)
+
+Full-stack merge check (user directive: one stack, on main): the overlay model
+file + every fused kernel were already grafted into the main-branch tree — the
+missing 26% of baseline was flags, not code. With `RWKV_SPARSE_FFN` and
+explicit `--dtype float16` (+`--attention-backend triton
+--disable-piecewise-cuda-graph`), the main-line 7.2B baseline is **115.1
+tok/s** with all three engagement banners in the log (fused GEMV armed, fused
+LoRA enabled, sparse channel-mix enabled). The remaining gap to the 0.5.10
+line's 142.8 is main-branch per-step runtime overhead, not kernels — unprofiled,
+next on the list. Ratios against the stronger baseline compress accordingly:
+spec K=4 median 1.25x, math 1.53x (absolute spec numbers barely move, because
+sparse FFN accelerates plain bsz1 decode, which the spec path never executes).
+
+Adaptive K (accept-EMA picks k in {4,6,8} per round, per-k verify graphs):
+logic verified — gate 10/10 while switching, K-distribution log engages
+({4:40, 6:134, 8:26}) — but the multi-K replay path dies within a few requests
+on an async illegal memory access surfacing at unrelated Triton first-compiles.
+Fixed-K is 40+ request-lifetimes clean at every k; upfront capture and a
+shared graph memory pool did not cure the adaptive case. Shipped as
+EXPERIMENTAL default-off with the evidence in the commit; a compute-sanitizer
+racecheck session is the follow-up.
+
 ## Cross-references
 
 [[F0029]] (alpha, reconfirmed today) · [[F0030]] (HTTP prototype ruled out) ·
