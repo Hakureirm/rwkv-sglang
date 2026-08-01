@@ -9,15 +9,15 @@
 # ids to every concurrent request (so 64 identical inputs made the union trivially equal to
 # the per-row rate). This uses 64 distinct prompts and reads only post-boot samples.
 set -uo pipefail
-REPO=/data/_mainbench
+REPO="${REPO_DIR:?set REPO_DIR=/path/to/rwkv-sglang checkout}"
 PORT=30084
-OUT=/data/_mainbench/out_union2
+OUT="${OUT_DIR:-/tmp/ffn_union}"
 LOG="$OUT/serve.log"
 mkdir -p "$OUT"
 rm -f "$LOG"
 
 pkill -f sglang.launch_server 2>/dev/null; sleep 6
-( cd "$REPO" && env MODEL=/data/rwkv-sglang/models/rwkv7-1.5b-fla PYTHON=python3 PORT="$PORT" \
+( cd "$REPO" && env MODEL="${MODEL_DIR:?set MODEL_DIR=/path/to/rwkv7-1.5b}" PYTHON=python3 PORT="$PORT" \
     MEMFRAC=0.60 RWKV_STATE_FP16=1 RWKV_MEGA=1 RWKV_WKV_CUDA=1 RWKV_PDL=1 RWKV_LOG_SPARSITY=1 \
     bash scripts/serve.sh -- --disable-cuda-graph > "$LOG" 2>&1 ) &
 for i in $(seq 1 180); do
@@ -27,7 +27,7 @@ done
 grep -q "fired up" "$LOG" || { echo "BOOT_FAILED"; tail -8 "$LOG"; exit 1; }
 echo "server up"
 
-python3 /data/union_client.py "$PORT"
+python3 "$(dirname "$0")/union_client.py" "$PORT"
 
 sleep 3
 echo "--- post-boot samples, 64 DISTINCT prompts ---"
