@@ -98,18 +98,125 @@ Settling it needs asymmetric GPTQ measured on this box, which needs a calibratio
 regenerate Hessians this box no longer has. Until then this stays a hypothesis with one
 striking coincidence behind it.
 
-## A mechanism that would explain it, offered as motivation for the next test rather than as fact
+## The mechanism, with direct evidence — and it is not what I first guessed
 
-GPTQ minimizes layer-wise **output reconstruction error** on calibration text — an objective
-closely related to perplexity. BENCHMARKS §4 already warns, in its own words, that
-perplexity-style rulers badly understate int4's reasoning damage. Put those together and the
-sharper statement is available: an algorithm that optimizes a perplexity-like proxy can trade
-away exactly what that proxy fails to see. The behavioural evidence is consistent — the GPTQ
-arm's failure mode is the documented one, losing the thread and never stopping (truncation
-0.583 versus RTN's 0.379, mean tokens 1032 versus 757), which is a generation-control failure
-rather than confident wrongness.
+The obvious worry about a result like this is that the checkpoint is simply *botched* — a bad
+calibration run rather than a real property of the algorithm. That is checkable offline, with no
+GPU and no calibration data: unpack both checkpoints through the kernel's own nibble convention
+and compare each dequantized matrix against the fp16 weight it came from.
 
-That is a story, not a finding. What is established is the 6.9 points.
+| | relative weight reconstruction error ‖Ŵ−W‖/‖W‖ |
+|---|---:|
+| RTN | **0.1118** |
+| GPTQ | **0.1542** |
+
+**GPTQ's weights are 38% further from the originals than RTN's, on 144 of 144 matrices — every
+single one.**
+
+My first reading of this was "the calibration is broken". It is not, and the distinction
+matters. GPTQ does not minimize ‖Ŵ−W‖; it minimizes the *activation-weighted* error ‖(Ŵ−W)X‖
+on calibration text, and it buys that by deliberately accepting **larger** weight error in
+directions the calibration data says are unimportant. Higher plain weight MSE is GPTQ working
+as designed, not failing. The published evidence agrees it works: F0017 and BENCHMARKS §4 have
+GPTQ beating RTN on lambada by a clear margin at 7.2B (−1.28pt versus RTN's −2.64pt).
+
+So the two facts fit together into one statement, and it is sharper than the hypothesis I
+started with:
+
+> GPTQ knowingly makes the weights less accurate in order to make the calibration-text
+> activations more accurate. That trade wins on lambada and compression. It loses 6.9 points of
+> MATH500.
+
+BENCHMARKS §4 already warns that perplexity-style rulers badly understate int4's reasoning
+damage. This is the same warning one level deeper: an *algorithm* tuned against a
+perplexity-like objective does not merely fail to see reasoning damage, it will actively spend
+weight fidelity to buy improvements the reasoning metric does not want. The behavioural evidence
+is consistent — the GPTQ arm's failure is the documented one, losing the thread and never
+stopping (truncation 0.583 versus RTN's 0.379, mean tokens 1032 versus 757), a
+generation-control failure rather than confident wrongness.
+
+**What is still not ruled out:** that *this particular* calibration was also poor, on top of
+being a bad trade. Separating "the objective is wrong for MATH500" from "these Hessians were
+bad" needs the activation-weighted error measured, which needs a calibration pass this box no
+longer has data for. The 38% figure establishes that GPTQ paid a real price in weight fidelity;
+it does not by itself establish that it got fair value on its own terms.
+
+## Where GPTQ spent it — and a matched control that falls out for free
+
+Breaking the error down by projection kind (`bench/quant_weight_error.py`):
+
+| projection | params | RTN | GPTQ |
+|---|---:|---:|---:|
+| `ffn.value` | 402.7M | 0.1126 | **0.1867** |
+| `attn.v_proj` | 100.7M | 0.1154 | 0.1457 |
+| `attn.o_proj` | 100.7M | 0.1129 | 0.1434 |
+| `attn.r_proj` | 100.7M | 0.1125 | 0.1392 |
+| `attn.k_proj` | 100.7M | 0.1135 | 0.1387 |
+| `ffn.key` | 402.7M | 0.1095 | **0.1340** |
+
+**RTN's error is flat to within 0.006 across every kind** — round-to-nearest cannot concentrate
+error anywhere, it only sees the weight distribution. **GPTQ's is not**: it ranges over 0.053,
+and its worst is `ffn.value`, the projection the state accumulation runs through — the exact
+tensor named in the public claim that 4 bits there "pollutes the state accumulation path".
+F0081's dose experiment could not see that claim's content precisely because it was run on RTN,
+which has no concentration to find.
+
+And the table hands over an ideal control. `ffn.key` and `ffn.value` are the same shape, the
+same 402.7M parameters, and adjacent in the same block — yet GPTQ damages `value` most (0.1867)
+and `key` least (0.1340). So take the shipped GPTQ checkpoint and hand back one of them at a
+time (`bench/quant_restore.py` — surgery, not re-quantization, since re-running GPTQ needs
+Hessians this box no longer has):
+
+- **dose-only** (F0081's rate, position irrelevant): both restores buy the same ~+4.25pp,
+  landing both near **0.194**.
+- **concentration** (GPTQ's loss is *where* it put the error): `value`-restore climbs far
+  higher than `key`-restore, plausibly recovering most of the 6.9-point gap to RTN.
+
+Identical dose, identical shapes, opposite ends of GPTQ's own damage profile. Both checkpoints
+are built; the arms are queued behind the 7.2B sweep.
+
+## The same pathology at 7.2B, measured before its MATH500 lands
+
+| projection | params | RTN | GPTQ |
+|---|---:|---:|---:|
+| `ffn.value` | 2,147.5M | 0.1106 | **0.1954** |
+| `attn.v_proj` | 536.9M | 0.1116 | 0.1380 |
+| `attn.o_proj` | 536.9M | 0.1110 | 0.1370 |
+| `attn.r_proj` | 536.9M | 0.1097 | 0.1367 |
+| `attn.k_proj` | 536.9M | 0.1106 | 0.1348 |
+| `ffn.key` | 2,147.5M | 0.1087 | **0.1328** |
+| **overall** | 4,832M | **0.1100** | **0.1561** (+42%) |
+
+Identical shape to 1.5B and slightly worse: RTN flat within 0.003, GPTQ spread over 0.063, the
+excess concentrated on `ffn.value` — which at 7.2B is 44% of all quantized weight. This is a
+property of the algorithm on this architecture, not a one-off bad run on one model.
+
+**Prediction, recorded before the 7.2B MATH500 arms report:** the GPTQ-versus-RTN inversion
+reproduces at 7.2B. The mechanism that would produce it is present and marginally stronger.
+
+## Why `ffn.value`, and it is our own earlier measurement that explains it
+
+`ffn.value`'s input is `relu(key(x))²` — and [F0080](0080-ffn-sparsity-does-not-batch.md)
+measured exactly what that input looks like: **77–90% of its channels are zero on any given
+token, and which ones are zero is a property of the input, not the channel.** On 64 pieces of
+genuinely different real text the union of live channels was only 6.5–15.8%.
+
+That is the worst possible input distribution for a calibration-based method. GPTQ weights its
+reconstruction by `XᵀX`, so channels the calibration text never activates carry no weight in
+the objective, and GPTQ is free to — and does — let those rows drift in order to buy accuracy
+on the channels the calibration text does light up. On a dense-input projection there is
+nothing to trade, which is precisely why the attention projections sit at 0.135–0.138 while
+`ffn.value` sits at 0.195.
+
+Then a math problem arrives and lights up a different subset. F0080 established that the live
+set barely overlaps across inputs; this finding is the bill for optimizing against one sample
+of it. Two findings that were about unrelated things — a sparse kernel that would not batch,
+and a quantizer that scores badly — turn out to be the same fact seen twice.
+
+This is a hypothesis with the pieces in place, not a proven chain. The `ffn.value` versus
+`ffn.key` surgery is its test: both take sparse-ish inputs but only `value` carries GPTQ's
+excess error, so if the story is right, handing back `value` recovers far more than handing
+back `key`.
 
 ## What follows
 
