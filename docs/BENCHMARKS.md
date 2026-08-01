@@ -180,9 +180,20 @@ full re-run was **bit-identical** (pooled 0.6085, drift −0.0000 over ~7.5M tok
 | 7.2B int4 w4 (rwkv_w4, g64) | 0.5615 | +0.0202 vs 7.2B fp16 |
 
 **[Quantization](#g-quant) costs less at 7.2B than at 1.5B.** [w8a8](#g-tiers): +0.0041 (7.2B) vs +0.0076 (1.5B); [int4](#g-int8):
-+0.0202 (7.2B, plain [RTN](#g-gptq-rtn) `rwkv_w4`) vs +0.0429 (1.5B, the stronger GPTQ) — the 7.2B RTN checkpoint
-degrades *less than half* as much as the 1.5B GPTQ one despite the weaker quantizer, i.e. the larger
++0.0202 (7.2B, plain [RTN](#g-gptq-rtn) `rwkv_w4`) vs +0.0429 (1.5B, GPTQ) — the 7.2B RTN checkpoint
+degrades *less than half* as much as the 1.5B GPTQ one, i.e. the larger
 model absorbs low-bit weights markedly better (`bench/results/uncheatable_full_{w4,w8a8}_7.2b_5090main.json`).
+
+> **Which of GPTQ and RTN is "stronger" depends on the size and the metric, and reverses twice**
+> (F0082, 2026-08-02). This row used to call GPTQ the stronger quantizer; that was an assumption
+> carried across a size boundary, not a matched-size measurement. Collecting every same-size
+> comparison we have: at **0.1B** RTN output is broken outright (repetition collapse — §7 below)
+> while GPTQ stays coherent; at **1.5B** RTN beats GPTQ on MATH500 by **6.9pt** (0.2198 vs 0.1510,
+> separated, same base model to the bit, same speed and size); at **7.2B** the two are tied on
+> MATH500 (0.6205 vs 0.6112, not separated) and GPTQ wins lambada by 1.36pt. So GPTQ wins at the
+> smallest size, loses in the middle, and ties-or-wins at the largest. **What we ship is unchanged**
+> — `w4gptq` remains the recommendation at 7.2B on the 7.2B evidence — but "stronger quantizer" is
+> not a property either one has in general.
 
 **Asymmetric (scale+zero) GPTQ for int4 — a cheap, zero-kernel-change refinement (F0043, 2026-07-07).**
 A clean 3-way rerun on a matched corpus (N=300, since the historical N=7500 corpus is no longer on

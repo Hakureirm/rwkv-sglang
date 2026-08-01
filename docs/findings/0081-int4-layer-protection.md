@@ -204,15 +204,42 @@ protected layer, bought with no measurable accuracy.**
 
 _(ALL4 and the same-stack GPTQ and fp16 references pending.)_
 
+## The flagship: same answer, and the same non-answer
+
+7.2B is 32 layers, so the positional formula moves to `{0, 8, 24, 31}` — 805.3M of the model's
+6,443M quantizable parameters, a 12.5% dose. Same box, same session, avg@8:
+
+| arm | MATH500 | vs RTN (95% CI) | bsz1 |
+|---|---:|---|---:|
+| fp16 | 0.6370 | +0.0165 [−0.0095, +0.0435] not sep. | 109.1 † |
+| RTN (no protection) | 0.6205 | baseline | 246.1 |
+| RTN + `{0,8,24,31}` | 0.6348 | +0.0142 [−0.0140, +0.0420] **not separated** | 212.7 (−13.6%) |
+| GPTQ | 0.6112 | −0.0093 [−0.0405, +0.0220] not sep. | 246.1 |
+
+† handicapped: every arm runs `RWKV_SPARSE_FFN=0` so the arms stay comparable, which costs only
+the unquantized one ~24%. Our published fp16 bsz1 is 143.2. Do not quote 109.1.
+
+The positional formula gives **+1.42pt, not separated, for 13.6% of single-stream throughput** —
+the same shape as 1.5B's +1.90pt for 9.5%. The product conclusion carries to the flagship
+unchanged.
+
+**But be careful reading the 7.2B column: nothing in it separates from anything else, including
+fp16 from int4.** Scores here sit near 0.62 with more heterogeneous problems, so the baseline
+interval is ±3.8pp and paired intervals run to ±3.1pp — a resolution floor around 5–6pp, above
+every effect present. BENCHMARKS §4's avg@64 measurement does resolve GPTQ at −3.1pt from fp16,
+and that remains the better estimate. So 7.2B here says "no intervention is worth its cost at
+any magnitude this screen can see", which is the product answer, and it does **not** say the
+effects are zero.
+
 ## What follows
 
-**Do not adopt mixed precision on our int4 — on either axis.** Seven arms across two axes and
-four doses, and every one lands where its parameter count predicts rather than where its
-mechanism predicts. There is no sensitive layer and no sensitive projection kind to protect;
-int4's damage here is diffuse. The exchange rate is ~1.0pp of MATH500 per 100M parameters
-restored across the entire affordable half of the model, against a strictly linear cost, and
-the half of the weights actually worth paying for is the half that erases the memory saving
-you quantized for.
+**Do not adopt mixed precision on our int4 — on either axis, at either size.** Seven arms at
+1.5B across two axes and four doses, plus the formula at 7.2B, and every one lands where its
+parameter count predicts rather than where its mechanism predicts. There is no sensitive layer
+and no sensitive projection kind to protect; int4's damage here is diffuse. The exchange rate
+is ~1.0pp of MATH500 per 100M parameters restored across the entire affordable half of the
+model, against a strictly linear cost, and the half of the weights actually worth paying for is
+the half that erases the memory saving you quantized for.
 
 This is not a power problem. The screen resolves 4pp, reproduces both published reference
 points, and did separate the two largest-dose arms — it simply found nothing where the

@@ -172,8 +172,40 @@ Hessians this box no longer has):
 - **concentration** (GPTQ's loss is *where* it put the error): `value`-restore climbs far
   higher than `key`-restore, plausibly recovering most of the 6.9-point gap to RTN.
 
-Identical dose, identical shapes, opposite ends of GPTQ's own damage profile. Both checkpoints
-are built; the arms are queued behind the 7.2B sweep.
+Identical dose, identical shapes, opposite ends of GPTQ's own damage profile.
+
+**Result: mostly dose, with a real but marginal concentration component on top.**
+
+| checkpoint | restored | params at fp16 | MATH500 | vs GPTQ (95% CI) |
+|---|---|---:|---:|---|
+| GPTQ | — | 0 | 0.1510 | baseline |
+| GPTQ + `ffn.key` back | 24 matrices | 402.7M | 0.2072 | +0.0562 [+0.0318, +0.0807] SEPARATED |
+| **GPTQ + `ffn.value` back** | 24 matrices | 402.7M | **0.2338** | **+0.0828 [+0.0570, +0.1090] SEPARATED** |
+| _(RTN, for reference)_ | — | 0 | 0.2198 | +0.0688 |
+
+**`value` versus `key`, paired directly: +0.0265, 95% CI [+0.0008, +0.0518] — separated, but
+only just.** The lower bound is eight ten-thousandths above zero. That is the weakest verdict
+this comparator can return, and it should be read as "detectable" rather than "established".
+
+Both predictions on the record were wrong in the same direction, and the honest reading splits
+the difference between them:
+
+- **Dose-only predicted +4.25pt for both.** Both arms beat it — +5.62 and +8.28. So restoring
+  402.7M parameters from *GPTQ* is worth substantially more than restoring the same count from
+  RTN, wherever you take them from. That is the uniform part of GPTQ's excess error (it is
+  worse on 144/144 matrices) and it is the larger share of the effect.
+- **Concentration predicted `value` far above `key`.** It is above, by 2.65pt, and the gap
+  clears zero by a hair rather than by a margin. Concentration is real and it is the *smaller*
+  term, not the dominant one I had claimed before this control existed.
+
+One quantitative consistency worth noting without leaning on it: GPTQ's error ratio between the
+two families is 0.1867 / 0.1340 = **1.39**, and the ratio of what restoring them buys is
+8.28 / 5.62 = **1.47**. Close enough to be suggestive that recovered accuracy tracks removed
+error roughly proportionally, on two points, which is not enough points to claim a law.
+
+A like-for-like check that the story stays coherent: with `ffn.value` at fp16 in both, RTN's
+remaining matrices still beat GPTQ's remaining matrices (0.2622 versus 0.2338, F0081's FFNV arm
+against this one). GPTQ is worse everywhere — somewhat more so on `ffn.value`.
 
 ## The same pathology at 7.2B, measured before its MATH500 lands
 
@@ -185,7 +217,7 @@ are built; the arms are queued behind the 7.2B sweep.
 | `attn.r_proj` | 536.9M | 0.1097 | 0.1367 |
 | `attn.k_proj` | 536.9M | 0.1106 | 0.1348 |
 | `ffn.key` | 2,147.5M | 0.1087 | **0.1328** |
-| **overall** | 4,832M | **0.1100** | **0.1561** (+42%) |
+| **overall** | 6,443M | **0.1100** | **0.1561** (+42%) |
 
 Identical shape to 1.5B and slightly worse: RTN flat within 0.003, GPTQ spread over 0.063, the
 excess concentrated on `ffn.value` — which at 7.2B is 44% of all quantized weight. This is a
@@ -206,11 +238,46 @@ RTN is ahead by 0.9 of a point and the interval comfortably spans zero. The dire
 is inside the noise. **The strong prediction — "the inversion reproduces at 7.2B" — is refuted,
 and the correction below turned out to be the right read of it.**
 
-**A third published reference point reproduced**, which is worth recording because it is what
-licenses every comparison in this finding: GPTQ at 7.2B measures 0.6112 here against BENCHMARKS
-§4's published 0.6108 at avg@64, with truncation 0.136 against the published 14.0%. Three for
-three now — 1.5B fp16 (0.4060 → 0.4020), 1.5B GPTQ (0.1498 → 0.1510), 7.2B GPTQ (0.6108 →
-0.6112) — across two model sizes, two cards and an 8× change in rollout count.
+**"Not separated" at 7.2B means something weaker than it did at 1.5B, and the difference has to
+be stated.** The fp16 ceiling here reads **0.6370** (truncation 0.063 against the published
+6.3%), and neither int4 arm separates from it either: RTN −1.65pt [−4.35, +0.95], GPTQ −2.58pt
+[−5.92, +0.75]. But BENCHMARKS §4's avg@64 measurement puts symmetric GPTQ at −3.1pt from fp16,
+and that is a *real* effect this screen simply cannot see. At 1.5B, where scores sit near 0.22,
+the paired intervals were ±2pp and the screen resolved 4pp. At 7.2B, where scores sit near 0.62
+and problems are more heterogeneous, the baseline interval is ±3.8pp and paired intervals run
+to ±3.1pp — so the resolution floor is roughly **5–6pp**, above the size of every effect in
+play.
+
+So the correct 7.2B statements are bounded, not null:
+
+- int4 is **not** shown lossless at 7.2B here; the published −3.1pt stands as the better
+  estimate, from 8× the rollouts.
+- the GPTQ-versus-RTN gap at 7.2B is **bounded above by roughly 3 points**, not shown to be
+  zero. It is certainly not 6.9.
+
+That is enough to decide the product question and not enough to close the scientific one, and
+those should not be conflated.
+
+**Four published reference points reproduced**, which is what licenses every comparison in this
+finding:
+
+| reference | published (avg@64) | measured here (avg@8) |
+|---|---:|---:|
+| 1.5B fp16 | 0.4060, trunc 14.2% | 0.4020, trunc 0.146 |
+| 1.5B int4 GPTQ | 0.1498, trunc 57.7% | 0.1510, trunc 0.583 |
+| 7.2B int4 GPTQ | 0.6108, trunc 14.0% | 0.6112, trunc 0.136 |
+| 7.2B fp16 | 0.6418, trunc 6.3% | 0.6370, trunc 0.063 |
+
+Four for four on accuracy and on truncation, across two model sizes, two cards, and an 8×
+change in rollout count. The screen is sound; what it lacks at 7.2B is resolution, not
+calibration.
+
+**One number in this run is not our fp16 product number.** The fp16 arm reads 109.1 tok/s at
+bsz1 against the 143.2 we publish, because every arm here runs `RWKV_SPARSE_FFN=0` — the sparse
+channel-mix is ineligible on quantized projections, so it was disabled everywhere to keep the
+arms comparable. That costs the *unquantized* arm about 24% and nothing else. Do not quote
+109.1 anywhere; it is a deliberately handicapped configuration that exists to make the accuracy
+comparison clean.
 
 **And a correction to that prediction, entered before the arms landed rather than after.**
 Re-reading BENCHMARKS §4's own 7.2B table undercuts the strong form of it. There, symmetric
@@ -262,10 +329,22 @@ set barely overlaps across inputs; this finding is the bill for optimizing again
 of it. Two findings that were about unrelated things — a sparse kernel that would not batch,
 and a quantizer that scores badly — turn out to be the same fact seen twice.
 
-This is a hypothesis with the pieces in place, not a proven chain. The `ffn.value` versus
-`ffn.key` surgery is its test: both take sparse-ish inputs but only `value` carries GPTQ's
-excess error, so if the story is right, handing back `value` recovers far more than handing
-back `key`.
+This is a hypothesis with the pieces in place, not a proven chain — and the surgery that tested
+it came back **supporting but modest**. Handing back `ffn.value` does beat handing back
+`ffn.key` at identical dose, by 2.65pt, but the interval clears zero by a hair and the larger
+share of both arms' gain is the uniform excess error GPTQ carries on all 144 matrices. So the
+sparse-input story explains a real component of the damage, not the bulk of it.
+
+The honest ordering of causes for GPTQ's 6.9-point loss at 1.5B, from this evidence:
+
+1. **GPTQ is uniformly worse** — 38% higher weight error on every matrix. Largest term.
+2. **GPTQ is additionally worse on `ffn.value`**, the sparse-input projection, which costs a
+   further ~2.6pt. Real, marginal, and the part the sparse-activation mechanism explains.
+
+I had written "concentration, decisively" after the first arm and before its control. That was
+the first arm agreeing with a hypothesis I liked, and one arm cannot separate dose from
+placement — which is precisely why the control was built. It is in the record because the
+sequence is the lesson, not the conclusion.
 
 ## What follows
 
