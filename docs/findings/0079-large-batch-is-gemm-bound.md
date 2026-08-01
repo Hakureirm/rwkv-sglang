@@ -1,6 +1,8 @@
 # F0079 — the large-batch step is GEMM-bound, and the megakernel line does not reach it
 
-**Status:** OPEN — a lead with numbers, no optimisation attempted yet
+**Status:** CLOSED — the lead this finding named was measured and **does not exist**; see the
+retraction at the end. The profile itself stands and its first two conclusions are the
+useful ones.
 **Date:** 2026-08-01 · 5090 (sm120), 7.2B fp16, sglang main with the F0078 repairs
 **Method:** the same torch-profile → `bench/step_span_from_trace.py` route F0078 used at bsz1,
 re-pointed at a c=320 load so the shapes are the ones large-batch serving actually runs.
@@ -52,12 +54,36 @@ peak. Two smells in the trace point the same way: the selected tiles are `cutlas
 i.e. Ampere-era shapes dispatched onto Blackwell, and there are 132 `splitKreduce_kernel`
 launches per step, which is the split-K path paying a reduction pass.
 
-## What this does not establish
+## Retraction: there is no GEMM headroom, and the "third of peak" was my error
 
-It does not show the GEMM *can* be made faster here — a third of peak is not automatically
-recoverable, the shapes are skinny (M=320 against K=N=4096), and cuBLAS may already be
-choosing well for them. It names where the time is and what to measure next: a standalone
-sweep of these exact shapes against cuBLAS defaults, cuBLASLt heuristics with split-K
-disabled, and the sm120-native tile set, before any kernel is written. The int8 tier already
-has a hand-written s8-wmma GEMM in this repo, so the question of whether an fp16 counterpart
-pays is answerable with the machinery that exists.
+The section above said to measure the shapes standalone before writing any kernel. Doing
+that immediately killed the lead:
+
+| shape | achieved |
+|---|---:|
+| r/k/v/o projection, M=320, K=N=4096 | **223.2 TFLOP/s** |
+| ffn key, M=320, K=4096, N=16384 | 223.2 |
+| ffn value, M=320, K=16384, N=4096 | 228.5 |
+| square 4096³ — the friendliest shape there is | 225.0 |
+| square 8192³ | 227.8 |
+
+**The skinny shape runs at the same rate as the friendliest one.** There is no shape penalty
+and no dispatch problem; toggling `allow_fp16_reduced_precision_reduction`, the one split-K
+knob torch exposes, changes nothing (220.8 vs 221.9, noise). The `cutlass_80_*` tile names
+and the splitK launches were real observations that turned out to mean nothing — the library
+picks Ampere-lineage tiles because they are the right ones here, not because it failed to
+notice the architecture.
+
+The "roughly a third of peak" claim was a bad comparison, and the bad part was mine: I
+divided by the fp16-accumulate marketing number. PyTorch accumulates fp16 matmuls in fp32,
+and this card's dense fp32-accumulate rate is in the 210–225 band — which is exactly where
+every one of these GEMMs already sits. They are at the ceiling, not a third of it.
+
+What survives is the profile's first two findings, and they are the ones worth carrying:
+the megakernel/PDL ladder is a bsz1 lever (95.6% → 19.8% overlap), and 58% of the
+large-batch step is library GEMM that none of our kernels touch. The correct reading of
+that is now the opposite of what this finding first suggested: the large-batch path spends
+most of its time in code that is already running at hardware speed, so effort aimed there
+should go at *removing work* — fewer or smaller GEMMs, quantisation, sparsity — rather than
+at making the existing GEMMs faster. The int8 tier winning at 7.2B (8,756 vs 8,277, F0078)
+is exactly that kind of lever, and it is already in the tree.
