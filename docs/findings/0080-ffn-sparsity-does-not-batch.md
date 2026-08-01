@@ -1,7 +1,7 @@
 # F0080 — the channel-mix sparsity is mostly input-dependent, so it does not batch
 
-**Status:** CLOSED for the question it asked (can the sparse FFN kernel serve M>1) ·
-**OPEN** for the one it uncovered (a ~16% always-dead core worth a pruning look)
+**Status:** CLOSED, both questions — the kernel cannot batch, and the always-dead core it
+seemed to uncover shrinks under a better sample rather than holding up
 **Date:** 2026-08-01 · 5090, RWKV-7 1.5B fp16, sglang main
 
 ## The question
@@ -46,12 +46,27 @@ weight rows against the ~85% it skips at bs=1, and the union can only shrink fur
 batch. That is a decisive negative result, and it is cheaper to have it as a measurement than
 as a half-finished kernel.
 
-**A ~16% always-dead core is worth a look, separately.** If those channels are dead across
-inputs generally — not just across these 64 — they are static pruning candidates, which beats
-a sparse kernel outright because it costs nothing at runtime. This measurement does not
-establish that: the prompts were random token ids rather than natural text, one model, one
-batch, short generations. The follow-up is a wider sample over real corpora before anyone
-touches a weight.
+**The ~16% always-dead core does not survive a better sample.** It looked like a static
+pruning candidate — dead channels cost nothing to remove and beat any sparse kernel — so the
+caveat attached to it (random token ids drive the model off-distribution) was worth spending
+a run on. Repeated with 64 pieces of genuinely different natural text (English and Chinese
+prose, code, SQL, dialogue, clinical notes, German, a legal clause):
+
+| prompts | per-row zero | union over 64 |
+|---|---:|---:|
+| random token ids | 0.77 – 0.90 | 0.10 – 0.24 |
+| **real text** | 0.78 – 0.89 | **0.065 – 0.158** |
+
+The per-row rate is unchanged; the union *falls*. A genuine always-dead set would not care
+what the inputs are — it would hold or grow as the sample gets more representative. Shrinking
+under a better sample is the signature of the other thing: no dead set, just a tail of rarely
+active channels, and the tail thins as you look at more inputs. With 64 prompts it reads 12%,
+and there is no reason to expect anything left at 640.
+
+So the pruning lead closes too. This is worth one more sentence than the result deserves,
+because the shape of the mistake recurs: the encouraging number came from the *less*
+representative sample, and the instinct on seeing it was to plan the follow-up work rather
+than to attack the sample first.
 
 ## Two traps this probe walked into first, recorded because they generalise
 
