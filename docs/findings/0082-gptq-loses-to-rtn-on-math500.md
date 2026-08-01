@@ -1,10 +1,10 @@
 ---
 doc_kind: finding
 finding_id: F0082
-title: "On MATH500 our calibrated int4 (GPTQ) is 6.9 points WORSE than plain round-to-nearest — separated, same base model, same session — and the w4gptq checkpoints are what we publish"
+title: "At 1.5B, our calibrated int4 (GPTQ) is 6.9 points WORSE on MATH500 than plain round-to-nearest — separated, same base model, same session. GPTQ concentrates its weight error on ffn.value at both sizes, which F0080's sparsity result explains; but 7.2B's total quantization damage is only −3.1pt, so the flagship effect is bounded well below the 1.5B one"
 last_verified_commit: "HEAD"
 discovered_by: Fable 5, 5090, 2026-08-02
-severity: high
+severity: medium
 status: open
 related: [F0017, F0043, F0081]
 ---
@@ -194,6 +194,37 @@ property of the algorithm on this architecture, not a one-off bad run on one mod
 **Prediction, recorded before the 7.2B MATH500 arms report:** the GPTQ-versus-RTN inversion
 reproduces at 7.2B. The mechanism that would produce it is present and marginally stronger.
 
+**And a correction to that prediction, entered before the arms landed rather than after.**
+Re-reading BENCHMARKS §4's own 7.2B table undercuts the strong form of it. There, symmetric
+GPTQ costs **−3.1pt** against fp16 (61.08% versus 64.18% at avg@64) where at 1.5B it cost
+−25.6pt. If GPTQ's *total* damage at 7.2B is three points, then RTN cannot beat it by more than
+about three, and the 6.9-point inversion is a 1.5B-scale result that cannot survive at flagship
+scale in anything like that magnitude. The first 7.2B arm is consistent with the small version:
+RTN reads **0.6205** at avg@8 against that published 61.08% — about a point apart, across
+different rollout counts and boxes, which is exactly the cross-run comparison this finding
+exists to stop making. The same-box GPTQ arm settles it.
+
+**This also caps how much the weight-error story can claim.** `ffn.value`'s GPTQ error is
+*worse* at 7.2B (0.1954) than at 1.5B (0.1867), while the MATH500 damage is eight times
+*smaller*. So concentration explains **where** GPTQ puts its error, not **how much that
+costs** — the cost is dominated by model scale, and a bigger model absorbs the same relative
+weight error far better. Any statement of the form "GPTQ's ffn.value damage predicts MATH500
+loss" is wrong as written; the honest version is that it predicts the loss *within* a size, not
+across sizes.
+
+## Supporting context we already published without reading it this way
+
+BENCHMARKS §4's own 7.2B table lists three GPTQ variants: symmetric **61.08%**, hybrid
+(`ffn.value`+`ffn.key` forced symmetric, rest asymmetric) **56.03%**, all-asymmetric
+**47.78%** — a 13-point spread produced purely by encoding choices *within* GPTQ. And the
+ordering **inverts with model size**: at 1.5B asymmetric beat symmetric (0.2199 versus 0.1498),
+at 7.2B it loses to it by 13 points.
+
+A method whose own variants reorder across model sizes is not being reliably steered by its
+objective on this architecture. That was visible in our published numbers before this finding;
+what was missing was the comparison against doing nothing clever at all, which is the one
+configuration that has no knobs to get wrong.
+
 ## Why `ffn.value`, and it is our own earlier measurement that explains it
 
 `ffn.value`'s input is `relu(key(x))²` — and [F0080](0080-ffn-sparsity-does-not-batch.md)
@@ -223,10 +254,17 @@ back `key`.
 - **Do not act on this at 7.2B yet.** 1.5B is not the flagship, and BENCHMARKS §4 already
   documents quantization costing less at 7.2B than at 1.5B, so the inversion may be
   size-dependent. The 7.2B arms (RTN / GPTQ / fp16 / positional-protection) are queued.
-- **Then reconsider what we publish.** ModelScope carries
-  `Hakureirm/rwkv7-g1-{1.5b,7.2b}-w4gptq`. If the inversion holds at 7.2B, we are shipping the
+- **Then reconsider what we publish, but expect a modest change at most.** ModelScope carries
+  `Hakureirm/rwkv7-g1-{1.5b,7.2b}-w4gptq`. If the inversion holds at 7.2B we are shipping the
   worse checkpoint on the metric this repo itself calls "the ruler that decides quantization
-  quality here", at identical speed and identical size.
+  quality here", at identical speed and identical size — but bounded by GPTQ's total −3.1pt
+  there, so at best a few points, not the 1.5B figure.
+- **Be honest that the practical impact may be small even where the result is large.** At 1.5B
+  the inversion is 6.9 points, but int4 at 1.5B is a bad product either way — −18.2pt for RTN
+  against −25.1pt for GPTQ, both far outside what anyone would ship for reasoning. The place
+  the inversion is biggest is the place the tier should not be used at all, and the place the
+  tier is actually good (7.2B, −3.1pt) is where the inversion has almost no room. That is an
+  awkward shape for a finding and it should be stated rather than smoothed over.
 - **Do not overcorrect either.** GPTQ was adopted on lambada and compression evidence, and that
   evidence is not withdrawn by this. The plausible outcome is a genuine metric-dependent split —
   GPTQ better on perplexity-style rulers, worse on reasoning — in which case the honest product
