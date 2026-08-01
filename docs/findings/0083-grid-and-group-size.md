@@ -101,9 +101,16 @@ L2 has just been shown to mispredict across lattices. It gets measured before it
 
 ## What follows
 
-- **For the tier as it ships today, fp4 is the better lattice and it is worth 4.4 points.**
-  Same 4.25 bits per weight, same file size, same bandwidth. That makes the question asked in
-  the group the right one, and the answer yes for our configuration.
+- **At our group size fp4 is the better lattice, worth 4.4 points — against RTN int4, which is
+  not what we ship.** The shipped checkpoint is GPTQ at 0.1510 (F0082), so the gap to it is
+  larger again, and that is a separate number needing its own paired run. Naming "our int4"
+  without saying which one is how these two get conflated.
+- **This measured a lattice, not a deployable tier, and the difference matters.** Both arms
+  were dequantised to fp16 and served on the unquantized path, so what is established is what
+  the grid costs in accuracy. There is no fp4 kernel here: `rwkv7_w4.cu` decodes a uniform
+  lattice with an fp16 group scale and nothing else. "Same 4.25 bits, same bandwidth" is a
+  property of the format, not of anything that ran — the speed side is entirely unmeasured,
+  and an fp4 tier does not exist until that kernel does.
 - **But do not generalise it to "fp4 beats int4".** At matched bit budgets int4 has the lower
   weight error at g16 and g32; only at g64 does fp4 lead. What is measured is one cell, and
   that cell is the one we happen to occupy.
