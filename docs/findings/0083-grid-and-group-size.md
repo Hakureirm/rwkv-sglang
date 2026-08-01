@@ -99,6 +99,55 @@ those errors as tiny; the model apparently does not.
 is that a promising configuration has a promising *L2* number and an unmeasured accuracy, and
 L2 has just been shown to mispredict across lattices. It gets measured before it gets claimed.
 
+## The question that dissolved it: our int4 can just be non-uniform
+
+Asked whether int4 has to be evenly spaced, and whether fp4 needs new hardware. Both have
+the same answer, and it makes the int4-vs-fp4 framing beside the point.
+
+`rwkv7_w4.cu` already converts each nibble to a float before it multiplies:
+
+```
+int q0 = (int)((p >> 0) & 0xF);  q0 -= (q0 & 8) << 1;
+float part = a0.x * (float)q0 + ...
+```
+
+Replacing `(float)q0` with `TABLE[q0]` — sixteen constants — makes the lattice arbitrary. No
+fp4 instruction is ever executed, so it runs on every card the existing int4 runs on rather
+than only on hardware with native fp4. And because the table is ours to choose, it need not be
+E2M1's.
+
+Fitting 15 symmetric levels to RWKV-7's own group-normalised weight distribution by Lloyd-Max:
+
+```
+[-0.9467, -0.7312, -0.5667, -0.4308, -0.3096, -0.2012, -0.0993, -0.0027,
+  0.0927,  0.1926,  0.3003,  0.4190,  0.5554,  0.7185,  0.9402]
+```
+
+| lattice, g64, 4.25 bits/weight | 1.5B | 7.2B |
+|---|---:|---:|
+| int4 uniform | 1.000× | 1.000× |
+| fp4 (E2M1) | 0.950× | 0.964× |
+| **fitted table** | **0.854×** | **0.860×** |
+
+**10% better than fp4 with none of fp4's hardware requirement**, and the table fitted on 1.5B
+transfers to 7.2B untouched — 0.854× against 0.860× — so it is a property of the architecture's
+weight distribution rather than of one checkpoint, which is what allows it to be a compile-time
+constant instead of per-model metadata.
+
+**Speed cost: at most 1.8%.** Two kernels moving byte-identical traffic and differing only in
+the decode measure 0.1309 ms against 0.1332 ms. That is an upper bound rather than an estimate:
+the probe's 8.4 MB working set is L2-resident, which over-weights ALU against the real
+weight-streaming path where a lookup has more to hide behind.
+
+**One caught error, because it would have been a good number.** The first fit produced a
+**17-level** table, which four bits cannot index — the symmetric construction used `(k+1)//2`
+per side instead of `k//2`. It showed 0.786× and was meaningless. Printing the table rather
+than only its error is what caught it.
+
+**What is still not known is what any of it is worth in accuracy**, and this finding is the
+reason not to guess: relative weight error mispredicted fp4 by five times a few hours ago. A
+MATH500 run on the fitted table is in flight.
+
 ## What follows
 
 - **At our group size fp4 is the better lattice, worth 4.4 points — against RTN int4, which is

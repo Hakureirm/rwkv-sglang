@@ -21,12 +21,32 @@ TARGET_SUFFIXES = ("r_proj.weight", "k_proj.weight", "v_proj.weight", "o_proj.we
                    ".key.weight", ".value.weight")
 E2M1 = torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0])
 
+# 15 levels fitted to RWKV-7's own group-normalised weight distribution by Lloyd-Max,
+# symmetric and containing zero so it drops into the existing nibble packing. Fitted on
+# 1.5B; it transfers to 7.2B unchanged (0.854x vs 0.860x relative weight error), so it is
+# a property of the architecture's weights rather than of one checkpoint.
+FITTED15 = torch.tensor([-0.9467, -0.7312, -0.5667, -0.4308, -0.3096, -0.2012, -0.0993,
+                         -0.0027, 0.0927, 0.1926, 0.3003, 0.4190, 0.5554, 0.7185, 0.9402])
+
 
 def through_int4(W, group):
     N, K = W.shape
     Wg = W.float().view(N, K // group, group)
     s = (Wg.abs().amax(2) / 7.0).clamp(min=1e-8)
     return (torch.round(Wg / s[:, :, None]).clamp_(-7, 7) * s[:, :, None]).view(N, K)
+
+
+def through_table(W, group, table):
+    """Snap to an arbitrary 15-level table. The kernel already turns each nibble into a
+    float before multiplying, so a non-uniform table is a lookup rather than a new format
+    and needs no fp4 hardware."""
+    N, K = W.shape
+    Wg = W.float().view(N, K // group, group)
+    s = Wg.abs().amax(2).clamp(min=1e-8)              # table is normalised to +-1
+    x = Wg / s[:, :, None]
+    t = table.to(W.device)
+    idx = (x.unsqueeze(-1) - t).abs().argmin(-1)
+    return (t[idx] * s[:, :, None]).view(N, K)
 
 
 def through_fp4(W, group):
@@ -43,10 +63,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--grid", required=True, choices=["int4", "fp4"])
+    ap.add_argument("--grid", required=True, choices=["int4", "fp4", "table"])
     ap.add_argument("--group", type=int, default=64)
     args = ap.parse_args()
-    snap = through_int4 if args.grid == "int4" else through_fp4
+    if args.grid == "int4":
+        snap = through_int4
+    elif args.grid == "fp4":
+        snap = through_fp4
+    else:
+        snap = lambda W, g: through_table(W, g, FITTED15)
 
     os.makedirs(args.out, exist_ok=True)
     for f in os.listdir(args.model):
