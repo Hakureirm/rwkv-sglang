@@ -278,6 +278,22 @@ back `key`.
   product either way: −18.2pt for RTN against −25.1pt for GPTQ, both far outside what anyone
   would ship for reasoning. So the honest recommendation is "if you insist on 1.5B int4, use
   RTN", not "1.5B int4 is now fine".
+- **And the ordering is not monotone in size, which narrows the claim further.** Collecting
+  every same-size GPTQ-versus-RTN comparison this repo now has:
+
+  | size | metric | GPTQ | RTN | winner |
+  |---|---|---|---|---|
+  | 0.1B | coherence (BENCHMARKS §7) | coherent text | **repetition collapse, broken** | GPTQ, decisively |
+  | 1.5B | MATH500 | 0.1510 | **0.2198** | RTN, +6.9pt separated |
+  | 7.2B | MATH500 | 0.6112 | 0.6205 | tied, not separated |
+  | 7.2B | lambada (BENCHMARKS §4) | **−1.28pt** | −2.64pt | GPTQ, +1.36pt |
+
+  GPTQ wins at 0.1B, loses at 1.5B, and ties-or-wins at 7.2B. A finding that reverses twice
+  across the size range is not a recommendation to change quantizers — it is evidence that
+  calibration helps when the model has little redundancy to spare, hurts in the middle where
+  the sparse-input pathology dominates, and washes out once the model is large enough to absorb
+  either. Only the 1.5B point is new here; the other three were already measured and were never
+  put in one table.
 - **State the awkward shape rather than smoothing it.** The inversion is largest exactly where
   the tier should not be used, and vanishes exactly where the tier is good. A reader who takes
   the 6.9 figure and applies it to the flagship gets the wrong answer by a factor of seven.
