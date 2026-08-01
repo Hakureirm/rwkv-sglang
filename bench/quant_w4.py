@@ -13,12 +13,13 @@ kept at original precision — they are tiny and/or precision-sensitive. Writes 
 
 The packing/scale convention is validated bit-identically by bench/verify_w4.py.
 """
-import argparse, glob, json, os, shutil
+import argparse, glob, json, os, re, shutil
 import torch
 from safetensors.torch import load_file, save_file
 
 TARGET_SUFFIXES = ("r_proj.weight", "k_proj.weight", "v_proj.weight", "o_proj.weight",
                    ".key.weight", ".value.weight")
+LAYER_IDX_RE = re.compile(r"\.layers\.(\d+)\.")
 
 
 def pack_w8(W: torch.Tensor, group: int):
@@ -49,7 +50,17 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--group", type=int, default=64)
     ap.add_argument("--bits", type=int, default=4, choices=[4, 8])
+    ap.add_argument("--keep-layers", default="",
+                    help="comma list of layer indices to leave at checkpoint precision "
+                         "(mixed precision; serve with the SAME list in RWKV_W4_KEEP_LAYERS)")
+    ap.add_argument("--keep-tensors", default="",
+                    help="comma list of projection kinds to leave at checkpoint precision, "
+                         "e.g. 'v_proj,value'. The other axis of the same question: is the "
+                         "int4 damage localized in a few LAYERS or in a few PROJECTION KINDS? "
+                         "(serve with the SAME list in RWKV_W4_KEEP_TENSORS)")
     args = ap.parse_args()
+    keep = {int(t) for t in args.keep_layers.replace(" ", "").split(",") if t}
+    keep_t = tuple(t for t in args.keep_tensors.replace(" ", "").split(",") if t)
 
     os.makedirs(args.out, exist_ok=True)
     for f in os.listdir(args.model):
@@ -63,7 +74,12 @@ def main():
         sd = load_file(sf)
         out = {}
         for name, W in sd.items():
-            if W.ndim == 2 and name.endswith(TARGET_SUFFIXES) and (W.shape[1] % args.group == 0):
+            m = LAYER_IDX_RE.search(name)
+            base_name = name[: -len(".weight")] if name.endswith(".weight") else name
+            protected = (keep and m is not None and int(m.group(1)) in keep) or (
+                keep_t and base_name.endswith(keep_t))
+            if (W.ndim == 2 and name.endswith(TARGET_SUFFIXES)
+                    and (W.shape[1] % args.group == 0) and not protected):
                 qw, sc = (pack_w4 if args.bits == 4 else pack_w8)(W.cuda(), args.group)
                 base = name[: -len(".weight")]
                 out[base + ".qweight"] = qw.cpu().contiguous()
@@ -82,9 +98,14 @@ def main():
         cfg = json.load(open(cfg_path))
         cfg["rwkv7_w4_info"] = {"quant_method": f"rwkv_w{args.bits}", "group_size": args.group,
                                 "bits": args.bits, "sym": True,
-                                "target_suffixes": list(TARGET_SUFFIXES)}
+                                "target_suffixes": list(TARGET_SUFFIXES),
+                                "keep_layers": sorted(keep),
+                                "keep_tensors": list(keep_t)}
         json.dump(cfg, open(cfg_path, "w"), indent=2)
-    print(f"w{args.bits} quant (sym g{args.group}): packed {n_q} matrices, kept {n_skip} tensors -> {args.out}")
+    kept = f", protected layers {sorted(keep)}" if keep else ""
+    kept += f", protected tensors {list(keep_t)}" if keep_t else ""
+    print(f"w{args.bits} quant (sym g{args.group}): packed {n_q} matrices, "
+          f"kept {n_skip} tensors{kept} -> {args.out}")
 
 
 if __name__ == "__main__":

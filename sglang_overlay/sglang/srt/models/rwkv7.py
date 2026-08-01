@@ -88,6 +88,7 @@ from sglang.srt.model_loader.weight_utils import default_weight_loader
 from sglang.srt.utils import add_prefix, make_layers
 
 import os
+import re as _re
 
 
 def _tp_size() -> int:
@@ -305,6 +306,41 @@ _W4_TC_MAX_M = int(os.environ.get("RWKV_W4_TC_MAX_M", "512"))
 # EVERY arch (Turing→Blackwell). Checkpoint from `bench/quant_w4.py --bits 8`.
 _W8 = os.environ.get("RWKV_W8", "0") == "1"
 
+# Mixed precision by layer (task#27): a comma list of layer indices whose big projections
+# stay at checkpoint precision even under RWKV_W4/RWKV_W8. The claim under test is that a
+# handful of protected layers recovers most of the reasoning accuracy int4 loses — our own
+# 1.5B int4 MATH500 is 0.1498 symmetric / 0.2199 asymmetric-GPTQ against fp16's 0.4060
+# (F0017, F0043), so the collapse is real and worth an intervention this cheap. The
+# checkpoint must have been written with the matching `bench/quant_w4.py --keep-layers`,
+# which leaves those layers' `.weight` unpacked; a mismatch surfaces as a missing/unexpected
+# key at load, not as silent wrong numerics.
+def _parse_keep_layers(raw: str):
+    out = set()
+    for tok in raw.replace(" ", "").split(","):
+        if tok:
+            out.add(int(tok))
+    return out
+
+
+_W4_KEEP_LAYERS = _parse_keep_layers(os.environ.get("RWKV_W4_KEEP_LAYERS", ""))
+_LAYER_IDX_RE = _re.compile(r"\.layers\.(\d+)\.")
+
+# The other axis of the same question: is the damage localized in a few LAYERS or in a few
+# PROJECTION KINDS? A comma list of projection suffixes (e.g. "v_proj,value") left at
+# checkpoint precision in every layer. Pairs with `bench/quant_w4.py --keep-tensors`.
+_W4_KEEP_TENSORS = tuple(
+    t for t in os.environ.get("RWKV_W4_KEEP_TENSORS", "").replace(" ", "").split(",") if t
+)
+
+
+def _layer_is_protected(prefix: str) -> bool:
+    if _W4_KEEP_TENSORS and prefix.endswith(_W4_KEEP_TENSORS):
+        return True
+    if not _W4_KEEP_LAYERS:
+        return False
+    m = _LAYER_IDX_RE.search(prefix)
+    return m is not None and int(m.group(1)) in _W4_KEEP_LAYERS
+
 # M7 calibration: capture per-projection input Hessians (X^T X) for GPTQ. Env-gated,
 # zero cost when off. Run the fp16 model (RWKV_W4 off) through calibration prompts with
 # RWKV_CALIB=1 + RWKV_CALIB_OUT=<dir>; Hessians dump to disk (dual trigger: token-count
@@ -324,7 +360,6 @@ _CALIB_CPU_K = int(os.environ.get("RWKV_CALIB_CPU_K", "8192"))
 # total), calibrate in passes: only qnames matching this regex accumulate
 # (e.g. pass A 'ffn.value' layers 0-15 via 'layers\.([0-9]|1[0-5])\..*ffn.value',
 # pass B the rest, pass C the small projections). Empty = accumulate everything.
-import re as _re
 _CALIB_FILTER = os.environ.get("RWKV_CALIB_FILTER", "")
 _CALIB_FILTER_RE = _re.compile(_CALIB_FILTER) if _CALIB_FILTER else None
 _HESS: dict = {}
@@ -513,9 +548,9 @@ def _make_proj(in_f: int, out_f: int, quant_config, prefix: str, parallel: str =
                 in_f, out_f, bias=False, gather_output=False,
                 quant_config=quant_config, prefix=prefix,
             )
-    elif _W4:
+    elif _W4 and not _layer_is_protected(prefix):
         m = W4Linear(in_f, out_f)
-    elif _W8:
+    elif _W8 and not _layer_is_protected(prefix):
         m = W8Linear(in_f, out_f)
     else:
         m = ReplicatedLinear(in_f, out_f, bias=False, quant_config=quant_config, prefix=prefix)

@@ -293,6 +293,19 @@ def main():
     ap.add_argument("--out", default="", help="summary JSON path (generations JSONL alongside)")
     args = ap.parse_args()
 
+    # Fail fast on the grader. verify_one() imports math_verify inside the worker, which
+    # runs only AFTER every rollout has been generated -- so a missing eval dep surfaces at
+    # the very end and takes the whole run's generation with it (cost one arm of F0081's
+    # sweep before this check existed). The import is what's fragile, not the grading, so
+    # check it here where it costs nothing.
+    try:
+        from math_verify import parse as _p, verify as _v
+        if not _v(_p(r"$\boxed{4}$"), _p(r"$\boxed{4}$")):
+            raise RuntimeError("math_verify installed but disagrees with itself on 4 == 4")
+    except ImportError as exc:
+        raise SystemExit(f"grader unavailable ({exc}) -- `pip install math_verify` before "
+                         f"spending generation time; see this file's docstring")
+
     tasks = load_tasks(args.data)
     if args.limit > 0:
         tasks = tasks[: args.limit]
