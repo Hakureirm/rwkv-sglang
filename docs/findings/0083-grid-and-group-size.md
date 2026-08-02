@@ -328,6 +328,55 @@ worth three tenths of a point.
 
 Two independent error levels, both null. The mechanism is total weight error.
 
+## The one arm that contradicted that, and what it turned out to be
+
+int4 g32/fp8 carries **less** total error than fp4 g64/fp16 (0.898× against 0.950×) and
+scores below it. At avg@32 that gap did not separate. Doubling the rollouts to avg@64
+was registered as the tiebreak, with the prediction that the inversion would not survive
+and a stated consequence if it did: lattice shape buys something error does not explain,
+and this finding needs an exception.
+
+It survived, and separated:
+
+| pair, avg@64 | difference | 95% CI | |
+|---|---:|---|---|
+| fp4 g64/fp16 − int4 g32/**fp8** | **+0.0278** | [+0.0002, +0.0557] | **SEPARATED** |
+
+Except the two arms differ in two ways, not one. fp4 carries an fp16 scale per 64
+weights; int4 g32 carries an **fp8** scale per 32. Both are 4.25 bits and the error
+number folds the scale in, but fp8 rounding through a per-tensor factor puts error
+somewhere different from where a shorter group removes it, and no arm had separated
+those. So: int4 at g32 with an fp16 scale, changing only the scale dtype. It costs 4.50
+bits, so it is a diagnostic, not a tier.
+
+| arm | rel. err | bits | MATH500 avg@64 |
+|---|---:|---:|---:|
+| int4 g32/fp8 | 0.898× | 4.25 | 0.2400 |
+| **int4 g32/fp16** | **0.893×** | 4.50 | **0.2518** |
+| fp4 g64/fp16 | 0.950× | 4.25 | 0.2678 |
+
+| pair | difference | 95% CI | |
+|---|---:|---|---|
+| fp4 − int4 g32/**fp16** | +0.0160 | [−0.0109, +0.0431] | not separated |
+| int4 g32/fp16 − int4 g32/fp8 | +0.0118 | [−0.0147, +0.0380] | not separated |
+
+**The exception does not survive the confound.** The only separated inversion in the
+whole sweep is the one carrying an fp8 scale; take the fp8 scale away and the same
+comparison stops separating. Nothing here establishes that lattice shape buys anything
+total error cannot explain.
+
+What it does raise, without establishing it: **an fp8 group scale may cost more than its
+contribution to weight error suggests.** Those two int4 arms differ by 0.5% in error and
+1.18 points in accuracy — far steeper than anything else in the sweep, where roughly 0.1
+of relative error buys 3 points. That is a suspicion with an unseparated difference
+behind it, and it is the arm to run next, because the g32/fp8 "free 10%" was the whole
+practical proposal and this is the first hint that the fp8 half of it is not free.
+
+**Owed caveat on the separation that started this.** Its lower bound is +0.0002, and by
+this point the finding has run well over a dozen paired comparisons. At that many looks
+a 95% interval clearing zero by two ten-thousandths is weak on its own, and it is being
+read here as "worth chasing", which is what it turned out to deserve.
+
 ## What follows
 
 - **At our group size fp4 is the better lattice, worth 4.4 points — against RTN int4, which is
