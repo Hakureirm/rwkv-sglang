@@ -1,21 +1,22 @@
 ---
 doc_kind: finding
 finding_id: F0083
-title: "At 1.5B a non-uniform 4-bit lattice beats int4 by 4.4-4.6 points of MATH500 (separated) and total weight error explains every arm, including two lattices held at identical error and 4.6x apart at the origin. At 7.2B the same lattice wins nothing, which retracts the recommendation and the mechanism with it"
+title: "At 1.5B a non-uniform 4-bit lattice beats int4 by 4.4-4.6 points of MATH500 (separated), and total weight error explains all nine arms including two held at identical error and 4.6x apart at the origin. At 7.2B it wins nothing, because 4-bit costs the flagship 1.45 points and does not separate from fp16 at all -- there is no damage to repair, so the kernel work is not justified"
 last_verified_commit: "HEAD"
 discovered_by: Fable 5, 5090, 2026-08-02
 severity: info
 status: open
-supersedes_claim: "total weight error accounts for every arm measured" — true at 1.5B, false at 7.2B
+supersedes_claim: "total weight error accounts for every arm measured" — holds; the 7.2B null is headroom, not a counterexample
 related: [F0017, F0081, F0082]
 ---
 
 # Finding F0083: a 4-bit lattice is worth 4.6 points at 1.5B and nothing at 7.2B
 
-> Read in order. This finding changed its mind three times and each turn is kept, because
+> Read in order. This finding changed its mind four times and each turn is kept, because
 > the retractions are the content: a mechanism fitted to three points and killed by the arm
-> built to test it, a metric retired on a bad calibration and un-retired, and a conclusion
-> that held across nine arms at one size and failed on the first arm at another.
+> built to test it, a metric retired on a bad calibration and un-retired, a conclusion
+> declared to fail at 7.2B, and that declaration itself withdrawn once the flagship's own
+> fp16 baseline showed there was nothing there to explain.
 
 ## Why this was asked
 
@@ -432,24 +433,44 @@ at 7.2B and they separate, in the neighbourhood of the +4.6 points it won at 1.5
 
 **b72table − b72int4 = −0.0083, 95% CI [−0.0367, +0.0202], not separated.**
 
-It does not transfer. And this is worse than a null, because the error account makes a
-point prediction here and misses it: the same 14% error advantage that bought 4.63
-points at 1.5B should buy about the same again, and **+0.046 sits outside the measured
-interval**. So the sentence committed a few hours ago — that total weight error accounts
-for every arm measured, with nothing owed anywhere — **is wrong as written.** It holds
-for the nine 1.5B arms. It fails on the first arm run at another size.
+It does not transfer.
 
-**What moved besides size, because it is not a clean ablation.** The 1.5B is the World
-line; the 7.2B here is `g1h`, the reasoning line, a different training run rather than
-the same model scaled. Baseline accuracy is 0.62 against 0.22, so the operating point
-moved too, and at 0.62 there is less headroom for a lattice to win in. Size, training
-line and operating point all moved together, and this arm cannot say which of them did it.
+### I first called that a refutation. It is not, and the reason was already in our data
 
-**What it does settle is the decision.** The kernel work — a lookup table in
-`rwkv7_w4.cu`, or a shorter group with an fp8 scale — was justified by a 4.6-point win.
-That win does not appear on the larger of the two checkpoints we actually ship, so on
-this evidence the work is not justified, and the 1.5B result should not be quoted as if
-it were a property of RWKV-7.
+I wrote that the error account makes a point prediction here and misses it — that the
+same 14% advantage which bought 4.63 points at 1.5B should buy about the same again, so
++0.046 outside the interval refutes it. **That is wrong, and wrong in the ordinary way:
+I carried a slope across a regime it was never measured in.** One command against a
+baseline we already had shows why:
+
+| 7.2B, avg@32 | MATH500 | vs fp16 |
+|---|---:|---|
+| fp16, unquantised | 0.6370 | baseline |
+| int4 g64 | 0.6225 | −0.0145 [−0.0406, +0.0107] **not separated** |
+| fitted table g64 | 0.6142 | −0.0228 [−0.0523, +0.0060] **not separated** |
+
+**At 7.2B, 4-bit quantization costs 1.45 points and does not separate from fp16 at all.**
+The entire gap a better lattice could recover is one and a half points, most of it noise.
+At 1.5B the same quantization costs **17.8** points and the table recovers 4.6 of them.
+
+So the slope is not a constant of the method, it is a property of how much damage there
+is to undo. Priced at 7.2B's own slope — 1.45 points across 0.110 of error — the table's
+0.0154 error advantage predicts about +0.2 points, which is comfortably inside the
+measured interval. **The error account is not refuted here. There is simply almost
+nothing at this size for any lattice to win.**
+
+Which also means the confounds I listed — size, the World-versus-`g1h` training line, the
+0.62-versus-0.22 operating point — are mostly beside the point. They matter only through
+headroom, and headroom is directly measured above rather than inferred.
+
+**What it settles is the decision, and more sharply than the wrong version did.** The
+kernel work — a lookup table in `rwkv7_w4.cu`, or a shorter group with an fp8 scale — was
+justified by a 4.6-point win. On the flagship there is no 4.6 points to win, because
+4-bit costs it 1.45 and that does not separate from not quantizing at all. The work is
+not justified, the 1.5B number is not a property of RWKV-7, and
+[F0082](0082-gptq-loses-to-rtn-on-math500.md) already said the operative half of this:
+7.2B's quantization damage is small. **This finding spent a day rediscovering the
+boundary that finding had already drawn.**
 
 ## What follows
 
