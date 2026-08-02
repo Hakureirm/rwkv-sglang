@@ -377,6 +377,40 @@ this point the finding has run well over a dozen paired comparisons. At that man
 a 95% interval clearing zero by two ten-thousandths is weak on its own, and it is being
 read here as "worth chasing", which is what it turned out to deserve.
 
+### The fp8 scale, on its own, is free
+
+The suspicion above is testable without a lattice in the way. Keep every weight exactly
+and round only each group's scale to fp8, multiplying the ratio back in. What is left is
+a **coherent multiplicative error of a few percent applied a whole group at a time** —
+which relative weight error cannot tell apart from rounding individual weights to the
+same L2, and which the model might. Registered beforehand: it can, and the arms land well
+below fp16. Registered alternative, in the same breath: if they sit within a point of
+fp16, fp8 scaling is nearly free, the 1.18 points were noise, and total error survives
+owing nothing.
+
+| arm | rel. err | MATH500 | vs fp16 |
+|---|---:|---:|---|
+| fp16 (unquantised) | 0 | 0.4020 | baseline |
+| scale-only, g64/fp8 | 0.236× int4's | 0.3950 | −0.0070 [−0.0327, +0.0183] not sep |
+| scale-only, g32/fp8 | 0.237× int4's | 0.4109 | +0.0089 [−0.0165, +0.0344] not sep |
+
+**The alternative fired.** Both land within a point of fp16 and neither separates, one
+below and one above — the signature of no effect. And the sweep's own linear rate, about
+3.2 points per 0.1 of relative error, predicts these arms should sit ~0.85 points under
+fp16; they measure −0.70 and +0.89. **The metric that was supposed to be missing
+something predicted this correctly.**
+
+So there is no exception anywhere in the sweep. Total weight error accounts for every
+arm measured: two lattices at matched error and 4.6× apart at the origin, the same pair
+at 1.05×, a nine-arm ladder from 0.806× to 1.330×, and now a perturbation that is pure
+group scaling. The 1.18 points that looked steep never separated, and this is what that
+means.
+
+**Caveat that is not resolved:** the fp16 endpoint is avg@8 from
+[F0082](0082-gptq-loses-to-rtn-on-math500.md) while these arms are avg@64, so the
+comparison is not rollout-matched and fp16's estimate is the noisier of the two. The two
+arms straddling it is the reason to read this as null rather than as either sign.
+
 ## What follows
 
 - **At our group size fp4 is the better lattice, worth 4.4 points — against RTN int4, which is
