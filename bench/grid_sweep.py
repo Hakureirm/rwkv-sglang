@@ -40,6 +40,15 @@ def snap(W, lattice, group, scale_dtype):
     N, K = W.shape
     Wg = W.float().view(N, K // group, group)
     absmax = Wg.abs().amax(2).clamp(min=1e-8)
+    if lattice == "scaleonly":
+        # No lattice at all: keep every weight exactly and perturb only the group scale,
+        # by the ratio the scale's own rounding introduces. What is left is a coherent
+        # multiplicative error of a few percent applied to a whole group at a time --
+        # the part of an fp8-scaled tier that weight error folds in with everything else
+        # and cannot distinguish, since rounding a weight and mis-scaling its group
+        # contribute the same L2 for very different structure.
+        ratio = (cast_scale(absmax, scale_dtype) / absmax)[:, :, None]
+        return (Wg * ratio).view(N, K)
     if isinstance(lattice, torch.Tensor):                    # an explicit level set
         s = cast_scale(absmax, scale_dtype)[:, :, None]
         t = lattice.to(W.device)
@@ -138,7 +147,7 @@ def main():
     ap.add_argument("--model", required=True)
     ap.add_argument("--mode", required=True, choices=["sweep", "write"])
     ap.add_argument("--out")
-    ap.add_argument("--grid", choices=["int4", "fp4", "table", "levels"])
+    ap.add_argument("--grid", choices=["int4", "fp4", "table", "levels", "scaleonly"])
     ap.add_argument("--levels", help="comma-separated positive levels, largest must be 1.0; "
                                      "mirrored about zero into a 15-point lattice")
     ap.add_argument("--group", type=int, default=64)
