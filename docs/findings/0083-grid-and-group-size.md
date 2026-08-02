@@ -46,6 +46,14 @@ two-level scheme is simulated rather than approximated — quantizing the scale 
 the per-tensor normalisation makes NVFP4 look 1.185× worse than int4 when it is really 0.847×,
 an error large enough to invert the conclusion on its own.
 
+Everything below comes from `bench/grid_sweep.py`, which both prints this table and writes the
+checkpoints that get served, so the configuration whose error is quoted is the one that ran.
+It was written against the earlier sweep rather than from it and reproduces all six original
+cells to six digits, which is the only reason the g64 arms and the g32 arms can be compared:
+the g64 arms were built before the fp8 path existed, and had the fp8 penalty been charged to
+one side only the comparison would tilt by more than the effect. Casting a g64 scale to fp16
+does not move its error at six digits, so nothing is owed there.
+
 ## Results (1.5B, all 144 matrices, relative weight error; 1.000 = what we ship today)
 
 | lattice | group | scale | rel. error | vs shipped | bits/weight |
@@ -144,9 +152,57 @@ weight-streaming path where a lookup has more to hide behind.
 per side instead of `k//2`. It showed 0.786× and was meaningless. Printing the table rather
 than only its error is what caught it.
 
-**What is still not known is what any of it is worth in accuracy**, and this finding is the
-reason not to guess: relative weight error mispredicted fp4 by five times a few hours ago. A
-MATH500 run on the fitted table is in flight.
+## The fitted table's extra 10% buys nothing, which mispredicts the other way
+
+Same construction, same avg@32, same 500 problems:
+
+| grid (g64, 4.25 bits) | rel. weight error | MATH500 avg@32 | vs int4 | vs fp4 |
+|---|---:|---:|---|---|
+| int4 | 1.000× | 0.2241 | baseline | |
+| fp4 (E2M1) | 0.950× | 0.2683 | +0.0442 [+0.0161, +0.0727] **SEP** | baseline |
+| fitted table | **0.854×** | 0.2704 | +0.0463 [+0.0187, +0.0733] **SEP** | +0.0021 [−0.0286, +0.0326] **not sep** |
+
+The table carries 10% less weight error than fp4 and lands 0.2 points away from it. So L2 has
+now mispredicted twice in opposite directions in one afternoon: it undercounted fp4's gain over
+int4 by five times, and it overcounted the table's gain over fp4 down to nothing. **A metric
+that errs in both directions is not miscalibrated, it is measuring the wrong thing.**
+
+One property separates the two winners from the loser. Spacing at the origin, in units of the
+group's absmax:
+
+| lattice | gap either side of zero | MATH500 |
+|---|---:|---:|
+| fp4 (E2M1) | 0.083 | 0.2683 |
+| fitted table | 0.096 | 0.2704 |
+| int4 uniform | 0.143 | 0.2241 |
+
+Accuracy tracks that column and not the error column. The reading is that resolution near zero
+is what a 4-bit lattice has to buy — nearly all the weight mass sits there — and that past
+roughly a tenth of absmax, buying more of it stops paying.
+
+**That story was fitted to three points after seeing them, which is the failure
+[F0081](0081-int4-layer-protection.md) is a record of.** So it is written down as a prediction
+before the arms that discriminate it exist.
+
+### Registered before the run
+
+int4 at g32 with an fp8 group scale costs the same 4.25 bits and carries **0.898×** the weight
+error — *less* than the 0.950× that bought fp4 its 4.42 points — while staying uniform, so its
+gap at zero shrinks only with the group absmax, by about 10%. The two accounts disagree:
+
+| | int4 g32/fp8 (0.898×) | table g32/fp8 (0.806×) |
+|---|---|---|
+| if total error drives it | above fp4's 0.2683, since 0.898 < 0.950 | best of everything, above 0.2704 |
+| if the gap at zero drives it | ≈ 0.235, no separation from int4 g64 | ≈ 0.2704, no separation from table g64 |
+
+**Predicting the second.** Concretely: int4 g32/fp8 lands between 0.225 and 0.245, does not
+separate from int4 g64, and stays below fp4 g64. If instead it reaches 0.2683 the near-zero
+story is dead and total error is back.
+
+Stated limit: at avg@32 a paired difference resolves to about ±0.028, so the two predictions
+are separated by roughly one CI width. A result near 0.235 refutes the error account outright
+because that account's floor is 0.2683. A result in between refutes neither, and that is the
+outcome this screen cannot settle.
 
 ## What follows
 
@@ -163,12 +219,13 @@ MATH500 run on the fitted table is in flight.
 - **But do not generalise it to "fp4 beats int4".** At matched bit budgets int4 has the lower
   weight error at g16 and g32; only at g64 does fp4 lead. What is measured is one cell, and
   that cell is the one we happen to occupy.
-- **Relative weight error is retired as a decision metric across lattices.** It mispredicted
-  this by five times. It stays useful for ranking within one lattice, which is what the group
-  size sweep is, and nothing gets claimed from it without a MATH500 run behind it.
-- **Two configurations are now worth measuring, not asserting**: int4 at g32/fp8 (10% lower L2
-  at unchanged bits) and fp4 at g32/fp8. Both are cheap to screen with the same
-  dequantise-and-serve construction used here.
+- **Relative weight error is retired as a decision metric across lattices.** It undercounted
+  fp4 by five times and overcounted the fitted table down to nothing. It stays usable for
+  ranking within one lattice, and the g32 arms are partly a test of even that, since they hold
+  the lattice fixed and move only the scale.
+- **The fitted table is not worth its extra complexity over E2M1 on this evidence.** It wins on
+  L2 and ties on accuracy. What it does keep is the hardware argument: a lookup runs on every
+  card the current int4 runs on, which E2M1 as a native format does not.
 - **Acting on any of it needs kernel work.** `rwkv7_w4.cu` decodes one fp16 scale per 64
   values on a uniform lattice. fp4 changes the decode table, g32/fp8 changes the stride and
   the scale dtype. Contained, but not free, and it should follow the measurements rather than
