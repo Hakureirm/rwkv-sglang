@@ -40,6 +40,11 @@ def snap(W, lattice, group, scale_dtype):
     N, K = W.shape
     Wg = W.float().view(N, K // group, group)
     absmax = Wg.abs().amax(2).clamp(min=1e-8)
+    if isinstance(lattice, torch.Tensor):                    # an explicit level set
+        s = cast_scale(absmax, scale_dtype)[:, :, None]
+        t = lattice.to(W.device)
+        idx = ((Wg / s).unsqueeze(-1) - t).abs().argmin(-1)
+        return (t[idx] * s).view(N, K)
     if lattice == "int4":
         s = cast_scale(absmax / 7.0, scale_dtype)[:, :, None]
         return (torch.round(Wg / s).clamp_(-7, 7) * s).view(N, K)
@@ -116,12 +121,15 @@ def write(model, out_dir, lattice, group, scale_dtype):
     cfg_path = os.path.join(out_dir, "config.json")
     if os.path.exists(cfg_path):
         cfg = json.load(open(cfg_path))
-        cfg["rwkv7_grid_info"] = {"grid": lattice, "group_size": group,
+        name = lattice if isinstance(lattice, str) else \
+            "levels:" + ",".join(f"{v:.4f}" for v in lattice.tolist())
+        cfg["rwkv7_grid_info"] = {"grid": name, "group_size": group,
                                   "scale_dtype": scale_dtype, "stored_as": "fp16 dequantized",
                                   "bits_per_weight": bits(group, scale_dtype),
                                   "relative_weight_error": rel}
         json.dump(cfg, open(cfg_path, "w"), indent=2)
-    print(f"{lattice} g{group} {scale_dtype}: snapped {n} matrices, rel err {rel:.6f}, "
+    label = lattice if isinstance(lattice, str) else "levels"
+    print(f"{label} g{group} {scale_dtype}: snapped {n} matrices, rel err {rel:.6f}, "
           f"{bits(group, scale_dtype):.2f} bits/weight -> {out_dir}")
 
 
@@ -130,7 +138,9 @@ def main():
     ap.add_argument("--model", required=True)
     ap.add_argument("--mode", required=True, choices=["sweep", "write"])
     ap.add_argument("--out")
-    ap.add_argument("--grid", choices=["int4", "fp4", "table"])
+    ap.add_argument("--grid", choices=["int4", "fp4", "table", "levels"])
+    ap.add_argument("--levels", help="comma-separated positive levels, largest must be 1.0; "
+                                     "mirrored about zero into a 15-point lattice")
     ap.add_argument("--group", type=int, default=64)
     ap.add_argument("--scale", default="fp16", choices=["fp8", "fp16", "fp32"])
     args = ap.parse_args()
@@ -138,9 +148,14 @@ def main():
         sweep(args.model, [(l, g, s) for g, s in
                            [(16, "fp8"), (32, "fp8"), (64, "fp16")]
                            for l in ("int4", "fp4", "table")])
-    else:
-        assert args.out and args.grid, "--mode write needs --out and --grid"
-        write(args.model, args.out, args.grid, args.group, args.scale)
+        return
+    assert args.out and args.grid, "--mode write needs --out and --grid"
+    grid = args.grid
+    if grid == "levels":
+        pos = [float(x) for x in args.levels.split(",")]
+        assert len(pos) == 7 and abs(pos[-1] - 1.0) < 1e-9, "need 7 levels ending at 1.0"
+        grid = torch.tensor(sorted([-p for p in pos] + [0.0] + pos), dtype=torch.float32)
+    write(args.model, args.out, grid, args.group, args.scale)
 
 
 if __name__ == "__main__":

@@ -204,6 +204,62 @@ are separated by roughly one CI width. A result near 0.235 refutes the error acc
 because that account's floor is 0.2683. A result in between refutes neither, and that is the
 outcome this screen cannot settle.
 
+### It landed in between, which is the outcome that settles nothing
+
+| grid | rel. err | gap@0 | MATH500 avg@32 | vs int4 g64 |
+|---|---:|---:|---:|---|
+| int4 g64/fp16 | 1.000× | 0.143 | 0.2241 | baseline |
+| **int4 g32/fp8** | **0.898×** | 0.143 | **0.2417** | +0.0176 [−0.0089, +0.0441] not sep |
+| fp4 g64/fp16 | 0.950× | 0.083 | 0.2683 | +0.0442 [+0.0161, +0.0727] **SEP** |
+| table g64/fp16 | 0.854× | 0.096 | 0.2704 | +0.0463 [+0.0187, +0.0733] **SEP** |
+| table g32/fp8 | 0.806× | 0.096 | 0.2782 | +0.0541 [+0.0253, +0.0824] **SEP** |
+
+The registered range was 0.225–0.245 with no separation from int4 g64 and a position below
+fp4. All three hold: 0.2417, +0.0176 not separated, below 0.2683.
+
+**The registered refutation does not.** I wrote that a result near 0.235 kills the error
+account because its floor is 0.2683 — but the test of "int4 g32 should beat fp4" is the paired
+comparison, and that is **−0.0266 with CI [−0.0552, +0.0020]**, zero inside it by 0.002. So
+the arm came out exactly where the stated limit says nothing is settled. Naming the floor was
+not the same as testing against it, and the point prediction landing is not the claim that
+mattered.
+
+What the two g32 arms do establish is the narrower thing: **within a fixed lattice, lower
+error does buy accuracy, monotonically.** int4 g64→g32 is +1.76 points for 10.2% less error,
+table g64→g32 is +0.78 for 5.6% less. Neither separates alone; both point the same way, and
+that is what keeps weight error usable inside one lattice while it fails across lattices.
+
+## The arm where the two accounts predict opposite signs
+
+Every arm so far moved total error and origin spacing **together**, which is why none of them
+separated. That is not bad luck, it is structural: the error-optimal placement of levels is
+itself "fine where the mass is", so refining the origin always lowers error. Trying to build
+a fine-origin lattice at 1.33× error hit this directly — the search family saturated at
+1.243× and could go no further, because every remaining move toward a finer origin *reduced*
+the error it was supposed to raise.
+
+The lever that does separate them is to hold error fixed and move only the origin. Two
+lattices, both snapped into served checkpoints measuring **0.148744** and **0.148742** —
+identical error to five figures, 4.6× apart at zero:
+
+| | gap@0 | levels (mirrored about zero, ×absmax) |
+|---|---:|---|
+| **fine** | 0.0500 | 0.05, 0.10, 0.2046, 0.3092, 0.4138, 0.5184, 1.0 |
+| **coarse** | 0.2294 | 0.2294, 0.3794, 0.5094, 0.6294, 0.7494, 0.8747, 1.0 |
+
+`fine` pays for its origin by starving the tail: nothing between 0.518 and 1.0 of a group's
+absmax. `coarse` pays the opposite way: nothing below 0.229, so everything under 0.115 snaps
+to zero outright. Same total error, opposite priorities.
+
+**Registered before running.** The origin account wins: `fine` lands four or more points above
+`coarse` and they separate, with `coarse` the worse arm outright and plausibly catastrophic.
+The error account predicts they land on top of each other, within a point or two, not
+separated. Both carry a third more error than shipped int4, so both should score below 0.2241
+— the comparison is fine-against-coarse, and nothing is claimed from either against int4.
+
+This design cannot distinguish "the origin matters" from "the tail does not". If `coarse`
+wins instead, the reading is the reverse of both accounts and the tail is what fp4 was buying.
+
 ## What follows
 
 - **At our group size fp4 is the better lattice, worth 4.4 points — against RTN int4, which is
