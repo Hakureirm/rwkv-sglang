@@ -1,7 +1,7 @@
 ---
 doc_kind: finding
 finding_id: F0083
-title: "fp4 beats int4 by 4.42 points of MATH500 at the group size we actually ship (separated), which is five times more than its 5% weight-error advantage predicts — so relative weight error ranks configurations within a lattice and mispredicts across them"
+title: "fp4 beats int4 by 4.42 points of MATH500 at the group size we actually ship (separated), and the mechanism is total weight error rather than the lattice's shape: two lattices held at identical error and 4.6x apart at the origin differ by 1.5 points and do not separate"
 last_verified_commit: "HEAD"
 discovered_by: Fable 5, 5090, 2026-08-02
 severity: info
@@ -77,7 +77,11 @@ these weights sits between g32 and g64.
 **Not a 1.5B accident:** at 7.2B the fp4/int4 ratio at g64 is 0.964× against 1.5B's 0.950×,
 and the whole ordering is unchanged.
 
-## Then the accuracy measurement landed, and relative weight error turned out to be a bad ruler
+## Then the accuracy measurement landed, and relative weight error looked like a bad ruler
+
+> **Retracted below.** This section prices fp4 against GPTQ and concludes weight error is
+> five times off. The calibration is the error, not the ruler — see *Refuted* further down,
+> where an arm built to test the replacement story kills it and error survives.
 
 Both lattices at g64, each snapped and dequantised back to fp16 so both serve on the identical
 unquantized path. MATH500 avg@32, 500 problems, cluster bootstrap:
@@ -184,6 +188,10 @@ roughly a tenth of absmax, buying more of it stops paying.
 [F0081](0081-int4-layer-protection.md) is a record of.** So it is written down as a prediction
 before the arms that discriminate it exist.
 
+> **This story is dead.** The arm registered below refutes it: at matched error, a 4.6×
+> difference at the origin is worth +1.5 points and does not separate. Three points and a
+> plausible mechanism, again.
+
 ### Registered before the run
 
 int4 at g32 with an fp8 group scale costs the same 4.25 bits and carries **0.898×** the weight
@@ -260,6 +268,44 @@ separated. Both carry a third more error than shipped int4, so both should score
 This design cannot distinguish "the origin matters" from "the tail does not". If `coarse`
 wins instead, the reading is the reverse of both accounts and the tail is what fp4 was buying.
 
+### Refuted. The origin buys +1.5 points and does not separate
+
+| lattice | rel. err | gap@0 | MATH500 avg@32 | vs int4 g64 |
+|---|---:|---:|---:|---|
+| **isofine** | 1.330× | 0.0500 | **0.1187** | −0.1054 [−0.1323, −0.0799] SEP |
+| **isocoarse** | 1.330× | 0.2294 | **0.1036** | −0.1206 [−0.1487, −0.0922] SEP |
+
+**isofine − isocoarse = +0.0151, 95% CI [−0.0062, +0.0371], not separated.** I registered
+four or more points and separation. It is one and a half and it does not separate, which is
+the error account's prediction almost exactly — "within a point or two, not separated".
+
+So the story I fitted to three points does not survive the arm built to test it. Resolution at
+the origin is not what fp4 and the fitted table were buying. Held against total error, a 4.6×
+difference in how finely a lattice represents the region holding nearly all the weight mass is
+worth about a point.
+
+**Which forces a correction to this finding's own headline.** "Relative weight error is retired
+as a decision metric across lattices" was itself built on a bad calibration: the "five times
+off" figure came from pricing fp4 against GPTQ, and this finding already says in the same
+breath that GPTQ's error is unusually cheap per unit. Pricing anything with it was the error.
+Against the seven arms now measured, error tracks accuracy across the whole 0.806×–1.330×
+range:
+
+| rel. err | 0.806 | 0.854 | 0.898 | 0.950 | 1.000 | 1.330 | 1.330 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| MATH500 | 0.2782 | 0.2704 | **0.2417** | **0.2683** | 0.2241 | 0.1187 | 0.1036 |
+
+One inversion, int4 g32 against fp4 g64, and it is the pair that does not separate. A straight
+line through the endpoints gives about 3.2 points per 0.1 of relative error and leaves
+residuals of two to three points — the same size as the intervals. **At this resolution nothing
+beyond total weight error is demonstrated, and that is the whole claim.**
+
+**The limit this test has, stated rather than buried.** Both iso arms sit at 1.33× error, where
+accuracy has already fallen by half from int4. Differences may compress near that floor, so
+what is refuted is "origin resolution is the dominant mechanism", not "origin resolution is
+irrelevant at the group sizes we ship". Re-running the pair at, say, 1.05× error would test it
+where the real lattices live. That has not been done.
+
 ## What follows
 
 - **At our group size fp4 is the better lattice, worth 4.4 points — against RTN int4, which is
@@ -275,10 +321,12 @@ wins instead, the reading is the reverse of both accounts and the tail is what f
 - **But do not generalise it to "fp4 beats int4".** At matched bit budgets int4 has the lower
   weight error at g16 and g32; only at g64 does fp4 lead. What is measured is one cell, and
   that cell is the one we happen to occupy.
-- **Relative weight error is retired as a decision metric across lattices.** It undercounted
-  fp4 by five times and overcounted the fitted table down to nothing. It stays usable for
-  ranking within one lattice, and the g32 arms are partly a test of even that, since they hold
-  the lattice fixed and move only the scale.
+- **Relative weight error is not retired.** An earlier draft of this finding retired it on the
+  strength of a GPTQ-based calibration that this same finding calls unreliable two paragraphs
+  earlier. Across seven arms spanning 0.806×–1.330× it tracks accuracy with residuals the size
+  of the confidence intervals, and the one arm designed to expose a mechanism it misses came
+  back null. Use it to rank; do not read points off it without a run behind them, because the
+  slope is only known to within a factor of two.
 - **The fitted table is not worth its extra complexity over E2M1 on this evidence.** It wins on
   L2 and ties on accuracy. What it does keep is the hardware argument: a lookup runs on every
   card the current int4 runs on, which E2M1 as a native format does not.
