@@ -303,8 +303,30 @@ beyond total weight error is demonstrated, and that is the whole claim.**
 **The limit this test has, stated rather than buried.** Both iso arms sit at 1.33× error, where
 accuracy has already fallen by half from int4. Differences may compress near that floor, so
 what is refuted is "origin resolution is the dominant mechanism", not "origin resolution is
-irrelevant at the group sizes we ship". Re-running the pair at, say, 1.05× error would test it
-where the real lattices live. That has not been done.
+irrelevant at the group sizes we ship". Re-running the pair at 1.05× would test it where the
+real lattices live.
+
+### Repeated at 1.05×, and the floor objection does not survive either
+
+Same construction just above the shipped configuration — served checkpoints at **0.117421** and
+**0.117427**, both 1.050× int4, 3.3× apart at the origin. Registered beforehand: null again,
+the two within two points and not separated, both a little below int4.
+
+| lattice | rel. err | gap@0 | MATH500 avg@32 | vs int4 g64 |
+|---|---:|---:|---:|---|
+| isofine105 | 1.050× | 0.0500 | 0.2201 | −0.0041 [−0.0320, +0.0232] not sep |
+| isocoarse105 | 1.050× | 0.1656 | 0.2169 | −0.0072 [−0.0321, +0.0172] not sep |
+
+**isofine105 − isocoarse105 = +0.0032, CI [−0.0240, +0.0300], not separated.** All three parts
+of the registered prediction hold.
+
+And the effect did not grow when the floor was removed — it **shrank**, from +1.5 points at
+1.33× to +0.3 at 1.05×, which is the opposite of what a compression artefact does. Where we
+actually operate, with accuracy at int4's level and room to move in either direction, a 3.3×
+difference in how finely a lattice resolves the region holding nearly all the weight mass is
+worth three tenths of a point.
+
+Two independent error levels, both null. The mechanism is total weight error.
 
 ## What follows
 
