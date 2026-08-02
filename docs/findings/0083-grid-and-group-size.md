@@ -1,15 +1,21 @@
 ---
 doc_kind: finding
 finding_id: F0083
-title: "fp4 beats int4 by 4.42 points of MATH500 at the group size we actually ship (separated), and the mechanism is total weight error rather than the lattice's shape: two lattices held at identical error and 4.6x apart at the origin differ by 1.5 points and do not separate"
+title: "At 1.5B a non-uniform 4-bit lattice beats int4 by 4.4-4.6 points of MATH500 (separated) and total weight error explains every arm, including two lattices held at identical error and 4.6x apart at the origin. At 7.2B the same lattice wins nothing, which retracts the recommendation and the mechanism with it"
 last_verified_commit: "HEAD"
 discovered_by: Fable 5, 5090, 2026-08-02
 severity: info
 status: open
+supersedes_claim: "total weight error accounts for every arm measured" — true at 1.5B, false at 7.2B
 related: [F0017, F0081, F0082]
 ---
 
-# Finding F0083: the lattice is worth more than its error says, and the ruler I reached for was the wrong one
+# Finding F0083: a 4-bit lattice is worth 4.6 points at 1.5B and nothing at 7.2B
+
+> Read in order. This finding changed its mind three times and each turn is kept, because
+> the retractions are the content: a mechanism fitted to three points and killed by the arm
+> built to test it, a metric retired on a bad calibration and un-retired, and a conclusion
+> that held across nine arms at one size and failed on the first arm at another.
 
 ## Why this was asked
 
@@ -411,8 +417,45 @@ means.
 comparison is not rollout-matched and fp16's estimate is the noisier of the two. The two
 arms straddling it is the reason to read this as null rather than as either sign.
 
+## At 7.2B none of it holds, and that retracts the section above
+
+The whole practical conclusion — use a non-uniform lattice, the fitted table for
+preference since it needs no fp4 hardware — rested at 7.2B on relative weight error
+alone: fitted on 1.5B the table reads 0.854× there and 0.860× at 7.2B. Every arm above
+had been measured at 1.5B. Registered before running: it transfers, the table beats int4
+at 7.2B and they separate, in the neighbourhood of the +4.6 points it won at 1.5B.
+
+| 7.2B, g64/fp16, avg@32 | rel. err | MATH500 | truncated |
+|---|---:|---:|---:|
+| int4 uniform | 0.109983 | **0.6225** | 0.113 |
+| fitted table | 0.094620 (0.860×) | **0.6142** | 0.081 |
+
+**b72table − b72int4 = −0.0083, 95% CI [−0.0367, +0.0202], not separated.**
+
+It does not transfer. And this is worse than a null, because the error account makes a
+point prediction here and misses it: the same 14% error advantage that bought 4.63
+points at 1.5B should buy about the same again, and **+0.046 sits outside the measured
+interval**. So the sentence committed a few hours ago — that total weight error accounts
+for every arm measured, with nothing owed anywhere — **is wrong as written.** It holds
+for the nine 1.5B arms. It fails on the first arm run at another size.
+
+**What moved besides size, because it is not a clean ablation.** The 1.5B is the World
+line; the 7.2B here is `g1h`, the reasoning line, a different training run rather than
+the same model scaled. Baseline accuracy is 0.62 against 0.22, so the operating point
+moved too, and at 0.62 there is less headroom for a lattice to win in. Size, training
+line and operating point all moved together, and this arm cannot say which of them did it.
+
+**What it does settle is the decision.** The kernel work — a lookup table in
+`rwkv7_w4.cu`, or a shorter group with an fp8 scale — was justified by a 4.6-point win.
+That win does not appear on the larger of the two checkpoints we actually ship, so on
+this evidence the work is not justified, and the 1.5B result should not be quoted as if
+it were a property of RWKV-7.
+
 ## What follows
 
+- **None of this is established beyond 1.5B.** The one arm run at 7.2B shows the fitted
+  table winning nothing where it won 4.6 points at 1.5B, and the error account missing a
+  point prediction it makes there. Every bullet below is a 1.5B statement.
 - **At our group size fp4 is the better lattice, worth 4.4 points — against RTN int4, which is
   not what we ship.** The shipped checkpoint is GPTQ at 0.1510 (F0082), so the gap to it is
   larger again, and that is a separate number needing its own paired run. Naming "our int4"
@@ -435,7 +478,9 @@ arms straddling it is the reason to read this as null rather than as either sign
 - **The fitted table is not worth its extra complexity over E2M1 on this evidence.** It wins on
   L2 and ties on accuracy. What it does keep is the hardware argument: a lookup runs on every
   card the current int4 runs on, which E2M1 as a native format does not.
-- **Acting on any of it needs kernel work.** `rwkv7_w4.cu` decodes one fp16 scale per 64
-  values on a uniform lattice. fp4 changes the decode table, g32/fp8 changes the stride and
-  the scale dtype. Contained, but not free, and it should follow the measurements rather than
-  lead them.
+- **Acting on any of it needs kernel work, and the measurement that would justify it has
+  now come back negative.** `rwkv7_w4.cu` decodes one fp16 scale per 64 values on a uniform
+  lattice; a lookup table changes the decode, g32/fp8 changes the stride and the scale
+  dtype. Contained, but not free — and the 4.6 points that paid for it do not appear on the
+  larger checkpoint. The work is on hold until something explains the gap between the two
+  sizes, which needs more than one arm at 7.2B.
