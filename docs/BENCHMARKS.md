@@ -1,5 +1,10 @@
 # Benchmarks — the full picture
 
+> **Looking for something specific?** [USER.md](USER.md) routes by need (fast / small /
+> my GPU / comparisons), [EVIDENCE.md](EVIDENCE.md) explains how anything here was
+> measured and how to re-run it, [FINDINGS.md](FINDINGS.md) indexes the 76 dated
+> reports. This page is the single-file full reference those three point into.
+
 Every measured axis of this project, in readable form. Each table states its setup and links
 the committed raw output. Methodology details and negative results live in the dated reports
 under [`findings/`](findings/); this page is the summary you can actually read.

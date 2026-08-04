@@ -17,12 +17,24 @@ quoted against, the raw logs and the numpy oracle are committed, and the correct
 claims are checked against implementations this project did not write — BlinkDL's own
 runtime and reference above all.
 
-**➡ Full benchmark reference: [docs/BENCHMARKS.md](docs/BENCHMARKS.md)** — every measured
-axis in readable tables (correctness gates, accuracy rulers, per-GPU speeds, the Albatross
-comparison, quantization trade-offs, latency under load), each linked to its raw log.
+## Three numbers, then the map
 
-Interactive dashboard (hover / zoom / toggle tiers):
-[hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)
+| | | detail |
+|---|---|---|
+| **Speed** | 7.2B fp16 **142.8 tok/s** single-request on one RTX 5090 — 92.0% of Bo's official Albatross; 1.5B **514.5** | [USER.md](docs/USER.md) |
+| **Scale** | 1.5B **29,533 tok/s** peak serving at 320 concurrent — constant-size state, <0.2 GB extra for 1→256 streams | [USER.md](docs/USER.md) |
+| **Trust** | greedy output **24/24 token-exact** vs a pure-numpy fp32 oracle, on every platform and under TP/PP | [EVIDENCE.md](docs/EVIDENCE.md) |
+
+Find your number by what you need:
+
+| you want | go to |
+|---|---|
+| one stream fast · throughput under load · smaller models (int8/int4) · your GPU · comparisons (Albatross / vllm-rwkv / Qwen3.5 / HF port) | **[docs/USER.md](docs/USER.md)** |
+| how any number was measured, the two timing conventions, the accuracy rulers, how to re-run | **[docs/EVIDENCE.md](docs/EVIDENCE.md)** |
+| every measured axis in one page (the full reference) | **[docs/BENCHMARKS.md](docs/BENCHMARKS.md)** · [中文](docs/BENCHMARKS.zh-CN.md) |
+| dated measurement reports, methodology, negative results | **[docs/FINDINGS.md](docs/FINDINGS.md)** (76 findings) |
+| interactive charts (hover / zoom / toggle tiers) | **[hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)** |
+| each headline claim → its raw log | [`CONTRIBUTIONS.md`](CONTRIBUTIONS.md) |
 
 **Runs on sglang `main` and on v0.5.10** — one code base, the version difference is detected
 at runtime. The model-support core is submitted upstream:
@@ -35,50 +47,17 @@ the context — a Transformer's KV cache grows with every token. Measured effect
 1 to 256 concurrent sequences, or growing the context 64×, each costs **less than 0.2 GB**
 of extra VRAM. High concurrency and long context are where this architecture wins.
 
-## What works (2026-07-06)
+## What works
 
 | | |
 |---|---|
-| **Correctness** | Greedy output is token-exact vs a numpy fp32 reference — 24/24 tokens on 0.1B / 1.5B / 7.2B (CUDA) and on Apple Silicon (MLX); also exact under dynamic batching, chunked prefill, CUDA graphs, and tensor/pipeline parallel (TP 2/4/8, PP 2/4/8; TP=2 & PP=2 re-verified on main under cuda-graph ON, greedy 24/24 == 1-GPU — [F0036](docs/findings/0036-pp-cudagraph-vfirst-fix.md)) |
-| **Accuracy rulers** | MATH500 avg@64 (the low-variance ruler): **0.4042** on main, matching v0.5.10's 0.4060 within noise — no regression. Compression rate: fp16 0.6085, int8 w8g64 0.6086 (lossless), w8a8 0.6161, int4-GPTQ 0.6514. Quantization on the reasoning ruler (avg@64): w8a8 −2.3pt, int4 −24pt — [§4](docs/BENCHMARKS.md#4-quantization-what-you-trade-and-what-you-get) |
-| **Serving features** | Dynamic batching, chunked prefill, recurrent-state prefix cache (~98% hit rate under high-reuse load) |
-| **Quantization** | Two int8 tiers + int4 (GPTQ), all hand-written CUDA. **w8g64** (weight-only): greedy-lossless (24/24 oracle-exact). **w8a8** (tensor-core): compression == cutlass (0.6161), a measured −2.3pt on MATH500 avg@64, for large-batch/VRAM wins. On sm120/Blackwell — where upstream has no int8 GEMM at all — our s8-wmma kernel serves w8a8 and beats fp16 cuBLAS on the GEMM (1.03–1.55× at batch ≥512). On **7.2B / one 32 GB 5090, int8 serves 1.86× the concurrency and 13.1% higher peak than fp16 can reach** (fp16's real ceiling is ≥344 concurrent, corrected 2026-07-07 from an undertested 221) — details in [BENCHMARKS §4](docs/BENCHMARKS.md#4-quantization-what-you-trade-and-what-you-get) / [F0047](docs/findings/0047-fp16-72b-concurrency-correction.md) |
-| **Speculative decoding** | Phase 1 working: a draft model proposes, the target verifies in one pass, rejected tokens roll back via an O(1) state snapshot. 9/10 test prompts token-identical to normal decoding; the single difference is a benign floating-point rounding-order effect, fully analyzed in [F0031](docs/findings/0031-spec-decode-increment-i.md) |
-| **Apple Silicon** | Native MLX implementation with a custom Metal kernel, gated by the same numpy reference — see [`mlx_port/`](mlx_port/) |
-| **Upstream work** | Model PR [#30115](https://github.com/sgl-project/sglang/pull/30115), verified on RTX 3090 and RTX 5090; also found and fixed a silent pipeline-parallel data-corruption bug: issue [#30015](https://github.com/sgl-project/sglang/issues/30015) → fix PR [#30095](https://github.com/sgl-project/sglang/pull/30095) |
-
-## Speed
-
-1.5B model, one GPU, sglang main. "Single request" = one stream, sustained decode speed.
-"Peak" = best total throughput across a concurrency sweep (64-token prompts, 256-token outputs).
-
-| GPU (1.5B) | single request | peak serving throughput |
-|---|---|---|
-| RTX 3090 | 230.7 tok/s | 7,205 tok/s fp16 · **9,851 tok/s int8** |
-| RTX 5090 | **535.2 tok/s** fp16 · **742.6** int4 | **22,175 tok/s** |
-
-**7.2B, one RTX 5090 (32 GB):** single request **142.8 tok/s** (fp16) — the megakernel
-flagship ladder (2026-07-21, F0066c), full step-by-step story in
-[BENCHMARKS §7a-flagship](docs/BENCHMARKS.md#7a-flagship-single-stream-megakernel-ladder-the-flagship-bsz1-story-vs-bo).
-Peak serving:
-**6,709 tok/s (fp16 @ c320, safe to ≥344 concurrent)** vs **7,587 tok/s
-(int8, 640 concurrent)**. At bsz 1 fp16 is faster; int8's win is the VRAM headroom that
-lets 7.2B scale to 1.86× the concurrency — the full story (and the correction to a
-previously-published 5,983/221 figure that undertested the concurrency grid) is in
-[BENCHMARKS §4](docs/BENCHMARKS.md#4-quantization-what-you-trade-and-what-you-get).
-
-- The same stack runs on T4, L4, A10G, A100 (40/80GB), L40S, H100, H200, B200 —
-  per-card results in [`fleet_main_10cards.json`](bench/results/fleet_main_10cards.json).
-- Real-workload sample (ShareGPT, RTX 5090): 9,845 output tok/s at peak; at 16 requests/s,
-  median time-to-first-token is 32 ms.
-- **Comparison with BlinkDL's Albatross** (the official speed reference — note it is a
-  benchmark loop without request scheduling or an API): our single-request speed is
-  0.9004× (L4) to 0.5129× (B200) of its decode speed — the higher the GPU's memory
-  bandwidth, the more its fused-layer design gains. On the author's own RTX 5090 our int4
-  reaches **0.9908×** of its fp16 speed. On T4-class GPUs the *stock* Albatross kernel
-  doesn't compile (it uses sm80+ `cp.async` — a removable limit; BlinkDL notes a patched
-  kernel runs on T4), so out-of-the-box only this stack serves T4. Per-card data:
-  [`albatross_fleet_10cards.json`](bench/results/albatross_fleet_10cards.json).
+| **Correctness** | Greedy output token-exact vs the numpy fp32 reference — 24/24 on 0.1B / 1.5B / 7.2B (CUDA) and Apple Silicon (MLX); exact under dynamic batching, chunked prefill, CUDA graphs, TP/PP 2/4/8 ([F0036](docs/findings/0036-pp-cudagraph-vfirst-fix.md)) |
+| **Accuracy rulers** | MATH500 avg@64 **0.4042** (1.5B) · compression bpb 0.6085 (1.5B) / **0.5413** (7.2B). Quantization measured on both rulers, because they disagree — [USER.md](docs/USER.md#i-want-it-smaller-quantization) |
+| **Serving** | Dynamic batching, chunked prefill, recurrent-state prefix cache (~98% hit under high-reuse load), TP/PP |
+| **Quantization** | w8g64 greedy-lossless · w8a8 tensor-core int8 (on 7.2B/32 GB: 1.86× the concurrency fp16 reaches) · int4 with the honest accuracy bill — [USER.md](docs/USER.md#i-want-it-smaller-quantization) |
+| **Speculative decoding** | draft-verify with O(1) state rollback — [F0031](docs/findings/0031-spec-decode-increment-i.md) |
+| **Apple Silicon** | native MLX + Metal kernel, gated by the same oracle — [`mlx_port/`](mlx_port/) |
+| **Upstream** | model PR [#30115](https://github.com/sgl-project/sglang/pull/30115); found and fixed a silent PP data-corruption bug upstream: [#30015](https://github.com/sgl-project/sglang/issues/30015) → [#30095](https://github.com/sgl-project/sglang/pull/30095) |
 
 ## Quickstart
 
@@ -110,13 +89,10 @@ sglang_overlay/    the implementation: model, state backend, CUDA/Triton kernels
 sglang_main_port/  the same code as applied to sglang main (patch + file list)
 mlx_port/          native Apple Silicon implementation (MLX + Metal kernel)
 bench/             every benchmark and correctness-gate script; raw outputs in bench/results/
-docs/              findings (numbered measurement reports) and design decisions — the evidence chain
+docs/              USER.md · EVIDENCE.md · BENCHMARKS.md · FINDINGS.md + findings/ — the evidence chain
 scripts/           deploy.sh (v0.5.10 deploy) · serve.sh (recommended launch flags)
+tools/             doc generators (gen_findings_index.py)
 ```
 
-## Where every claim comes from
-
-[`CONTRIBUTIONS.md`](CONTRIBUTIONS.md) maps each headline number to its raw log.
-[`docs/findings/`](docs/findings/) are dated measurement reports with methodology, including
-negative results. If you re-run a script in `bench/` and get a different number, please open
-an issue.
+If you re-run a script in `bench/` and get a different number, please open an issue —
+that is what the raw logs are committed for.
