@@ -53,11 +53,21 @@ class _Meta:
 
 
 class _Mode:
+    # Mirror every forward_mode query the deployed model makes. When the model
+    # grows a new one this stub must grow it too, or the profiler dies at the
+    # first component that reaches it -- which is how the missing
+    # is_target_verify() was found.
     def __init__(self, decode):
         self._d = decode
 
     def is_decode_or_idle(self):
         return self._d
+
+    def is_target_verify(self):
+        return False
+
+    def is_extend(self):
+        return not self._d
 
 
 class _Backend:
