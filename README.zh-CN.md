@@ -9,12 +9,24 @@
 
 **关于产出方式。**本项目的代码、核、测量与文档大部分由 AI agent(Claude 的 Opus / Sonnet / Fable 模型)在人工指挥下完成;`docs/findings/` 下每份 finding 的 `discovered_by` 字段都写明了产出它的模型。写在这里而不是埋在 front-matter 里,是因为这件事应当改变你读这些数字的方式:这里没有任何结论要求你凭作者的信誉接受——benchmark 脚本、对照基线、原始日志和 numpy oracle 全部在库,正确性结论对照的是本项目没有写过的实现,首先是 BlinkDL 自己的运行时与参考。
 
-**➡ 完整基准文档:[docs/BENCHMARKS.zh-CN.md](docs/BENCHMARKS.zh-CN.md)**——所有测过的
-指标轴,可读的表格形式(正确性验证、精度指标、逐卡速度、与 Albatross 的对比、量化
-取舍、真实负载延迟),每张表链接到原始日志。
+## 三个数字,然后是地图
 
-交互版仪表盘(悬停/缩放/开关精度档):
-[hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)
+| | | 详情 |
+|---|---|---|
+| **速度** | 7.2B fp16 单流 **142.8 tok/s**(单张 RTX 5090)——官方 Albatross 的 92.0%;1.5B **514.5** | [USER.md](docs/USER.md) |
+| **规模** | 1.5B 峰值吞吐 **29,533 tok/s**(320 并发)——状态固定大小,1→256 路只多用 0.2 GB | [USER.md](docs/USER.md) |
+| **可信** | 贪心输出与 numpy fp32 参考 **24/24 逐 token 一致**,所有平台、含 TP/PP | [EVIDENCE.md](docs/EVIDENCE.md) |
+
+按需要找数字:
+
+| 你想要 | 去哪 |
+|---|---|
+| 单流快 · 高并发吞吐 · 量化(int8/int4)· 你的卡 · 各家对比(Albatross / vllm-rwkv / Qwen3.5 / HF 移植) | **[docs/USER.md](docs/USER.md)**(英文) |
+| 每个数怎么测的、两种计时口径、精度尺子、怎么复现 | **[docs/EVIDENCE.md](docs/EVIDENCE.md)**(英文) |
+| 所有指标轴一页看全(完整参考,中文) | **[docs/BENCHMARKS.zh-CN.md](docs/BENCHMARKS.zh-CN.md)** |
+| 76 篇带日期的测量报告(含负结果) | **[docs/FINDINGS.md](docs/FINDINGS.md)** |
+| 交互图表(悬停/缩放/开关精度档) | **[hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)** |
+| 每条头条数字 → 原始日志 | [`CONTRIBUTIONS.md`](CONTRIBUTIONS.md) |
 
 **同时支持 sglang `main` 和 v0.5.10**——同一份代码,版本差异在运行时自动识别。
 模型支持的核心部分已提交上游:[sglang PR #30115](https://github.com/sgl-project/sglang/pull/30115)。
