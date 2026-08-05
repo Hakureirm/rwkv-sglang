@@ -154,7 +154,6 @@ _FUSED_LORA = os.environ.get("RWKV_FUSED_LORA", "0") == "1"
 # Greedy-EXACT vs the numpy oracle at 4, 8, 16 and 32, so this is a speed choice
 # only; see F0086, including the between-instance spread that bounds it.
 _FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "8"))
-_FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "8"))
 # W1 (reverse-overtake): fuse the LoRA-output gate activations (w_log/a/v-residual
 # sigmoids + neg/mul/sub/add) into ONE launch on the bsz1 fp16 lora4_m1 path. The
 # H100 profile (F0051) found these ~5-7 tiny elementwise ops are the single largest
