@@ -416,6 +416,68 @@ __global__ __launch_bounds__(Threads, 1) void lora_stage1_mn_kernel(
   }
 }
 
+// stage2, M-inner. The original mapped one warp to one (m, c, n), so u_cat's row
+// segment for (c, n) was re-read once per m: at M=8 that is 8.4 MB of weight
+// traffic per call where 1.05 MB is the data. Warp -> (c, n) instead, with m the
+// inner loop: the segment is loaded once into registers and every m reuses it,
+// and h is staged in shared memory for all m (the m1 kernel already does this for
+// its single row; the comment there called the batched version a later step).
+//
+// Byte-identical to the version it replaces, and that is not an accident of
+// testing: for a fixed (m, c, n) the lanes, their r indices, the fp32 fma order
+// and the warp_sum shuffle tree are all unchanged. Only the loop nesting and
+// where the operands are read from moved.
+//
+// The u segment is re-read per m rather than held in registers: a register array
+// indexed by a runtime loop counter lands in local memory, which costs more than
+// the L1 hits it was meant to avoid. Re-reading inside the same warp hits the
+// same lines in the same L1, which is the reuse that was missing when the m's
+// were separate blocks on separate SMs.
+//
+// h that does not fit in shared memory takes the M-outer kernel below -- the host
+// picks between them, so neither path is ever partly applied.
+template <int Warps>
+__global__ __launch_bounds__(Warps * 32, 1) void lora_stage2_mn_minner_kernel(
+    int H, int C, int Rtot, int M,
+    const dtype* __restrict__ u_cat,     // [H, R_total]
+    const dtype* __restrict__ bias_cat,  // [C, H]
+    const int* __restrict__ meta,        // [C, 3]
+    const float* __restrict__ h,         // [M, R_total]
+    dtype* __restrict__ y) {             // [M, C, H]
+  extern __shared__ float hs[];  // M * R_total floats
+  const int64_t nh = static_cast<int64_t>(M) * Rtot;
+  for (int64_t i = threadIdx.x; i < nh; i += Warps * 32) hs[i] = h[i];
+  __syncthreads();
+
+  const int64_t gw = static_cast<int64_t>(blockIdx.x) * Warps + (threadIdx.x >> 5);
+  const int64_t CH = static_cast<int64_t>(C) * H;
+  if (gw >= CH) return;
+  const int c = static_cast<int>(gw / H);
+  const int n = static_cast<int>(gw - static_cast<int64_t>(c) * H);
+  const int roff = meta[c * 3];
+  const int rank = meta[c * 3 + 1];
+  const dtype* u = u_cat + static_cast<int64_t>(n) * Rtot + roff;
+  const int lane = threadIdx.x & 31;
+  const float bias = __half2float(bias_cat[c * H + n]);
+
+  const bool vec = ((Rtot | roff | rank) & 1) == 0;
+  for (int m = 0; m < M; ++m) {
+    const float* hm = hs + static_cast<int64_t>(m) * Rtot + roff;
+    float acc = 0.0f;
+    if (vec) {
+      for (int r = lane << 1; r < rank; r += 64) {
+        const float2 uv = __half22float2(*reinterpret_cast<const __half2*>(u + r));
+        acc = fmaf(uv.x, hm[r], acc);
+        acc = fmaf(uv.y, hm[r + 1], acc);
+      }
+    } else {
+      for (int r = lane; r < rank; r += 32) acc = fmaf(__half2float(u[r]), hm[r], acc);
+    }
+    acc = warp_sum(acc);
+    if (lane == 0) y[static_cast<int64_t>(m) * CH + gw] = __float2half_rn(acc + bias);
+  }
+}
+
 template <int Warps>
 __global__ __launch_bounds__(Warps * 32, 1) void lora_stage2_mn_kernel(
     int H, int C, int Rtot, int M,
@@ -482,12 +544,27 @@ at::Tensor lora4_mn(at::Tensor xs, at::Tensor d_cat, at::Tensor u_cat,
       xs.data_ptr<dtype>(), d_cat.data_ptr<dtype>(), meta.data_ptr<int>(), h.data_ptr<float>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   constexpr int kWarps = 8;
-  const int64_t total = M * C * H;
-  const int64_t blocks = (total + kWarps - 1) / kWarps;
-  lora_stage2_mn_kernel<kWarps><<<blocks, kWarps * 32, 0, stream>>>(
-      static_cast<int>(H), static_cast<int>(C), static_cast<int>(Rtot), static_cast<int>(M),
-      u_cat.data_ptr<dtype>(), bias_cat.data_ptr<dtype>(), meta.data_ptr<int>(),
-      h.data_ptr<float>(), y.data_ptr<dtype>());
+  // M-inner stages h for every m in shared memory, so it needs M * Rtot floats.
+  // Both come from tensor sizes, so the choice is a compile-time-shaped host
+  // branch with no device read -- cuda-graph capture stays safe, which the
+  // M-outer path's contract also depends on.
+  constexpr int64_t kMaxSmem = 40 * 1024;    // stay inside the 48 KB default block
+  const int64_t smem = M * Rtot * static_cast<int64_t>(sizeof(float));
+  if (smem <= kMaxSmem) {
+    const int64_t blocks = (C * H + kWarps - 1) / kWarps;
+    lora_stage2_mn_minner_kernel<kWarps>
+        <<<blocks, kWarps * 32, static_cast<size_t>(smem), stream>>>(
+            static_cast<int>(H), static_cast<int>(C), static_cast<int>(Rtot), static_cast<int>(M),
+            u_cat.data_ptr<dtype>(), bias_cat.data_ptr<dtype>(), meta.data_ptr<int>(),
+            h.data_ptr<float>(), y.data_ptr<dtype>());
+  } else {
+    const int64_t total = M * C * H;
+    const int64_t blocks = (total + kWarps - 1) / kWarps;
+    lora_stage2_mn_kernel<kWarps><<<blocks, kWarps * 32, 0, stream>>>(
+        static_cast<int>(H), static_cast<int>(C), static_cast<int>(Rtot), static_cast<int>(M),
+        u_cat.data_ptr<dtype>(), bias_cat.data_ptr<dtype>(), meta.data_ptr<int>(),
+        h.data_ptr<float>(), y.data_ptr<dtype>());
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return y;
 }

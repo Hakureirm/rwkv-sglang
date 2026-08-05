@@ -86,3 +86,4 @@ findings, not this table.
 | F0085 | [Two ops, not one, made every ONNX export subtest fail: cumprod and linalg.solve_triangular](findings/0085-onnx-export-two-triggers.md) | closed |
 | F0086 | [A measured +10.7% never shipped: the default was raised in the tree that was about to be deleted](findings/0086-the-improvement-was-committed-to-the-retired-tree.md) | closed |
 | F0087 | [W1'': the 2<=T<=gate band was doing in torch what both of its neighbours had a kernel for — +5.2% at bs8, +...](findings/0087-the-band-between-the-two-fused-paths.md) | closed |
+| F0088 | [lora4_mn stage2 re-read its weights once per token: −33% on the kernel, +1.6% on the step, and the gate sti...](findings/0088-lora-stage2-m-inner.md) | closed |
