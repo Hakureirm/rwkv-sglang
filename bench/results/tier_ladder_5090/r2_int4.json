@@ -1,0 +1,135 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 2.86,
+      "out_tokens": 2048,
+      "out_tok_per_s": 716.3,
+      "req_per_s": 2.798,
+      "lat_p50_s": 0.357,
+      "lat_p99_s": 0.358,
+      "per_stream_tok_s": 716.3
+    },
+    {
+      "concurrency": 4,
+      "requests": 8,
+      "wall_s": 0.98,
+      "out_tokens": 2048,
+      "out_tok_per_s": 2089.7,
+      "req_per_s": 8.163,
+      "lat_p50_s": 0.489,
+      "lat_p99_s": 0.49,
+      "per_stream_tok_s": 522.4
+    },
+    {
+      "concurrency": 8,
+      "requests": 16,
+      "wall_s": 1.42,
+      "out_tokens": 4096,
+      "out_tok_per_s": 2890.9,
+      "req_per_s": 11.293,
+      "lat_p50_s": 0.706,
+      "lat_p99_s": 0.709,
+      "per_stream_tok_s": 361.4
+    },
+    {
+      "concurrency": 16,
+      "requests": 32,
+      "wall_s": 1.46,
+      "out_tokens": 8192,
+      "out_tok_per_s": 5613.9,
+      "req_per_s": 21.929,
+      "lat_p50_s": 0.724,
+      "lat_p99_s": 0.729,
+      "per_stream_tok_s": 350.9
+    },
+    {
+      "concurrency": 32,
+      "requests": 64,
+      "wall_s": 1.82,
+      "out_tokens": 16384,
+      "out_tok_per_s": 9011.3,
+      "req_per_s": 35.2,
+      "lat_p50_s": 0.899,
+      "lat_p99_s": 0.911,
+      "per_stream_tok_s": 281.6
+    },
+    {
+      "concurrency": 64,
+      "requests": 128,
+      "wall_s": 2.54,
+      "out_tokens": 32768,
+      "out_tok_per_s": 12875.7,
+      "req_per_s": 50.296,
+      "lat_p50_s": 1.257,
+      "lat_p99_s": 1.273,
+      "per_stream_tok_s": 201.2
+    },
+    {
+      "concurrency": 128,
+      "requests": 256,
+      "wall_s": 6.17,
+      "out_tokens": 65536,
+      "out_tok_per_s": 10625.2,
+      "req_per_s": 41.505,
+      "lat_p50_s": 3.058,
+      "lat_p99_s": 3.091,
+      "per_stream_tok_s": 83.0
+    },
+    {
+      "concurrency": 256,
+      "requests": 512,
+      "wall_s": 8.61,
+      "out_tokens": 131072,
+      "out_tok_per_s": 15229.8,
+      "req_per_s": 59.491,
+      "lat_p50_s": 4.238,
+      "lat_p99_s": 4.293,
+      "per_stream_tok_s": 59.5
+    },
+    {
+      "concurrency": 384,
+      "requests": 768,
+      "wall_s": 11.63,
+      "out_tokens": 196608,
+      "out_tok_per_s": 16900.1,
+      "req_per_s": 66.016,
+      "lat_p50_s": 5.719,
+      "lat_p99_s": 5.803,
+      "per_stream_tok_s": 44.0
+    },
+    {
+      "concurrency": 512,
+      "requests": 1024,
+      "wall_s": 14.01,
+      "out_tokens": 262144,
+      "out_tok_per_s": 18711.7,
+      "req_per_s": 73.093,
+      "lat_p50_s": 6.88,
+      "lat_p99_s": 6.999,
+      "per_stream_tok_s": 36.5
+    }
+  ],
+  "peak": {
+    "concurrency": 512,
+    "requests": 1024,
+    "wall_s": 14.01,
+    "out_tokens": 262144,
+    "out_tok_per_s": 18711.7,
+    "req_per_s": 73.093,
+    "lat_p50_s": 6.88,
+    "lat_p99_s": 6.999,
+    "per_stream_tok_s": 36.5
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30091,
+    "concurrencies": "1,4,8,16,32,64,128,256,384,512",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 2,
+    "min_reqs": 8,
+    "out": "r2_int4.json"
+  }
+}

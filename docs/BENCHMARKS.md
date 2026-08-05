@@ -919,6 +919,35 @@ config). The c=1 cell is the later megakernel flagship number (2026-07-21, F0066
 work lands on the bsz1 decode path only so far (F0064 §6: the concurrency GEMV kernel,
 `gemv_mb`, is a separate deferred round) — c=32/c=128 are not yet re-measured under it.
 
+## 5a. Which tier to run at which concurrency (RTX 5090, 1.5B, one session)
+
+fp16 and int4 on the same card, same sweep, two runs per tier agreeing to 0.4%:
+
+| concurrency | fp16 | int4 | int4 / fp16 |
+|---:|---:|---:|---:|
+| 1 | 496 | **716** | **1.44** |
+| 4 | 1,194 | **2,089** | **1.75** |
+| 8 | 2,232 | **2,897** | 1.30 |
+| 16 | 4,111 | **5,620** | 1.37 |
+| 32 | 8,498 | **9,057** | 1.07 |
+| 64 | **14,300** | 12,895 | 0.90 |
+| 128 | **19,960** | 10,686 | **0.54** |
+| 256 | **23,054** | 15,251 | 0.66 |
+| 512 | **23,617** | 18,708 | 0.79 |
+
+**The crossover is between 32 and 64.** Below it int4 is worth up to 1.75x; above
+it fp16 is worth up to 1.87x. int4 reads 1.64 GB per token against fp16's 2.81,
+which buys time only while weight traffic is what the step waits on — as the batch
+grows, one weight read serves the whole batch and the step turns compute-bound,
+where dequantisation is work fp16 never does. See F0090; the bandwidth accounting
+behind it is F0089.
+
+Note the c=128 int4 cell is *lower* than c=64: `W4Linear` sends M>64 to
+dequantise-then-cuBLAS, a known cliff. `RWKV_W4_TC_LARGE_M=1` recovers 5% of it
+and changes semantics to w4a8, so it stays opt-in.
+
+Raw: `bench/results/tier_ladder_5090/`.
+
 ## 6. The 10-GPU fleet (same code, same recipe, every card)
 
 1.5B fp16 full stack on sglang main, wall-clock. **Single-request = [bsz1](#g-bsz1) sustained decode

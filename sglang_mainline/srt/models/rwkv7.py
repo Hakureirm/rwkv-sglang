@@ -287,6 +287,7 @@ _SPARSE_FFN = os.environ.get("RWKV_SPARSE_FFN", "0") == "1"
 # weight VRAM. LoRA/norms/emb/head stay full precision. Opt-in; the checkpoint must be
 # produced by bench/quant_w4.py (carries .qweight/.scale instead of .weight). Default OFF.
 _W4 = os.environ.get("RWKV_W4", "0") == "1"
+_W4_ANNOUNCED = False  # one-time notice; every other fast path here has one
 
 # W1 stage-1 (task#52): w4a8 large-M tensor-core path. When on, W4Linear's M>64
 # dispatch goes to gemm_w4a8_tc (per-token int8 activations x int4 weights on the
@@ -452,6 +453,17 @@ class W4Linear(nn.Module):
             and (x.shape[-1] % self.group) == 0
             and w4_linear.available()
         ):
+            # Every other fast path here announces itself once; this one did not,
+            # so a w4 run could not be told apart from a w4 checkpoint silently
+            # dequantising to cuBLAS by reading the log. A liveness check that has
+            # nothing to look for is not a liveness check.
+            global _W4_ANNOUNCED
+            if not _W4_ANNOUNCED:
+                import sys
+                _W4_ANNOUNCED = True
+                print("[rwkv7] W4 int4 weight path ENABLED (fp16 activations, "
+                      f"group={self.group}; M-tiered gemv/gemm)",
+                      file=sys.stderr, flush=True)
             if M == 1:
                 return w4_linear.gemv_w4_m1(x, self.qweight, self.scale)
             # small batched decode: one int4 weight read feeds all M rows; each row
