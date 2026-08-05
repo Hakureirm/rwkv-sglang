@@ -144,9 +144,17 @@ _MEGA_ANNOUNCED = False
 # M-gate cuBLAS wins - measured crossover, F0028). Gate: greedy-EXACT
 # (verify_m1d + verify_batch) before it can be the default. Default OFF.
 _FUSED_LORA = os.environ.get("RWKV_FUSED_LORA", "0") == "1"
-# Fused LoRA wins only at small batch (measured crossover ~M=4→8); above this it
-# loses to cuBLAS-batched ReplicatedLinear, so gate lora4_m1/lora4_mn to T<=this.
-_FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "4"))
+# Fused LoRA wins only at small batch; above it, cuBLAS-batched ReplicatedLinear
+# wins, so gate lora4_m1/lora4_mn to T<=this. The crossover was first recorded as a
+# range (~M=4→8) and the gate set to 4, the safe end. Measured inside the range on
+# the shipped tree (5090, 1.5B fp16, alternating A/B in two sessions): 8 beats 4 by
+# ~11% at concurrency 8, and beats 16 and 32 at every concurrency measured up to 32
+# (7,229 tok/s at c=32 against 6,789 at gate 16 and 5,801 at gate 32) -- past the
+# crossover the fused kernel is the slower one, which is what the range meant.
+# Greedy-EXACT vs the numpy oracle at 4, 8, 16 and 32, so this is a speed choice
+# only; see F0086, including the between-instance spread that bounds it.
+_FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "8"))
+_FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "8"))
 # W1 (reverse-overtake): fuse the LoRA-output gate activations (w_log/a/v-residual
 # sigmoids + neg/mul/sub/add) into ONE launch on the bsz1 fp16 lora4_m1 path. The
 # H100 profile (F0051) found these ~5-7 tiny elementwise ops are the single largest

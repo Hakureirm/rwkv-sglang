@@ -53,12 +53,18 @@ cache flushed before every sample.
 - **bs1 decode is ours by 1.12–1.16×** — the single-stream megakernel path.
 - **bs8 decode is theirs by 1.56–1.62×** — their batched kernels and full-graph
   decode; the crossover sits between batch 1 and 8 and is unmeasured.
-  **Partly closed since**: raising this project's fused-LoRA batch gate from 4 to
-  8 (the crossover had been recorded as a range, ~M=4→8, and the gate set to the
-  safe end without measuring inside it) takes bs8 decode from 1,931 to 2,165
-  tok/s, +12.2%, replicated in an alternating off/on/off/on A/B, greedy 24/24
-  oracle-exact. That narrows the gap to ~1.44x; the remainder is unexplained and
-  still open.
+  **Partly closed since**: the fused-LoRA batch gate is now 8 rather than 4 (the
+  crossover had been recorded as a range, ~M=4→8, and the gate set to the safe end
+  without measuring inside it). On this project's own harness, on the tree that
+  ships, that is worth **+10.7% at concurrency 8** — 1,743 to 1,929 tok/s,
+  alternating A/B, oracle-exact at every gate value tried. An earlier version of
+  this note claimed +12.2% and a gap narrowed to ~1.44x: the measurement was real
+  but the commit that made it the default edited `sglang_overlay/`, which was
+  deleted a few commits later, so **the shipped default stayed at 4 until
+  2026-08-06** (F0086). The narrowed ratio is not restated here because the +10.7%
+  is measured on this project's harness while the 1.62x above is measured on the
+  other project's; comparing them would be mixing two yardsticks. Re-running the
+  cross-project cell is what would settle it, and has not been done.
 - **Short-prompt TTFT is theirs** (8.9 ms vs 17.4 ms at 128 tokens, bs1): their
   fixed-shape prefill CUDA-graph buckets. This project disables prefill CUDA
   graphs for RWKV-7 on purpose and the reason is structural, not a missing
