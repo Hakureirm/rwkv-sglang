@@ -134,5 +134,25 @@ move the same way. It would not survive on a single pair of numbers.
 - `bench/profile_components.py`: the LoRA component takes the model's branch
   instead of a torch copy of it, and says which branch it timed.
 
+## The cross-project cell, on the yardstick the ratio was taken with
+
+Withdrawing the ratio was the right call and re-running it was the way to restore
+it. Our side re-measured on the other project's harness, both gate values, two
+rounds each; **their column is the 2026-08-04 number and was not re-run**, which
+the gate-4 arm makes checkable: it reads 1,936.4 / 1,937.3 / 1,926.2 against
+1,931 / 1,930 / 1,922 that day — **0.2-0.4% apart**, so the card and harness are
+in the same state.
+
+| batch / prompt | ours, gate 4 | ours, gate 8 | theirs | theirs/ours | was |
+|---|---:|---:|---:|---:|---:|
+| 8 / 128 | 1,936.4 | 2,167.3 | 3,122 | **1.441** | 1.617 |
+| 8 / 512 | 1,937.3 | 2,168.3 | 3,007 | **1.387** | 1.558 |
+| 8 / 2048 | 1,926.2 | 2,159.4 | 3,040 | **1.408** | 1.582 |
+| 1 / 128-2048 | — | 514.4-514.6 | 444-457 | 0.863-0.888 | unchanged |
+
++11.9% on this harness against +10.7% on ours, and the original claim of +12.2%
+lands inside that. **bs8 gap 1.56-1.62x -> 1.39-1.44x**; bs1 untouched, as the
+gate covers T=1 either way.
+
 Correctness re-gated on the shipped tree at both values, because a gate that only
 ever sees the new arm cannot tell a pass from a check that never fired.

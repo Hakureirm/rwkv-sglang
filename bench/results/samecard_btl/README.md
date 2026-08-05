@@ -48,23 +48,45 @@ cache flushed before every sample.
 | 8 | 512 | 45,717 | 49,512 |
 | 8 | 2048 | 38,495 | 50,852 |
 
+## Re-measured on this harness after the LoRA gate landed (2026-08-06)
+
+The fused-LoRA batch gate is now 8 rather than 4. The crossover had been recorded
+as a range, ~M=4→8, and the gate set to the safe end without measuring inside it;
+worse, the commit that measured it and raised the default edited `sglang_overlay/`
+— the retired line, deleted a few commits later — so **the shipped default stayed
+at 4 until 2026-08-06** (F0086).
+
+Our column re-run here on the same harness, both gate values, two rounds each,
+decode tok/s (median of 5, 2 warmups). **Their column is not re-run**: it is still
+the 2026-08-04 measurement.
+
+| batch | prompt | ours, gate 4 | ours, gate 8 | theirs (08-04) | theirs/ours | was |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 128 | — | 514.6 | 448 | 0.871 | 0.885 |
+| 1 | 512 | — | 514.5 | 457 | 0.888 | 0.891 |
+| 1 | 2048 | — | 514.4 | 444 | 0.863 | 0.866 |
+| 8 | 128 | 1,936.4 | **2,167.3** | 3,122 | **1.441** | 1.617 |
+| 8 | 512 | 1,937.3 | **2,168.3** | 3,007 | **1.387** | 1.558 |
+| 8 | 2048 | 1,926.2 | **2,159.4** | 3,040 | **1.408** | 1.582 |
+
+**bs8 gap 1.56–1.62x → 1.39–1.44x. bs1 is untouched** (the gate covers T=1 either
+way), and that is the control: our gate-4 arm today reads 1,936.4 / 1,937.3 /
+1,926.2 against 1,931 / 1,930 / 1,922 on 2026-08-04 — **0.2–0.4% apart**, so the
+card and the harness are in the same state and the comparison against their
+un-re-run column holds. Raw: `ours-5090-regate-r{1,2}_gate{4,8}.jsonl`.
+
+Two things this does not say. It is a decode-column result only — the prefill
+column of this harness does not reproduce (see the caveat above). And 1.39–1.44x
+is still their result, not parity: what is left is the batched kernels, and the
+gate was the part of it that cost nothing to fix.
+
 ## Reading
 
 - **bs1 decode is ours by 1.12–1.16×** — the single-stream megakernel path.
-- **bs8 decode is theirs by 1.56–1.62×** — their batched kernels and full-graph
-  decode; the crossover sits between batch 1 and 8 and is unmeasured.
-  **Partly closed since**: the fused-LoRA batch gate is now 8 rather than 4 (the
-  crossover had been recorded as a range, ~M=4→8, and the gate set to the safe end
-  without measuring inside it). On this project's own harness, on the tree that
-  ships, that is worth **+10.7% at concurrency 8** — 1,743 to 1,929 tok/s,
-  alternating A/B, oracle-exact at every gate value tried. An earlier version of
-  this note claimed +12.2% and a gap narrowed to ~1.44x: the measurement was real
-  but the commit that made it the default edited `sglang_overlay/`, which was
-  deleted a few commits later, so **the shipped default stayed at 4 until
-  2026-08-06** (F0086). The narrowed ratio is not restated here because the +10.7%
-  is measured on this project's harness while the 1.62x above is measured on the
-  other project's; comparing them would be mixing two yardsticks. Re-running the
-  cross-project cell is what would settle it, and has not been done.
+- **bs8 decode is theirs by 1.56–1.62×** as measured on 2026-08-04, **1.39–1.44×
+  after the LoRA gate landed** (re-measured section above) — their batched kernels
+  and full-graph decode; the crossover sits between batch 1 and 8 and is
+  unmeasured.
 - **Short-prompt TTFT is theirs** (8.9 ms vs 17.4 ms at 128 tokens, bs1): their
   fixed-shape prefill CUDA-graph buckets. This project disables prefill CUDA
   graphs for RWKV-7 on purpose and the reason is structural, not a missing
