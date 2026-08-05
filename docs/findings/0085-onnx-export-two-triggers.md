@@ -107,8 +107,25 @@ reaches for first. The pathology needs an inverse that stays near 1 while the po
 do not, which is what the delta rule produces. I checked three synthetic
 constructions before accepting that the regression test had to be end-to-end.
 
-Cost, honestly: a T=1024 forward is about a third slower on CPU than on the solve it
-replaces. Not measured on GPU yet.
+Cost, measured on both. CPU end to end: a T=1024 forward runs about a third slower
+than on the solve. RTX 5090, the inverse step against the per-chunk solve with the
+loop included, at 1.5B shapes: **2.5x at T=1024**, where 16 chunks do not fill the
+card, falling to **1.2x at T=4096**, flat in batch and head count.
+
+## Cross-checked on the GPU, because everything above was CPU
+
+Everything was found and fixed on a CPU, and float32 cancellation is exactly the
+kind of thing that reshuffles when the matmul changes. On the 5090
+(`torch_device = cuda`, torch 2.11+cu130):
+
+- Model suite **130 passed, 0 failed, 1583 subtests** (130 rather than the CPU's 126
+  because the CUDA-gated tests run). Two failures on the first attempt were
+  `accelerate` missing from the container, not the model.
+- The same 40-seed sweep: **0/40** with block substitution, **7/40** with Newton.
+  CPU said 8/40 — seed 34 is finite on one and not on the other, which is what a
+  borderline cancellation should do and is a reason not to trust a single backend.
+- Both seeds the regression test pins (7 and 33) NaN on CUDA as well, so the test
+  discriminates on the GPU and not only where it was written.
 
 ## Two false alarms recorded on the way
 
