@@ -87,3 +87,4 @@ findings, not this table.
 | F0086 | [A measured +10.7% never shipped: the default was raised in the tree that was about to be deleted](findings/0086-the-improvement-was-committed-to-the-retired-tree.md) | closed |
 | F0087 | [W1'': the 2<=T<=gate band was doing in torch what both of its neighbours had a kernel for — +5.2% at bs8, +...](findings/0087-the-band-between-the-two-fused-paths.md) | closed |
 | F0088 | [lora4_mn stage2 re-read its weights once per token: −33% on the kernel, +1.6% on the step, and the gate sti...](findings/0088-lora-stage2-m-inner.md) | closed |
+| F0089 | [Single-stream fp16 has 17% of headroom, not a factor: we are at 86% of the card's achievable read bandwidth...](findings/0089-the-single-stream-roof.md) | closed |

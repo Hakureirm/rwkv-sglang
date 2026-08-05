@@ -1023,7 +1023,16 @@ benchmarked a hand-patched Albatross on T4.
 How to read it: the gap tracks memory bandwidth ([bandwidth-bound](#g-bound) territory). On inference cards we are close (0.90 on
 L4); on HBM monsters its whole-layer fused kernel stretches ahead (0.51 on B200) because our
 per-operator launch overhead grows in relative terms as compute gets faster — which is
-precisely what our next speed increment (CUDA graphs + deeper fusion) targets. Meanwhile our
+precisely what our next speed increment (CUDA graphs + deeper fusion) targets.
+
+**How much is left, measured (F0089).** On the 5090 a decode step moves 2.81 GB
+(2.79 GB of weights — the embedding is gathered, not read — plus 25 MB of recurrent
+state) against 1,688 GB/s of achievable read bandwidth, so the roof is **600 tok/s**.
+We run at 514.6 = **86% of it**, Albatross at 554.1 = **92%**. Single-stream fp16
+therefore has **17% of headroom in total** and the gap above is about half of it —
+these ratios are competing for a fraction, not for a factor. The int4 row below is
+not bounded this way: at 742.6 tok/s it is already past this fp16 roof, because it
+reads fewer bytes. Meanwhile our
 **int4 path now reaches 1.3402× of Albatross's fp16 on the author's own 5090** (742.6 vs 554.11,
 cross-precision, both re-measured in one session 2026-07-27 — it read 0.9908× at 548.8 vs 553.9
 before the megakernel line landed), and the T4 row shows the coverage difference. Raw:
