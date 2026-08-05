@@ -12,11 +12,16 @@ severity: medium
 
 ## TL;DR
 
-Six `RUN_SLOW` ONNX export subtests had been failing since the port existed, with
+Seven `RUN_SLOW` ONNX export subtests had been failing since the port existed, with
 `aot_autograd expected to have an entirely functional graph, but found aten.detach_`.
 The cause is **two** operations, and every earlier attempt failed because removing
-either one alone changes nothing observable. Both are now replaced with exact
-equivalents; the subtests go **6 failed → 8 passed, 16 subtests passed**.
+either one alone changes nothing observable. Both are now replaced; on the upstream
+PR branch the export tests go **7 failed / 12 passed → 12 passed, 16 subtests
+passed**, and the model suite from 125 to 126 passing.
+
+The first replacement for the second trigger was **exact in exact arithmetic and
+broken in float32**, and shipped a NaN into a fifth of long prefills before a test
+caught it. That half of the story is below, and it is the more useful half.
 
 ## Mechanism
 
@@ -43,7 +48,8 @@ Bisection from a stub that exports cleanly, adding one operation at a time to th
 | **`cumprod`** | ConversionError |
 | **`linalg.solve_triangular`** | ConversionError |
 | `linalg.inv`, `linalg.solve` (as replacements) | ConversionError |
-| Neumann series, Newton doubling (as replacements) | CLEAN |
+| Neumann series, Newton doubling (as replacements) | CLEAN — and numerically wrong, see below |
+| block forward substitution (as replacement) | CLEAN |
 
 ## The replacements are exact, not approximate
 
@@ -51,11 +57,10 @@ Bisection from a stub that exports cleanly, adding one operation at a time to th
   product of factors below one underflows where the equivalent sum of logs does
   not, and `c_prev = c / w_c` becomes a subtraction rather than a division by a
   possibly-tiny value.
-- `lhs` is unit lower triangular, so `qb` is nilpotent and the Neumann series for
-  `(I + qb)^-1` terminates. Newton doubling reaches it in `ceil(log2(span))` steps.
-  Against `solve_triangular` in float64: max abs difference **1.8e-15**, and
-  `|inv @ lhs - I|` = **5.0e-16**. Also moved out of the per-chunk serial loop into
-  one batched pass.
+- `lhs` is unit lower triangular, so `qb` is nilpotent and the series for
+  `(I + qb)^-1` terminates. **This is where I went wrong** — see the next section.
+  The shipped replacement is block forward substitution, block 8, batched over every
+  chunk at once instead of solving inside the serial loop.
 
 ## Why every earlier attempt "failed"
 
@@ -70,16 +75,59 @@ elimination reports every true cause as false.** Nothing in the earlier method c
 have found this; what found it was starting from a known-clean state and adding one
 thing at a time, which makes each cause visible on its own.
 
+## The first fix was exact in exact arithmetic and useless in float32
+
+Newton doubling `X <- X(2I - AX)` from `X0 = I - qb` terminates after
+`ceil(log2(span))` steps because `qb` is nilpotent. It agreed with float64
+`solve_triangular` to 1.8e-15 **on random triangular matrices**, which is what I
+validated it on. On the matrices the model actually produces it is garbage:
+
+| quantity | value on a real chunk |
+|---|---|
+| max abs entry of `qb` | 0.977 |
+| max abs entry of the true inverse | **1.0** |
+| max abs entry of `qb^32` | **1.3e11** |
+| Newton result, max abs entry | 1.2e4 (answer: 1.0) |
+| plain Neumann sum, max abs entry | 2.7e4 |
+| float32 `solve_triangular` | 2.4e-8 from the float64 reference |
+| block forward substitution, block 4 / 8 / 16 | 1.3e-7 / **6.6e-7** / 1.9e-5 |
+
+Eleven orders of magnitude of cancellation against seven digits of mantissa. The
+result then went to NaN one layer on. Measured incidence, 40 random inits per cell:
+
+| T | 32 | 64 | 128 | 256 | 1024 |
+|---|---|---|---|---|---|
+| Newton | 0/40 | 0/40 | 0/40 | 1/40 | **8/40** |
+| block substitution | — | — | — | — | **0/140** |
+
+**Random triangular matrices cannot detect this, and that is the whole trap.** Their
+own inverses are as large as the intermediate powers, so the cancellation is
+invisible and the series looks accurate to 1e-6 — on exactly the input a test
+reaches for first. The pathology needs an inverse that stays near 1 while the powers
+do not, which is what the delta rule produces. I checked three synthetic
+constructions before accepting that the regression test had to be end-to-end.
+
+Cost, honestly: a T=1024 forward is about a third slower on CPU than on the solve it
+replaces. Not measured on GPU yet.
+
 ## Two false alarms recorded on the way
 
 - A "4× prefill collapse" attributed to a flag was run-order noise; an alternating
   A/B showed the same spread with the flag off.
-- A "test I broke" was a stale `__pycache__` after `git checkout`: the test passes
-  in isolation. See the open item below for what is actually left.
+- A "test I broke" was blamed on a stale `__pycache__` after `git checkout`, and
+  then on suite ordering. **Both readings were wrong.** The test
+  (`test_the_last_real_token_is_found_by_index_not_by_float_arithmetic`) draws its
+  weights unseeded, so every process gets a different model; it failed whenever the
+  draw landed in the fifth that NaNs. There was never any order dependence — the
+  first "passes alone" observation was a lucky draw, and I built a whole bisection
+  harness on top of it before checking that premise. Diagnosis started for real when
+  the assertion was instrumented and both sides printed `nan`.
 
-## Open
+## What the regression test pins
 
-`test_the_last_real_token_is_found_by_index_not_by_float_arithmetic` passes alone
-and with its neighbour, and fails in the full suite — reproducibly, with no random
-ordering plugin installed. The full suite passed before this change, so the order
-dependence is ours. Not yet diagnosed.
+`test_a_long_prefill_stays_finite_where_a_series_inverse_would_not`, seeded at two
+of the failing draws, at T=1024. Run against all three implementations before being
+committed: **fails** on Newton, **passes** on `solve_triangular` and on the block
+substitution. A test that has not been run against the code it is about is not known
+to have any discriminating power — the unseeded neighbour above is what happens
+without that step.
