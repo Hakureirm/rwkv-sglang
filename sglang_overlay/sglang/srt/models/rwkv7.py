@@ -144,9 +144,17 @@ _MEGA_ANNOUNCED = False
 # M-gate cuBLAS wins - measured crossover, F0028). Gate: greedy-EXACT
 # (verify_m1d + verify_batch) before it can be the default. Default OFF.
 _FUSED_LORA = os.environ.get("RWKV_FUSED_LORA", "0") == "1"
-# Fused LoRA wins only at small batch (measured crossover ~M=4→8); above this it
-# loses to cuBLAS-batched ReplicatedLinear, so gate lora4_m1/lora4_mn to T<=this.
-_FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "4"))
+# Fused LoRA wins only at small batch; above this it loses to cuBLAS-batched
+# ReplicatedLinear, so gate lora4_m1/lora4_mn to T<=this. The crossover was
+# originally recorded as ~M=4→8 and the gate set to the safe end of that range;
+# measuring inside it (2026-08-05, RTX 5090, 1.5B fp16) puts M=8 on the winning
+# side: batched decode goes 1931→2165 tok/s (+12.2%), bsz1 unchanged, greedy
+# 24/24 oracle-exact with the gate both raised and not. The A/B alternates
+# off/on/off/on in one session because an earlier uncontrolled comparison read a
+# run-order effect in the prefill column as a regression caused by this flag;
+# prefill on this harness is bimodal (13.4k vs 28.0k tok/s at the SAME setting)
+# and cannot resolve a change of this size either way.
+_FUSED_LORA_MAX_BS = int(os.environ.get("RWKV_FUSED_LORA_MAX_BS", "8"))
 # W1 (reverse-overtake): fuse the LoRA-output gate activations (w_log/a/v-residual
 # sigmoids + neg/mul/sub/add) into ONE launch on the bsz1 fp16 lora4_m1 path. The
 # H100 profile (F0051) found these ~5-7 tiny elementwise ops are the single largest

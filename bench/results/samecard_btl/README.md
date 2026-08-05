@@ -30,6 +30,15 @@ cache flushed before every sample.
 
 ## Prefill tok/s (median)
 
+> **The prefill column of this harness does not reproduce.** Running the same
+> server at the same setting four times in one session (2026-08-05) gave 13,396
+> / 28,752 / 28,047 / 13,439 tok/s at bs8 / prompt 128 — a 2.1x spread with
+> nothing changed between runs, alternating with run order rather than with any
+> setting. The decode column over those same four runs was stable to 0.4%. Read
+> the numbers below as order-of-magnitude only; a difference smaller than ~2x in
+> this column is not evidence of anything. This was found while chasing an
+> apparent regression that turned out to be this noise.
+
 | batch | prompt | ours | theirs |
 |---:|---:|---:|---:|
 | 1 | 128 | 7,370 | 14,407 |
@@ -44,9 +53,20 @@ cache flushed before every sample.
 - **bs1 decode is ours by 1.12–1.16×** — the single-stream megakernel path.
 - **bs8 decode is theirs by 1.56–1.62×** — their batched kernels and full-graph
   decode; the crossover sits between batch 1 and 8 and is unmeasured.
+  **Partly closed since**: raising this project's fused-LoRA batch gate from 4 to
+  8 (the crossover had been recorded as a range, ~M=4→8, and the gate set to the
+  safe end without measuring inside it) takes bs8 decode from 1,931 to 2,165
+  tok/s, +12.2%, replicated in an alternating off/on/off/on A/B, greedy 24/24
+  oracle-exact. That narrows the gap to ~1.44x; the remainder is unexplained and
+  still open.
 - **Short-prompt TTFT is theirs** (8.9 ms vs 17.4 ms at 128 tokens, bs1): their
-  fixed-shape prefill CUDA-graph buckets. Our prefill graph is disabled at boot
-  (ADR-0008); at 512+ tokens prefill is par.
+  fixed-shape prefill CUDA-graph buckets. This project disables prefill CUDA
+  graphs for RWKV-7 on purpose and the reason is structural, not a missing
+  feature: the model calls its linear-attention backend directly, so the
+  backend's per-batch varlen metadata would sit *inside* the captured region and
+  be frozen at capture. Fixed-shape bucketing is what makes their configuration
+  able to capture it at all. Closing this means moving that metadata out of the
+  captured region, not flipping a flag. (Subject to the noise caveat above.)
 - Their documented launch caps at 16 running requests, so the high-concurrency
   regime (our 1.5B 29,533 tok/s at c=320, BENCHMARKS §5) has no comparable cell
   under their published configuration. The flag is adjustable; "as documented"
