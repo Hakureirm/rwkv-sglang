@@ -18,11 +18,11 @@ import torch
 
 # Import the deployed fused module. Prefer the installed overlay (== production, i.e.
 # the overlay merged into sglang's site-packages); fall back to a raw repo checkout's
-# sglang_overlay/ on PYTHONPATH.
+# sglang_mainline/ on PYTHONPATH.
 try:
     from sglang.srt.layers.attention.rwkv7_kernels import fused
 except Exception:
-    OV = Path(__file__).resolve().parents[1] / "sglang_overlay"
+    OV = Path(__file__).resolve().parents[1] / "sglang_mainline"
     sys.path.insert(0, str(OV))
     from sglang.srt.layers.attention.rwkv7_kernels import fused  # noqa: E402
 

@@ -23,7 +23,7 @@ from pathlib import Path
 import torch
 
 # load the JIT ext + helpers from the overlay
-OV = Path(__file__).resolve().parents[1] / "sglang_overlay/sglang/srt/layers/attention/rwkv7_kernels"
+OV = Path(__file__).resolve().parents[1] / "sglang_mainline/srt/layers/attention/rwkv7_kernels"
 sys.path.insert(0, str(OV))
 import fast_linear as FL  # noqa: E402
 

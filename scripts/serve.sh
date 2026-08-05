@@ -15,7 +15,7 @@
 # this RWKV/MambaPool config regardless of free memory, silently forcing eager
 # decode for batch>24 (3–8x throughput loss). We set it explicitly.
 #
-# Deploy the overlay first: `BOX=... SP=... bash scripts/deploy.sh`.
+# Deploy the overlay first: `BOX=... SP=... bash scripts/serve.sh`.
 #
 # Usage:
 #   MODEL=/path/to/rwkv7-1.5b bash scripts/serve.sh              # throughput mode (default)

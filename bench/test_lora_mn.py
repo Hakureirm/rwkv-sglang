@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 import torch
 
-OV = Path(__file__).resolve().parents[1] / "sglang_overlay/sglang/srt/layers/attention/rwkv7_kernels"
+OV = Path(__file__).resolve().parents[1] / "sglang_mainline/srt/layers/attention/rwkv7_kernels"
 sys.path.insert(0, str(OV))
 
 from torch.utils.cpp_extension import load  # noqa: E402

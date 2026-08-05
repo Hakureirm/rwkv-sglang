@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 import torch
 
-OV = Path(__file__).resolve().parents[1] / "sglang_overlay/sglang/srt/layers/attention/rwkv7_kernels"
+OV = Path(__file__).resolve().parents[1] / "sglang_mainline/srt/layers/attention/rwkv7_kernels"
 from torch.utils.cpp_extension import load  # noqa: E402
 load(name="rwkv7_glue", sources=[str(OV / "cuda" / "rwkv7_glue.cu")], is_python_module=False,
      verbose=False, extra_cflags=["-O3"], extra_cuda_cflags=["-O3", "-Xptxas", "-O3"])

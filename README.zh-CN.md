@@ -28,7 +28,7 @@
 | 交互图表(悬停/缩放/开关精度档) | **[hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)** |
 | 每条头条数字 → 原始日志 | [`CONTRIBUTIONS.md`](CONTRIBUTIONS.md) |
 
-**同时支持 sglang `main` 和 v0.5.10**——同一份代码,版本差异在运行时自动识别。
+**跑在 sglang `main` 上**,实现在 [`sglang_mainline/`](sglang_mainline/) ——就是产出下列数字的那份代码。
 模型支持的核心部分已提交上游:[sglang PR #30115](https://github.com/sgl-project/sglang/pull/30115)。
 
 ## 为什么用 RWKV-7 做推理服务
@@ -86,8 +86,6 @@ python -m sglang.launch_server --model-path <rwkv7模型目录> --trust-remote-c
     --attention-backend triton --dtype float16 --disable-radix-cache
 ```
 
-**在 sglang v0.5.10 上**(pip 安装的环境):`BOX=<主机> SP=<site-packages路径> bash scripts/deploy.sh`
-——rsync 覆盖层并应用两处单行补丁。
 
 手写加速核通过环境变量按需开启,全部经过贪心精确验证;推荐的生产组合见
 [`scripts/serve.sh`](scripts/serve.sh)。模型:任意 fla 格式的 RWKV-7 权重
@@ -98,12 +96,12 @@ python -m sglang.launch_server --model-path <rwkv7模型目录> --trust-remote-c
 ## 目录结构
 
 ```
-sglang_overlay/    实现本体:模型、状态后端、CUDA/Triton 计算核、投机解码 worker
+sglang_mainline/    实现本体:模型、状态后端、CUDA/Triton 计算核、投机解码 worker
 sglang_main_port/  同一份代码在 sglang main 上的应用方式(补丁 + 文件清单)
 mlx_port/          Apple Silicon 原生实现(MLX + Metal 核)
 bench/             全部基准与正确性验证脚本;原始输出在 bench/results/
 docs/              编号的测量报告(findings)与设计决策(ADR)——完整证据链
-scripts/           deploy.sh(v0.5.10 部署)· serve.sh(推荐启动参数)
+scripts/           serve.sh(推荐启动参数)
 ```
 
 ## 每个数字的出处

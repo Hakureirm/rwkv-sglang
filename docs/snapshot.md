@@ -62,8 +62,8 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 - ✅ **M1 DONE** — RWKV-7 0.1B runs in sglang, **EXACT greedy-match vs oracle**
   (lead-verified `bench/verify_m1d.py`; HEAD 700e554). [[F0005]]
   - M1a kernels (gate pass) · M1b converter (399 tensors) · M1c boot · M1d exact match.
-  - Deliverable: `sglang_overlay/` (model+backend+config+wiring) + converter; deploy
-    via `scripts/deploy.sh`. scale=1.0, 2 conv token-shift states, fp32 state.
+  - Deliverable: `sglang_mainline/` (model+backend+config+wiring) + converter; deploy
+    via `scripts/serve.sh`. scale=1.0, 2 conv token-shift states, fp32 state.
 - ✅ **M2** scale + perf:
   - ✅ **M2-baseline** [[F0006]]: bf16 0.1B + **1.5B EXACT**, fits 3090; throughput profiled.
   - ✅ **M2b cuda-graph** [[F0008]]: decode **7.5-21× faster than eager**, still EXACT (lead-verified);
@@ -169,7 +169,7 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
 - 🔄 **remaining**: w4/w8 M=64 long-K final gap (cp.async landed; next lever = 256-thread TC block) · tp/pp throughput-tuned numbers (cuda-graph ON) + 7.2B multi-GPU · W4/W8 × tp>1 · per-arch small-M cutover (T4) ·
   7.2B GPTQ streamed calibration · fp8 · upstream PR (main port DONE — unblocked).
 
-> Dev model: `sglang_overlay/` (new+edited files) → `scripts/deploy.sh` rsyncs into the
+> Dev model: `sglang_mainline/` (new+edited files) → `scripts/serve.sh` rsyncs into the
 > box's wheel sglang site-packages (no editable build). Head config = 12×64 (from r_k).
 
 > ✅ **BENCHMARK RIGOR (DONE)**: the new shared-GPU numbers (F0006/F0008/F0009 +

@@ -26,7 +26,7 @@ is `head_dim * norm_eps` (see the numpy oracle — copy its semantics, not our C
 
 - **The WKV recurrence** (the only custom kernel that matters first): sequential over T,
   parallel over heads and V-columns; fp32 state. Reference mapping:
-  [`sglang_overlay/.../rwkv7_kernels/wkv_recurrent.py`](../sglang_overlay/sglang/srt/layers/attention/rwkv7_kernels/wkv_recurrent.py)
+  [`sglang_mainline/.../rwkv7_kernels/wkv_recurrent.py`](../sglang_mainline/srt/layers/attention/rwkv7_kernels/wkv_recurrent.py)
   (Triton) and `mlx_port/rwkv7_mlx.py` (Metal — one threadgroup per head, one thread per
   V column). A first port can be a pure-ops loop (that alone passed 24/24 on MLX); the
   fused kernel is a speed increment, not a correctness requirement.

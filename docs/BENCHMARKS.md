@@ -15,10 +15,14 @@ quant rows). The **0.1B** (`rwkv7-0.1b-fla`) and **7.2B** (`rwkv7-7.2b-fla`) row
 labeled with their size. Precision is fp16/bf16 unless a row names a quant tier (w8g64 / w8a8 /
 int4-GPTQ / w4).
 
-**Engine versions.** Since 2026-07-05 all new measurements run on **sglang main**; earlier
-numbers were measured on v0.5.10 and are kept, marked "(v0.5.10)". Where both exist we show
-both — the migration itself changed nothing for correctness (verified) and made the 3090
-slightly faster across the board.
+**Engine versions.** Since 2026-07-05 all new measurements run on **sglang main**, from the
+implementation in [`sglang_mainline/`](../sglang_mainline/) — which is the tree that produced
+them, committed as such. Rows marked "(v0.5.10)" were measured on an earlier line whose code
+has since been **removed** from this repository: it solved chunk-boundary state a different
+way and was no longer the thing being run or maintained. Those rows are kept because deleting
+a measurement because its code was retired would be rewriting the record, but they cannot be
+re-run from this repository and are historical. Everything unmarked is reproducible from
+`sglang_mainline/` today.
 
 **Two timing windows** (do not compare across them):
 
@@ -551,7 +555,7 @@ other (2,051.0 / 2,047.2), and the c=128 point repeated across two independent r
 section originally flagged the mechanism as suspected; a dedicated concurrency map on the
 3090 has since pinned the edge at exactly **c=64→66** (1,429.5 tok/s @c=64 → 719.7 @c=66),
 which is the M=64 boundary where the hand-written w4 tiers end (gemv M=1, small-batch 2–8,
-wmma 8–64; `sglang_overlay/sglang/srt/layers/attention/rwkv7_kernels/w4_linear.py`) and
+wmma 8–64; `sglang_mainline/srt/layers/attention/rwkv7_kernels/w4_linear.py`) and
 every projection falls back to dequant→cuBLAS. Two architectures, one edge, one mechanism
 (sm86 + sm120 — the 5090's 64→96 gap simply never sampled the 65–95 range). Inside the
 fallback region the batch is too small to amortize the per-step full-weight dequant: the

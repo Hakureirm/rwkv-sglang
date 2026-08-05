@@ -43,7 +43,7 @@ def build():
     here = Path(__file__).resolve().parent
     candidates = [
         here / "rwkv7_w4.cu",  # flat (rsync'd next to this script)
-        here.parent / "sglang_overlay/sglang/srt/layers/attention/rwkv7_kernels/cuda/rwkv7_w4.cu",
+        here.parent / "sglang_mainline/srt/layers/attention/rwkv7_kernels/cuda/rwkv7_w4.cu",
     ]
     src = next((c for c in candidates if c.exists()), None)
     if src is None:

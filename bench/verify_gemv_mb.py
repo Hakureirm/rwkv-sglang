@@ -19,7 +19,7 @@ def _load():
     here = Path(__file__).resolve().parent
     src = (
         here.parent
-        / "sglang_overlay/sglang/srt/layers/attention/rwkv7_kernels/cuda/rwkv7_fast.cu"
+        / "sglang_mainline/srt/layers/attention/rwkv7_kernels/cuda/rwkv7_fast.cu"
     )
     load(name="rwkv7_fast", sources=[str(src)], is_python_module=False, verbose=False,
          extra_cflags=["-O3"], extra_cuda_cflags=["-O3", "-Xptxas", "-O3"])

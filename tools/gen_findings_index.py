@@ -18,14 +18,18 @@ for p in sorted(glob.glob("docs/findings/*.md")):
         t = re.search(r'title:\s*>-?\s*\n\s+(.+)', s) or re.search(r'^title:\s*([^\n]+)', s, re.M)
     if not t:
         t = re.search(r'^#\s+(?:Finding\s+F?\d+[a-z]?:?\s*)?(.+)', s, re.M)
-    status = re.search(r'status:\s*(\S+)', s)
+    # Front-matter first, then a bolded "**Status: x**" in the body. Findings that
+    # predate the front-matter convention carry the latter, and defaulting them to
+    # "open" reported closed work as outstanding -- F0059 was resolved and still
+    # showed open because it states its status in prose.
+    status = re.search(r'status:\s*(\S+)', s) or re.search(r'\*\*Status:\s*([A-Za-z]+)', s)
     name = os.path.basename(p)
     base = name.rsplit('.md', 1)[0]
     fid_s = fid.group(1) if fid else "F" + base.split('-')[0]
     title = re.sub(r'\s+', ' ', (t.group(1).strip().rstrip('"') if t else base))
     if len(title) > 110:
         title = title[:107] + "..."
-    rows.append((fid_s, title, status.group(1) if status else "open", name))
+    rows.append((fid_s, title, (status.group(1).rstrip(".").lower() if status else "open"), name))
 
 out = [
     "# Findings index",

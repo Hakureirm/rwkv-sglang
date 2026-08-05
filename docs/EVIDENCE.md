@@ -57,8 +57,11 @@ hides reasoning damage
 | claim → raw-log map | [`CONTRIBUTIONS.md`](../CONTRIBUTIONS.md) |
 | dated methodology + negative results | [`docs/findings/`](findings/) via the [index](FINDINGS.md) |
 
-Engine versions: since 2026-07-05 everything new runs on **sglang main**; older rows
-are kept and marked "(v0.5.10)". The migration was verified correctness-neutral.
+Engine versions: since 2026-07-05 everything new runs on **sglang main**, from
+[`sglang_mainline/`](../sglang_mainline/) — the tree that produced the numbers, now
+committed. Rows marked "(v0.5.10)" came from an earlier line that has been removed from
+this repository; they are kept as record but are not reproducible from it. If a number
+here matters to you, check which of the two it is before trying to re-run it.
 
 ## 5. Re-running
 

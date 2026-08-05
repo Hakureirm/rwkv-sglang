@@ -36,8 +36,8 @@ Find your number by what you need:
 | interactive charts (hover / zoom / toggle tiers) | **[hakureirm.github.io/rwkv-sglang/interactive/](https://hakureirm.github.io/rwkv-sglang/interactive/)** |
 | each headline claim → its raw log | [`CONTRIBUTIONS.md`](CONTRIBUTIONS.md) |
 
-**Runs on sglang `main` and on v0.5.10** — one code base, the version difference is detected
-at runtime. The model-support core is submitted upstream:
+**Runs on sglang `main`**, from [`sglang_mainline/`](sglang_mainline/) — the tree that
+produced the numbers below, committed as such. The model-support core is submitted upstream:
 [sglang PR #30115](https://github.com/sgl-project/sglang/pull/30115).
 
 ## Why RWKV-7 for serving
@@ -72,8 +72,6 @@ python -m sglang.launch_server --model-path <rwkv7-model-dir> --trust-remote-cod
     --attention-backend triton --dtype float16 --disable-radix-cache
 ```
 
-**On sglang v0.5.10** (pip install): `BOX=<host> SP=<site-packages> bash scripts/deploy.sh`
-— rsyncs the overlay and applies two one-line patches.
 
 The hand-written fast-path kernels are opt-in environment flags, all greedy-exact; the
 recommended production set is in [`scripts/serve.sh`](scripts/serve.sh). Models: any
@@ -85,12 +83,12 @@ on ModelScope (`Hakureirm/rwkv7-g1-*`).
 ## Layout
 
 ```
-sglang_overlay/    the implementation: model, state backend, CUDA/Triton kernels, spec-decode worker
-sglang_main_port/  the same code as applied to sglang main (patch + file list)
+sglang_mainline/   the implementation that runs: model, state backend, CUDA kernels, spec-decode worker
+sglang_main_port/  the wiring edits to sglang's own files (upstream_edits.patch)
 mlx_port/          native Apple Silicon implementation (MLX + Metal kernel)
 bench/             every benchmark and correctness-gate script; raw outputs in bench/results/
 docs/              USER.md · EVIDENCE.md · BENCHMARKS.md · FINDINGS.md + findings/ — the evidence chain
-scripts/           deploy.sh (v0.5.10 deploy) · serve.sh (recommended launch flags)
+scripts/           serve.sh (recommended launch flags)
 tools/             doc generators (gen_findings_index.py)
 ```
 

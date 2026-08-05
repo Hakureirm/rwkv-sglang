@@ -22,7 +22,11 @@ def greedy(model, chunk_size, prompt, gen, dtype, mem):
     import sglang as sgl
     eng = sgl.Engine(
         model_path=model, skip_tokenizer_init=True,
-        disable_cuda_graph=True, disable_piecewise_cuda_graph=True,
+        # disable_piecewise_cuda_graph was removed from ServerArgs when the
+        # cuda_graph_config rework landed; passing it raised TypeError and this
+        # gate crashed on every invocation instead of failing loudly, so the
+        # chunk-boundary carry-in went unchecked for as long as that was true.
+        disable_cuda_graph=True,
         disable_radix_cache=True, chunked_prefill_size=chunk_size,
         dtype=dtype, tp_size=1, mem_fraction_static=mem,
     )

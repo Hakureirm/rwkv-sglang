@@ -11,12 +11,12 @@ findings, not this table.
 | F0002 | [RWKV-7 architecture & vLLM component mapping](findings/0002-rwkv7-architecture-and-vllm-mapping.md) | open |
 | F0003 | [Parity baselines (rwkv-lm, albatross) & acceptance test definition](findings/0003-parity-baselines-and-acceptance.md) | open |
 | F0004 | [Verified latest-upstream re-analysis (vLLM / sglang / HF)](findings/0004-latest-upstream-reanalysis.md) | open |
-| F0005 | [M1 complete — RWKV-7 0.1B runs in sglang, exact greedy-match vs oracle](findings/0005-m1-complete.md) | closed_by_M1 |
+| F0005 | [M1 complete — RWKV-7 0.1B runs in sglang, exact greedy-match vs oracle](findings/0005-m1-complete.md) | closed_by_m1 |
 | F0006 | [M2-baseline — bf16 + 1.5B exact greedy-match; throughput baseline; decode is eager-bound](findings/0006-m2-baseline-throughput.md) | open |
 | F0007 | [Albatross speed baseline on our 3090; quantified gap; kernel-vendoring path](findings/0007-albatross-3090-baseline.md) | open |
 | F0008 | [M2b — CUDA graph for RWKV-7 decode: 7.5-21× speedup, exact, gap vs albatross → ~2-3×](findings/0008-m2b-cudagraph.md) | open |
 | F0009 | [7.2B exact + dynamic-batch correctness (radix auto-off) + full ours-vs-albatross table (gap shrinks with sc...](findings/0009-7.2b-comparison-radix.md) | open |
-| F0010 | [M3b — deliverable is 100% FLA-free (own WKV kernel for decode+prefill), zero speed cost](findings/0010-m3b-de-fla-complete.md) | closed_by_M3b |
+| F0010 | [M3b — deliverable is 100% FLA-free (own WKV kernel for decode+prefill), zero speed cost](findings/0010-m3b-de-fla-complete.md) | closed_by_m3b |
 | F0011 | [M4 — w8a8-int8 quant: decode FASTER than bf16 + weight bytes −41-46%, accuracy preserved at scale](findings/0011-m4-quant.md) | open |
 | F0012 | [Multi-GPU coverage — greedy-EXACT on 10 GPU types / 7 SM generations (Turing→Blackwell: T4/L4/A10G/A100-40/...](findings/0012-multigpu-coverage.md) | open |
 | F0013 | [Elementwise fusion (+5-11% decode, EXACT) + the bit-exact↔speed ceiling; speed standing vs albatross](findings/0013-fusion-and-speed-standing.md) | open |
@@ -64,17 +64,17 @@ findings, not this table.
 | F0056 | [W1' serving fixes: internal step-time profiling on the 7.2B fp16 decode step (bs=320, shape A 128in/1280out...](findings/0056-w1prime-serving-fixes.md) | closed |
 | F0057 | [RWKV_STATE_FP16 long-context positional compression gate (7.2B fp16, 3090, full N=7500 UncheatableEval corp...](findings/0057-state-fp16-positional-compression-gate.md) | closed |
 | F0058 | [task #54 hand-CUDA WKV decode kernel: bit-exact (zero differing bytes) vs the Triton kernel on BOTH state d...](findings/0058-wkv-hand-cuda.md) | closed |
-| F0059 | [F0059 — sglang_overlay drift debt: ground truth, categorization, and resync](findings/0059-overlay-resync.md) | open |
+| F0059 | [F0059 — sglang_overlay drift debt: ground truth, categorization, and resync](findings/0059-overlay-resync.md) | closed |
 | F0060 | [Megakernel Stage-A (#50): the 3090 bsz1 decode profile re-frames the endgame — the M==1 GEMVs already run a...](findings/0060-megakernel-stage-a-rkv-fusion.md) | open |
 | F0061 | [Megakernel Stage-A2 (#50): the next fused-block components on the 3090 — (1) o_proj folded into a role-gene...](findings/0061-megakernel-stage-a2-oproj-shift-lora.md) | open |
 | F0062 | [cp.async race-class audit vs Albatross ff144b6b ('bvec' zero-fill race, 2026-07-14): ALL our cp.async sites...](findings/0062-cp-async-zfill-race-audit.md) | closed |
 | F0063 | [Megakernel sm120 assembly (#50): the PDL chain is LIVE — griddepcontrol wait/launch_dependents wired across...](findings/0063-sm120-pdl-chain-flagship.md) | closed |
-| F0064 | [GEMV weight-stream bandwidth (#50 follow-on): the flagship bsz1 gap to Bo (D=87.9% of 155.2) lives in BUSY/...](findings/0064-gemv-weight-stream-bandwidth.md) | CLOSED |
-| F0065 | [Stage-B opener (#57): the bsz1 small-kernel BUSY is a LATENCY problem before it is a fusion problem — add_l...](findings/0065-smallkernel-latency-round.md) | CLOSED |
-| F0066 | [Stage-B fusion round (#57, after F0065): (a) fused add_ln+token-shift+lerp boundary kernel — ONE launch rep...](findings/0066-boundary-fusion-round.md) | CLOSED |
-| F0069 | [#59 public-number re-measure. Three results. (1) The published flagship numbers are NOT stale — 7.2B 142.8 ...](findings/0069-public-number-conventions.md) | CLOSED |
-| F0070 | [Scoring the HuggingFace RWKV-7 port on Bo's own ruler instead of against itself. Every correctness check th...](findings/0070-porting-accuracy-and-a-dead-harness-path.md) | OPEN |
-| F0071 | [OUR OWN HuggingFace RWKV-7 port (transformers-rwkv PR#2, written by this project) scaled the ln_x GroupNorm...](findings/0071-hf-port-groupnorm-epsilon.md) | CLOSED |
+| F0064 | [GEMV weight-stream bandwidth (#50 follow-on): the flagship bsz1 gap to Bo (D=87.9% of 155.2) lives in BUSY/...](findings/0064-gemv-weight-stream-bandwidth.md) | closed |
+| F0065 | [Stage-B opener (#57): the bsz1 small-kernel BUSY is a LATENCY problem before it is a fusion problem — add_l...](findings/0065-smallkernel-latency-round.md) | closed |
+| F0066 | [Stage-B fusion round (#57, after F0065): (a) fused add_ln+token-shift+lerp boundary kernel — ONE launch rep...](findings/0066-boundary-fusion-round.md) | closed |
+| F0069 | [#59 public-number re-measure. Three results. (1) The published flagship numbers are NOT stale — 7.2B 142.8 ...](findings/0069-public-number-conventions.md) | closed |
+| F0070 | [Scoring the HuggingFace RWKV-7 port on Bo's own ruler instead of against itself. Every correctness check th...](findings/0070-porting-accuracy-and-a-dead-harness-path.md) | open |
+| F0071 | [OUR OWN HuggingFace RWKV-7 port (transformers-rwkv PR#2, written by this project) scaled the ln_x GroupNorm...](findings/0071-hf-port-groupnorm-epsilon.md) | closed |
 | F0074 | [F0074 — rwkv_lightning: the serving layer albatross points at, and what it does not publish](findings/0074-rwkv-lightning-survey.md) | open |
 | F0077 | [RWKV_SPEC completed to a real net win: the draft rollback was off by one token (accept 1.2 vs alpha 0.7, pe...](findings/0077-spec-decode-draft-desync-fix.md) | open |
 | F0078 | [F0078 — the main-line graft was stale, and the profile said so](findings/0078-main-line-graft-was-stale.md) | open |

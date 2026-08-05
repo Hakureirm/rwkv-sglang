@@ -2,6 +2,25 @@
 
 **Date:** 2026-07-15 · **Machine:** 3090 (`dg-workstation-2x3090`) · **Task:** #55
 
+## Resolution (2026-08-05)
+
+`sglang_overlay/` and `scripts/deploy.sh` are **deleted**, and the tree that actually runs
+is committed as [`sglang_mainline/`](../../sglang_mainline/). The debt this finding opened
+on 2026-07-15 stayed open for three weeks and was collected in the worst available way: an
+external PR fixed a chunk-boundary state bug in `sglang_overlay/`, a correctness gate was
+run to check whether the bug was real, the gate passed, and the pass was meaningless —
+the deployed tree does not contain the code the patch touches. The conclusion "we cannot
+reproduce it" was about a different implementation and was one step away from being sent
+to the contributor as a rebuttal.
+
+Also found while closing this: `sglang_main_port/new_files.tgz`, which this finding named
+as "the correct shape", was itself carrying 5 of the 12 kernel modules — missing the
+megakernel, fused glue, fused LoRA, w8a8, w4 and WKV kernels. So neither committed copy
+was the running one. That is why the fix is a full capture of the running tree rather than
+a re-sync of either snapshot.
+
+**Status: closed.**
+
 ## TL;DR
 
 - The mythical "`model_runner.py` differs from upstream by ~835 ins / 1195 del" is

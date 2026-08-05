@@ -28,7 +28,7 @@ import torch
 try:
     from sglang.srt.layers.attention.rwkv7_kernels import fast_linear
 except Exception:
-    OV = Path(__file__).resolve().parents[1] / "sglang_overlay"
+    OV = Path(__file__).resolve().parents[1] / "sglang_mainline"
     sys.path.insert(0, str(OV))
     from sglang.srt.layers.attention.rwkv7_kernels import fast_linear  # noqa: E402
 
