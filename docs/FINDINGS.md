@@ -89,3 +89,4 @@ findings, not this table.
 | F0088 | [lora4_mn stage2 re-read its weights once per token: −33% on the kernel, +1.6% on the step, and the gate sti...](findings/0088-lora-stage2-m-inner.md) | closed |
 | F0089 | [Single-stream fp16 has 17% of headroom, not a factor — and int4, already faster, has 38%: measured against ...](findings/0089-the-single-stream-roof.md) | closed |
 | F0090 | [int4 wins below c=32 by up to 1.75x and loses above c=64 by up to 1.87x — its headroom is bandwidth headroo...](findings/0090-int4-is-a-low-concurrency-lever.md) | closed |
+| F0091 | [Every correctness gate here compared our code to our code; this one compares it to BlinkDL's numpy forward,...](findings/0091-a-gate-that-shares-nothing.md) | closed |
