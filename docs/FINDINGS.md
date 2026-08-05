@@ -83,3 +83,4 @@ findings, not this table.
 | F0081 | [Mixed-precision by layer for int4: testing the claim that protecting {0, N/4, 3N/4, N-1} rescues the reason...](findings/0081-int4-layer-protection.md) | open |
 | F0082 | [At 1.5B, our calibrated int4 (GPTQ) is 6.9 points WORSE on MATH500 than plain round-to-nearest — separated,...](findings/0082-gptq-loses-to-rtn-on-math500.md) | open |
 | F0083 | [At 1.5B a non-uniform 4-bit lattice beats int4 by 4.4-4.6 points of MATH500 (separated), and total weight e...](findings/0083-grid-and-group-size.md) | open |
+| F0085 | [Two ops, not one, made every ONNX export subtest fail: cumprod and linalg.solve_triangular](findings/0085-onnx-export-two-triggers.md) | closed |
