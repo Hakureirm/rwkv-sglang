@@ -42,22 +42,40 @@ Within-arm spread 0.2%; between arms **+10.7%**. Concurrency 8, 128-in/128-out,
 `scripts/serve.sh`, `_sglspec` verified byte-identical to `sglang_mainline` first
 (29 files, zero differences).
 
-## Why the profiler said it should be worth nothing
+## The profiler said the opposite, and was measuring the wrong function
 
-`bench/profile_components.py decode --bsz 8`, gate 4 vs gate 8:
+`bench/profile_components.py`'s `loras(8 matmul)+gate-math` component called the
+four LoRA modules and the torch gate chain directly. That is a path
+`RWKV_FUSED_LORA_MAX_BS` **cannot reach** — the gate lives in
+`Rwkv7Attention.forward`, and `Rwkv7LoRA` is a plain `up(act(down(x)))` module
+with no knowledge of it. The component's numbers moved anyway when the gate was
+swept, and the first version of this finding read a mechanism out of them
+("all of the difference is launch overhead"). **There was no mechanism. The
+component was not on the code path being swept.**
 
-| column | gate 4 | gate 8 |
-|---|---:|---:|
-| loras+gate-math, **graphed** (GPU-busy) | 45.73 us | 45.09 us |
-| loras+gate-math, **eager** | 587.41 us | 154.87 us |
+The component now takes the branch the model takes and labels which one it took.
+Re-measured, graphed (GPU-busy) us per layer:
 
-All of the difference is launch overhead, and production runs decode under a CUDA
-graph, where launch overhead is supposed to be gone. It is not: the profiler times
-one component repeated N times with no data dependency between repeats, so the
-device pipelines the graph nodes and hides their launch latency. In the real step
-the ops depend on each other and cannot. **The graphed column is a lower bound on
-what a graph pays, not a measurement of it** — worth remembering before reading a
-"graphed" number as "what production costs".
+| M | fused (`lora4_mn`) | torch fallback |
+|---:|---:|---:|
+| 8 | **30.5** | 45.7 |
+| 16 | 46.3 | **29.6** |
+
+That is the crossover, from the model side, and it lands between 8 and 16 — which
+is what the server ladder shows and what the original "~M=4 to 8" range meant. At
+M=16 the fused kernel is 1.6x the cost of the cuBLAS path, so a gate of 16 or 32
+does not merely stop helping, it actively pays.
+
+The `eager` column is not usable for this. Across processes running the *same*
+branch it varied by 3-7x (M=8 fused: 227 us at one gate setting, 63 us at another;
+M=16 fallback: 139 us and 470 us). Whatever that is, it is not the model. Use
+`graphed`, which held to 5% across the same pairs.
+
+Two lessons, and the second is the one that cost time: a component that does not
+call the code under test can still produce numbers that correlate with the setting
+by accident, and a noisy column will supply the correlation.
+
+## How it happened
 
 ## How it happened
 
@@ -89,14 +107,19 @@ up 20% at c=32, which is the crossover the original range note was describing �
 past it the fused kernel is the slower one. Greedy output is oracle-exact at 4, 8,
 16 and 32, so nothing here trades correctness for speed.
 
-**The cell that does not add up:** at c=8 and c=16, gate 16 and gate 32 select the
-same code path — every batch is at or below both gates, so both take the fused
-kernel — and they differ by 13% and 10%, reproducibly, in both sweep directions.
-There is no mechanism for that in the model. Either the running batch is not what
+Most of the shape now has a mechanism: gate 16 and gate 32 both force the fused
+kernel at M=16, where the table above shows it costs 1.6x the cuBLAS path, so both
+lose to gate 8 at c=16 and c=32.
+
+**What still does not add up:** those two settings take the *same* branch at c=8
+and c=16, and they differ by 13% and 10%, reproducibly, in both sweep directions.
+Nothing in the model distinguishes them there. Either the running batch is not what
 the concurrency setting implies, or this harness carries a per-server-instance
-variable we do not control. Until that is known, **a difference of this size
-between two server launches is not by itself evidence of anything**, which is the
-same caveat F0084 attached to the prefill column of the other harness.
+variable we do not control — and the profiler's eager column, which varies 3-7x
+across processes on identical code, says something in this environment does vary
+that much. Until it is known, **a difference of this size between two server
+launches is not by itself evidence of anything**, the same caveat F0084 attached
+to the prefill column of the other harness.
 
 That bounds the confidence in the headline: the gate 4 -> 8 result survives it only
 because it has a mechanism (M=8 changes which kernel runs), because it replicates
@@ -108,6 +131,8 @@ move the same way. It would not survive on a single pair of numbers.
 - `sglang_mainline/srt/models/rwkv7.py`: default gate 4 -> 8.
 - `bench/results/samecard_btl/README.md`: the claim now cites the shipped number
   and this finding rather than the retired measurement.
+- `bench/profile_components.py`: the LoRA component takes the model's branch
+  instead of a torch copy of it, and says which branch it timed.
 
 Correctness re-gated on the shipped tree at both values, because a gate that only
 ever sees the new arm cannot tell a pass from a check that never fired.

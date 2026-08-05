@@ -327,13 +327,50 @@ def run_decode(cfg, dtype, n_iter, bsz=1):
         return P(attn.r_proj, xr), P(attn.k_proj, xk), P(attn.v_proj, xv)
     add("rkv_proj(3 GEMM)", _rkv)
     # 4 LoRAs (8 matmuls) + gating math (sigmoids, w_log, v-residual)
-    def _loras():
+    #
+    # This must take the branch the model takes. Until 2026-08-06 it called the
+    # four LoRA modules and the torch gate chain unconditionally -- a path
+    # `RWKV_FUSED_LORA_MAX_BS` cannot reach. The component's numbers moved
+    # anyway when the gate was swept, which is worse than not moving: they were
+    # read as evidence about the gate, and F0086 drew a mechanism out of them
+    # that the code cannot produce. The label now says which branch was timed,
+    # so a profile that fell back is not mistaken for one that did not.
+    from sglang.srt.layers.attention.rwkv7_kernels import lora_fused
+    from sglang.srt.models import rwkv7 as _rwkv7_mod
+
+    _pack = attn._build_lora_pack() if getattr(attn, "_fused_lora", False) else None
+    _C = 4 if attn.layer_id > 0 else 3
+    _fused_ok = (
+        _pack is not None
+        and dtype == torch.float16
+        and T <= _rwkv7_mod._FUSED_LORA_MAX_BS
+    )
+
+    def _loras_torch():
         wl = -torch.sigmoid(attn.w_lora(xw)) * _INV_SQRT_E
         aa = torch.sigmoid(attn.a_lora(xa))
         gg = attn.g_lora(xg)
         vv2 = v + (v_first - v) * torch.sigmoid(attn.v_lora(xv))
         return wl, aa, gg, vv2
-    add("loras(8 matmul)+gate-math", _loras)
+
+    def _loras_fused():
+        xs = torch.stack([xw, xa, xg, xv][:_C])                  # [C,T,H]
+        if T == 1:
+            lo = lora_fused.lora4_m1(xs.reshape(_C, -1), *_pack)
+            wl = -torch.sigmoid(lo[0:1]) * _INV_SQRT_E
+            aa = torch.sigmoid(lo[1:2])
+            gg = lo[2:3]
+            vv2 = v + (v_first - v) * torch.sigmoid(lo[3:4]) if _C == 4 else v
+        else:
+            lo = lora_fused.lora4_mn(xs.permute(1, 0, 2).contiguous(), *_pack)
+            wl = -torch.sigmoid(lo[:, 0]) * _INV_SQRT_E
+            aa = torch.sigmoid(lo[:, 1])
+            gg = lo[:, 2].contiguous()
+            vv2 = v + (v_first - v) * torch.sigmoid(lo[:, 3]) if _C == 4 else v
+        return wl, aa, gg, vv2
+
+    add("loras(8 matmul)+gate-math" + ("" if _fused_ok else " [torch fallback]"),
+        _loras_fused if _fused_ok else _loras_torch)
     # 5 kk/k mix + L2 norm
     def _kkmix():
         kk = k * attn.k_k
