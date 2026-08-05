@@ -231,6 +231,7 @@ _ADDLN_ANNOUNCED = False  # one-time notice (fused residual-add + LayerNorm)
 _GNGC_ANNOUNCED = False  # one-time notice (fused GroupNorm + gate-corr)
 _RELUSQ_ANNOUNCED = False  # one-time notice (fused relu^2, dense ffn path)
 _VRESGATE_ANNOUNCED = False  # one-time notice (batched LoRA-gate activations)
+_VRESGATE_MN_ANNOUNCED = False  # same, on the batched M-gate (lora4_mn) path
 
 
 def _try_add_ln(x, delta, ln):
@@ -1114,15 +1115,37 @@ class Rwkv7Attention(nn.Module):
                 if self.layer_id != 0:
                     v = v + (v_first - v) * torch.sigmoid(lo[3:4])
         elif lo_mn is not None:
-            # lo_mn[:, c] is a STRIDED column slice of [T,C,H]; w_log/a/v get
-            # materialized (contiguous) by sigmoid/arithmetic, but g is a raw slice
-            # -> .contiguous() so the fused_gate_corr kernel reads it correctly
-            # (the T==1 lora4_m1 path's lo[2:3] is a contiguous row slice; match that).
-            w_log = -torch.sigmoid(lo_mn[:, 0]) * _INV_SQRT_E
-            a = torch.sigmoid(lo_mn[:, 1])
-            g = lo_mn[:, 2].contiguous()
-            if self.layer_id != 0:
-                v = v + (v_first - v) * torch.sigmoid(lo_mn[:, 3])
+            # W1'' : the 2 <= T <= _FUSED_LORA_MAX_BS band was the only one left
+            # doing its gate activations in torch. Both neighbours have a kernel
+            # for exactly this chain -- T==1 folds it into lora4_m1's stage2
+            # (F0066c) and T > the gate takes ln_fused.vres_gates -- so this band
+            # paid ~7 launches for arithmetic the batched kernel already does.
+            #
+            # `vres_gates` wants contiguous [T,H]; lo_mn[:, c] is a strided column
+            # of [T,C,H]. One transpose materialises all C columns as contiguous
+            # rows, which the torch path was already half-paying for: it
+            # materialised w_log/a/v through sigmoid anyway and copied g outright.
+            chans = lo_mn.transpose(0, 1).contiguous()          # [C,T,H]
+            if _FUSED_VRESGATE and ln_fused.available():
+                global _VRESGATE_MN_ANNOUNCED
+                if not _VRESGATE_MN_ANNOUNCED:
+                    import sys
+                    _VRESGATE_MN_ANNOUNCED = True
+                    print("[rwkv7] W1'' fused LoRA-gate activations on the batched "
+                          "M-gate path ENABLED (fp16 decode, 2<=T<=gate)",
+                          file=sys.stderr, flush=True)
+                w_log, a, v = ln_fused.vres_gates(
+                    chans[0], chans[1],
+                    chans[3] if self.layer_id != 0 else None,
+                    v, v_first if self.layer_id != 0 else None, _INV_SQRT_E,
+                )
+                g = chans[2]
+            else:
+                w_log = -torch.sigmoid(chans[0]) * _INV_SQRT_E
+                a = torch.sigmoid(chans[1])
+                g = chans[2]
+                if self.layer_id != 0:
+                    v = v + (v_first - v) * torch.sigmoid(chans[3])
         else:
             wl = self.w_lora(xw)
             al = self.a_lora(xa)

@@ -85,3 +85,4 @@ findings, not this table.
 | F0083 | [At 1.5B a non-uniform 4-bit lattice beats int4 by 4.4-4.6 points of MATH500 (separated), and total weight e...](findings/0083-grid-and-group-size.md) | open |
 | F0085 | [Two ops, not one, made every ONNX export subtest fail: cumprod and linalg.solve_triangular](findings/0085-onnx-export-two-triggers.md) | closed |
 | F0086 | [A measured +10.7% never shipped: the default was raised in the tree that was about to be deleted](findings/0086-the-improvement-was-committed-to-the-retired-tree.md) | closed |
+| F0087 | [W1'': the 2<=T<=gate band was doing in torch what both of its neighbours had a kernel for — +5.2% at bs8, +...](findings/0087-the-band-between-the-two-fused-paths.md) | closed |

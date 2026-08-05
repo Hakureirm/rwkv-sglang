@@ -56,20 +56,28 @@ worse, the commit that measured it and raised the default edited `sglang_overlay
 — the retired line, deleted a few commits later — so **the shipped default stayed
 at 4 until 2026-08-06** (F0086).
 
-Our column re-run here on the same harness, both gate values, two rounds each,
-decode tok/s (median of 5, 2 warmups). **Their column is not re-run**: it is still
-the 2026-08-04 measurement.
+Our column re-run here on the same harness, two rounds per arm, decode tok/s
+(median of 5, 2 warmups). Two changes landed: the batch gate (F0086) and W1'', the
+fused gate activations on the batched band (F0087). **Their column is not re-run**:
+it is still the 2026-08-04 measurement.
 
-| batch | prompt | ours, gate 4 | ours, gate 8 | theirs (08-04) | theirs/ours | was |
-|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 128 | — | 514.6 | 448 | 0.871 | 0.885 |
-| 1 | 512 | — | 514.5 | 457 | 0.888 | 0.891 |
-| 1 | 2048 | — | 514.4 | 444 | 0.863 | 0.866 |
-| 8 | 128 | 1,936.4 | **2,167.3** | 3,122 | **1.441** | 1.617 |
-| 8 | 512 | 1,937.3 | **2,168.3** | 3,007 | **1.387** | 1.558 |
-| 8 | 2048 | 1,926.2 | **2,159.4** | 3,040 | **1.408** | 1.582 |
+| batch | prompt | ours, gate 4 | ours, gate 8 | + W1'' | theirs (08-04) | theirs/ours | was |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 128 | — | 514.6 | 515.4 | 448 | 0.869 | 0.885 |
+| 1 | 512 | — | 514.5 | — | 457 | 0.888 | 0.891 |
+| 1 | 2048 | — | 514.4 | — | 444 | 0.863 | 0.866 |
+| 4 | 128 | — | 1,169.1 | **1,237.2** | — | — | — |
+| 8 | 128 | 1,936.4 | 2,167.3 | **2,279.1** | 3,122 | **1.370** | 1.617 |
+| 8 | 512 | 1,937.3 | 2,168.3 | — | 3,007 | 1.387 † | 1.558 |
+| 8 | 2048 | 1,926.2 | 2,159.4 | — | 3,040 | 1.408 † | 1.582 |
 
-**bs8 gap 1.56–1.62x → 1.39–1.44x. bs1 is untouched** (the gate covers T=1 either
+† prompt 512 and 2048 were measured before W1'' and are not re-run; the 128 column
+is what carries both changes. W1'' is a per-token cost that does not depend on
+prompt length, so those two cells should move with the 128 one, but that is an
+expectation and not a measurement.
+
+**bs8 gap 1.62x → 1.37x at prompt 128 (1,931 → 2,279 tok/s, +18.0% in one day).
+bs1 is untouched** (the gate covers T=1 either
 way), and that is the control: our gate-4 arm today reads 1,936.4 / 1,937.3 /
 1,926.2 against 1,931 / 1,930 / 1,922 on 2026-08-04 — **0.2–0.4% apart**, so the
 card and the harness are in the same state and the comparison against their
@@ -83,8 +91,8 @@ gate was the part of it that cost nothing to fix.
 ## Reading
 
 - **bs1 decode is ours by 1.12–1.16×** — the single-stream megakernel path.
-- **bs8 decode is theirs by 1.56–1.62×** as measured on 2026-08-04, **1.39–1.44×
-  after the LoRA gate landed** (re-measured section above) — their batched kernels
+- **bs8 decode is theirs by 1.56–1.62×** as measured on 2026-08-04, **1.37× after
+  the LoRA gate and W1'' landed** (re-measured section above) — their batched kernels
   and full-graph decode; the crossover sits between batch 1 and 8 and is
   unmeasured.
 - **Short-prompt TTFT is theirs** (8.9 ms vs 17.4 ms at 128 tokens, bs1): their

@@ -335,7 +335,7 @@ def run_decode(cfg, dtype, n_iter, bsz=1):
     # read as evidence about the gate, and F0086 drew a mechanism out of them
     # that the code cannot produce. The label now says which branch was timed,
     # so a profile that fell back is not mistaken for one that did not.
-    from sglang.srt.layers.attention.rwkv7_kernels import lora_fused
+    from sglang.srt.layers.attention.rwkv7_kernels import ln_fused, lora_fused
     from sglang.srt.models import rwkv7 as _rwkv7_mod
 
     _pack = attn._build_lora_pack() if getattr(attn, "_fused_lora", False) else None
@@ -363,10 +363,13 @@ def run_decode(cfg, dtype, n_iter, bsz=1):
             vv2 = v + (v_first - v) * torch.sigmoid(lo[3:4]) if _C == 4 else v
         else:
             lo = lora_fused.lora4_mn(xs.permute(1, 0, 2).contiguous(), *_pack)
-            wl = -torch.sigmoid(lo[:, 0]) * _INV_SQRT_E
-            aa = torch.sigmoid(lo[:, 1])
-            gg = lo[:, 2].contiguous()
-            vv2 = v + (v_first - v) * torch.sigmoid(lo[:, 3]) if _C == 4 else v
+            # W1'': the model fuses this band's gate activations too, so mirror it
+            # or the component drifts back into timing a branch nobody runs.
+            chans = lo.transpose(0, 1).contiguous()
+            wl, aa, vv2 = ln_fused.vres_gates(
+                chans[0], chans[1], chans[3] if _C == 4 else None,
+                v, v_first if _C == 4 else None, _INV_SQRT_E)
+            gg = chans[2]
         return wl, aa, gg, vv2
 
     add("loras(8 matmul)+gate-math" + ("" if _fused_ok else " [torch fallback]"),
