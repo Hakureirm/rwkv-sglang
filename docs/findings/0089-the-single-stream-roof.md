@@ -1,6 +1,6 @@
 ---
 finding_id: F0089
-title: "Single-stream fp16 has 17% of headroom, not a factor: we are at 86% of the card's achievable read bandwidth and Albatross at 92%"
+title: "Single-stream fp16 has 17% of headroom, not a factor — and int4, already faster, has 38%: measured against the card's achievable read bandwidth"
 date: 2026-08-06
 status: closed
 severity: low
@@ -71,12 +71,37 @@ on the same card — 1.63x that naive chain — which is what the fused GEMV and
 megakernel line bought and is a fairer statement of their value than any
 tok/s delta.
 
+## The same accounting for int4, and where the headroom actually is
+
+`rwkv7-1.5b-w4` is 1.8846 GB on disk. Same treatment:
+
+| | fp16 | int4 |
+|---|---:|---:|
+| read per token (weights + state) | 2.8116 GB | **1.6414 GB** |
+| measured | 514.6 tok/s | 742.6 tok/s |
+| effective | 1,447 GB/s | **1,219 GB/s** |
+| **% of the 1,688 GB/s roof** | **85.7%** | **72.2%** |
+| roof for this tier | 600 tok/s | **1,028 tok/s** |
+| headroom | +17% | **+38%** |
+
+So the tier that is already fastest is also the one running furthest below its own
+roof, by 13 percentage points. Dequantisation is not free and that is where the
+difference goes — but it means **int4 has more than twice the headroom fp16 has**,
+and any effort spent on the fp16 single-stream path is spent on the smaller half.
+
+One concrete piece of it: `lm_head.weight` is **not quantised** in this artifact —
+268.4 MB of fp16, read in full every step, **16.4% of int4's per-token traffic**
+against 9.5% of fp16's. Taking it to int8 would move the int4 roof from 1,028 to
+about 1,120 tok/s.
+
 ## What this says about the next step
 
 - **fp16 single-stream**: at most +17%, realistically +8% to match Albatross. Worth
   doing only with cheap fusions; not worth a large restructuring.
-- **int4 / lower precision**: not bounded by this roof at all, and already ahead.
-  This is where single-stream throughput actually lives.
+- **int4 / lower precision**: 72% of the roof against fp16's 86%, so **+38% of
+  headroom** — more than twice fp16's, on the tier that is already faster. This is
+  where single-stream throughput actually lives, and the unquantised `lm_head` is
+  the first named piece of it.
 - **Concurrency**: a different regime entirely — at batch 8 the weights are
   amortised across 8 tokens, so the roof is 8x further away and the limit is the
   kernels, which is where F0086-F0088 were working.
