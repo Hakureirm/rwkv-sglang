@@ -36,9 +36,22 @@ PORT="${PORT:-30089}"
 mkdir -p "$OUT"
 
 [ -n "$SGLANG" ] && export PYTHONPATH="$SGLANG"
-eval "$(grep -oE '^export RWKV_[A-Z_]+=[0-9]+' scripts/serve.sh | tr '\n' ';')"
+
+# Ask serve.sh what it resolves instead of parsing it. Grepping the source for
+# `^export RWKV_...=1` broke the moment those became `${VAR:-1}` -- silently: the
+# server still starts and the run still finishes, it just measures the unfused
+# path. serve.sh ends in `exec "$PYTHON" -m sglang.launch_server`, so pointing
+# PYTHON at something that prints the environment and exits gets the resolved set
+# from the script itself, whatever syntax it is written in.
+_flagdump="$(mktemp)"
+printf '#!/bin/sh\nenv\n' > "$_flagdump" && chmod +x "$_flagdump"
+eval "$(MODEL=/nonexistent PYTHON="$_flagdump" bash scripts/serve.sh 2>/dev/null \
+        | grep -E '^RWKV_[A-Z_]+=' | sed 's/^/export /' | tr '\n' ';')"
+rm -f "$_flagdump"
+
 echo "server tree : $(python3 -c 'import sglang,os;print(os.path.dirname(sglang.__file__))')"
 echo "RWKV flags  : $(env | grep -c '^RWKV_')"
+[ "$(env | grep -c '^RWKV_')" -gt 0 ] || { echo "!!! no RWKV_ flags resolved from scripts/serve.sh -- refusing to measure the unfused path"; exit 1; }
 
 # ---- prompts, by stride, not by choice ----
 python3 - "$PARQUET" "$OUT/prompts.txt" "$NPROMPT" "$STRIDE" <<'PY'
