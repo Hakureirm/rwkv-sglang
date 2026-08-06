@@ -117,6 +117,15 @@ This smoke validates the new landing path and the absence of the retired
 `extend_prefix_lens` workaround. The complete all-size performance tables below
 remain the original contributor measurements rather than a second full sweep.
 
+A separate model-level W8 batch-8 diagnostic on the newer ROCm-compatible
+runtime did not reproduce the historical all-size batch-exact result: the 0.1B
+checkpoint diverged after four greedy tokens, while the rebased W8 projection
+operator itself remained batch-exact. Enabling SGLang's fp32 LM head restored
+the batch-1 continuation, identifying another near-tie output-head reduction
+order issue rather than a W8 kernel mismatch. The fp32 head is too slow to make
+the default. Consequently, the W8 all-size batch table below remains historical
+evidence and is not presented as a post-rebase mainline acceptance result.
+
 ## Original gfx1100 result
 
 The initial 1.5B fp16 validation on ROCm 7.2.1 completed the following gates on
