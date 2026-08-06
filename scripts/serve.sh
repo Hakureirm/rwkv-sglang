@@ -54,11 +54,11 @@ CGMAXBS="${CGMAXBS:-512}"
 MODE="${MODE:-throughput}"
 
 # Verified greedy-exact hand-written kernels (see findings F0015/F0020/F0025/F0026):
-export RWKV_FAST_LINEAR=1          # fused fp16 GEMV, bsz1 r/k/v/o + ffn proj
-export RWKV_SPARSE_FFN=1           # sparse sqrelu channel-mix value-proj (bsz1)
-export RWKV_FUSED_LORA=1           # fused 4-chain LoRA (M==1 lora4_m1 + batched lora4_mn)
-export RWKV_FUSED_GLUE=1           # fused paged token-shift + lerp (R2 attn+ffn)
-export RWKV_GEMV_AUTOTUNE=1        # arch-aware GEMV launch autotune (warmup only)
+export RWKV_FAST_LINEAR="${RWKV_FAST_LINEAR:-1}"          # fused fp16 GEMV, bsz1 r/k/v/o + ffn proj
+export RWKV_SPARSE_FFN="${RWKV_SPARSE_FFN:-1}"           # sparse sqrelu channel-mix value-proj (bsz1)
+export RWKV_FUSED_LORA="${RWKV_FUSED_LORA:-1}"           # fused 4-chain LoRA (M==1 lora4_m1 + batched lora4_mn)
+export RWKV_FUSED_GLUE="${RWKV_FUSED_GLUE:-1}"           # fused paged token-shift + lerp (R2 attn+ffn)
+export RWKV_GEMV_AUTOTUNE="${RWKV_GEMV_AUTOTUNE:-1}"        # arch-aware GEMV launch autotune (warmup only)
 # W1 reverse-overtake pair (F0051/F0052), promoted to default here 2026-07-08. GATES and
 # SQRELU are NOT two independent simultaneous wins: SQRELU only fires when `not self._sparse`
 # (models/rwkv7.py, mutually exclusive by construction — the sparse kernel applies its own
@@ -75,15 +75,15 @@ export RWKV_GEMV_AUTOTUNE=1        # arch-aware GEMV launch autotune (warmup onl
 # on sm_89 (L4) + sm_90 (H100) only, not the full 11-card matrix the other 5 exports
 # accumulated — a narrower-published-speed-number issue, not a correctness one (an
 # arch-specific divergence would fail the routine oracle re-verify this project runs per box).
-export RWKV_FUSED_GATES=1          # fused LoRA-gate activations (sigmoids+neg/mul/sub/add)
+export RWKV_FUSED_GATES="${RWKV_FUSED_GATES:-1}"          # fused LoRA-gate activations (sigmoids+neg/mul/sub/add)
 # F0066c: the gate epilogue folded INTO lora stage2 (kills the standalone
 # _lora_gates launch + the raw-lo round trip on the bsz1 decode path). Tier
 # note: torch-reference-exact on ALL 65536 fp16 patterns (probe census) —
 # STRONGER than the triton path it replaces (which carries a 1-ULP tl.exp
 # anomaly on 2/65536 rare patterns); greedy 24/24+8/8 EXACT. Measured 7.2B
 # c=1 +0.35% (142.8), 1.5B +1.0% (514.5), kernels/step -32.
-export RWKV_FUSED_LORA_GATED=1
-export RWKV_FUSED_SQRELU=1         # epilogue-fused ffn relu(k)^2 into the key GEMV's store
+export RWKV_FUSED_LORA_GATED="${RWKV_FUSED_LORA_GATED:-1}"
+export RWKV_FUSED_SQRELU="${RWKV_FUSED_SQRELU:-1}"         # epilogue-fused ffn relu(k)^2 into the key GEMV's store
 # W1' large-batch glue set (2026-07-13), same bar as the rest of this stack:
 # byte-exact vs the live reference ops (bench/test_ln_fused.py, zero differing
 # bytes incl. a 1.57M-row summation-tree probe), greedy 24/24 EXACT per fusion
@@ -96,17 +96,17 @@ export RWKV_FUSED_SQRELU=1         # epilogue-fused ffn relu(k)^2 into the key G
 # stacked (full set 8,931 -> 9,406 tok/s serving). Scope note: byte-exact-
 # verified on sm_120 (5090) so far - same narrower-arch disclosure as
 # GATES/SQRELU above.
-export RWKV_FUSED_ADDLN=1          # fused residual-add + LayerNorm (all norm boundaries)
+export RWKV_FUSED_ADDLN="${RWKV_FUSED_ADDLN:-1}"          # fused residual-add + LayerNorm (all norm boundaries)
 # F0065 small-T wide config for add_ln (512thr/row vs the pathological single
 # 128-thr block at decode T=1). Tier note: a pure fp32-Welford REORDERING (tree
 # shape), one tier above a numerics change — x_new stays byte-identical, LN y
 # gated no-farther-from-fp32-truth than the parity config (bench/
 # test_addln_wide.py) + greedy 24/24+8/8 EXACT under the full stack. Measured
 # 7.2B bsz1: add_ln 426.6->254.9 us/step, e2e +2.4% (141.3 tok/s).
-export RWKV_ADDLN_WIDE=1
-export RWKV_FUSED_GNGC=1           # fused GroupNorm + gate-corr epilogue (attn output)
-export RWKV_FUSED_RELUSQ=1         # fused relu(k)^2 on the M>1 dense ffn path
-export RWKV_FUSED_VRESGATE=1       # fused batched LoRA-gate activations (w/a/v)
+export RWKV_ADDLN_WIDE="${RWKV_ADDLN_WIDE:-1}"
+export RWKV_FUSED_GNGC="${RWKV_FUSED_GNGC:-1}"           # fused GroupNorm + gate-corr epilogue (attn output)
+export RWKV_FUSED_RELUSQ="${RWKV_FUSED_RELUSQ:-1}"         # fused relu(k)^2 on the M>1 dense ffn path
+export RWKV_FUSED_VRESGATE="${RWKV_FUSED_VRESGATE:-1}"       # fused batched LoRA-gate activations (w/a/v)
 # lm_head through the same shared-weight GEMV as every other projection, but ONLY at
 # M<=8. It was the lone cuBLAS holdout, and only because speculative verify had to
 # match it: the worker re-projected each of its bs*K rows one at a time to reproduce
@@ -130,7 +130,7 @@ export RWKV_FUSED_VRESGATE=1       # fused batched LoRA-gate activations (w/a/v)
 # the flag off and on as its own control -- 1.5B and 7.2B, OVERALL PASS all batches
 # exact in all four legs -- so the usual "verified at one size" scope note does not
 # apply here.
-export RWKV_FAST_LMHEAD=1
+export RWKV_FAST_LMHEAD="${RWKV_FAST_LMHEAD:-1}"
 # NOT exported: RWKV_STATE_FP16 (fp16 temporal WKV state). It leaves the
 # bitwise-oracle tier (a numerics change, not a reordering), so it stays a
 # deliberate per-deployment opt-in despite passing its lossy-tier gates
@@ -159,5 +159,5 @@ esac
 
 # strip a leading `--` separator if the caller passed extra flags after it
 [ "${1:-}" = "--" ] && shift
-echo "[serve] MODE=$MODE dtype=$DTYPE port=$PORT cuda_graph_max_bs=$CGMAXBS (fast-path stack ON)"
+echo "[serve] MODE=$MODE dtype=$DTYPE port=$PORT cuda_graph_max_bs=$CGMAXBS fast_linear=$RWKV_FAST_LINEAR sparse_ffn=$RWKV_SPARSE_FFN wkv_cuda=${RWKV_WKV_CUDA:-0}"
 exec "$PYTHON" -m sglang.launch_server "${COMMON[@]}" "${EXTRA[@]}" "$@"

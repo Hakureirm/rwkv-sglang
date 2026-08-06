@@ -91,6 +91,14 @@ python -m sglang.launch_server --model-path <rwkv7模型目录> --trust-remote-c
 [`scripts/serve.sh`](scripts/serve.sh)。模型:任意 fla 格式的 RWKV-7 权重
 (HF 上的 `fla-hub/rwkv7-*`),或我们发布在 ModelScope 的 int8/int4 量化权重(`Hakureirm/rwkv7-g1-*`)。
 
+**在 AMD ROCm 上**:先加载 [`scripts/rocm_env.sh`](scripts/rocm_env.sh),再使用
+[`scripts/serve_rocm.sh`](scripts/serve_rocm.sh)。贡献者在 `gfx1100` 上完成了
+0.1B / 0.4B / 1.5B / 2.9B / 7.2B / 13.3B 全尺寸正确性矩阵;独立 HIP W8/W4
+decode 核在实测 bsz1、bsz8 均快于 dense。量化 prefill 的 M=9..256 已使用
+fused-dequant Triton 路径，其中 W4 全覆盖、W8 按实测形状分流。RTN W4 模型质量
+与 CDNA 实卡验证仍是明确的开放门槛，完整口径与原始日志见
+[`docs/ROCM.md`](docs/ROCM.md)。
+
 **在 Mac 上**:见 [`mlx_port/README.md`](mlx_port/README.md)。
 
 ## 目录结构

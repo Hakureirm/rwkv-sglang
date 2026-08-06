@@ -62,6 +62,7 @@ from sglang.srt.distributed import (
 from sglang.srt.layers.attention.rwkv7_kernels import fast_linear
 from sglang.srt.layers.attention.rwkv7_kernels import ln_fused
 from sglang.srt.layers.attention.rwkv7_kernels import lora_fused
+from sglang.srt.layers.attention.rwkv7_kernels import rocm_quant
 from sglang.srt.layers.attention.rwkv7_kernels import sparse_cmix
 from sglang.srt.layers.attention.rwkv7_kernels import w4_linear
 from sglang.srt.layers.attention.rwkv7_kernels import w8a8_linear
@@ -109,6 +110,49 @@ def _tp_rank() -> int:
 
 # e^-0.5 = 1/sqrt(e); w_log = -this * sigmoid(w_raw)  =>  decay = exp(w_log).
 _INV_SQRT_E = 0.6065306597126334
+
+
+# rocBLAS may select a different GEMM reduction algorithm when the row count
+# changes.  That is normally harmless, but RWKV carries the result through the
+# recurrent state, so a few ULPs from ``prefill(M=2048)`` versus
+# ``prefill(M=1024)`` can eventually change a greedy token.  Use a stable row
+# micro-tile for ROCm prefill projections so an unchunked request and the same
+# request split by SGLang execute the same sequence of GEMM shapes.  The default
+# 256 divides SGLang's production chunk sizes while keeping each GEMM large
+# enough to use the GPU efficiently.  CUDA and CPU paths are unchanged; ROCm
+# users can set RWKV_ROCM_PREFILL_TILE=0 to disable the compatibility path.
+_IS_ROCM = torch.version.hip is not None
+_ROCM_PREFILL_TILE = int(
+    os.environ.get("RWKV_ROCM_PREFILL_TILE", "256" if _IS_ROCM else "0")
+)
+
+
+def _linear_output(layer, x: torch.Tensor) -> torch.Tensor:
+    """Call an SGLang/custom linear and return only its output tensor."""
+    result = layer(x)
+    return result[0] if isinstance(result, tuple) else result
+
+
+def _stable_linear_output(layer, x: torch.Tensor) -> torch.Tensor:
+    """ROCm row-stable linear path used by recurrent prefill.
+
+    Each row is independent, so splitting on dimension zero does not change the
+    mathematical operation.  It does make rocBLAS use the same GEMM shape at
+    scheduler chunk boundaries, which prevents recurrent-state drift.  Decode
+    and small dynamic batches never enter this path.
+    """
+    tile = _ROCM_PREFILL_TILE
+    if (
+        tile > 0
+        and _IS_ROCM
+        and x.device.type == "cuda"
+        and x.ndim == 2
+        and x.shape[0] > tile
+    ):
+        return torch.cat(
+            [_linear_output(layer, part) for part in x.split(tile, dim=0)], dim=0
+        )
+    return _linear_output(layer, x)
 
 
 # M6 CUDA endgame: route the big r/k/v/o + ffn projections through a hand-tuned
@@ -429,10 +473,11 @@ if _CALIB:
 class W4Linear(nn.Module):
     """Weight-only group-wise symmetric int4 replacement for a bias-free ReplicatedLinear.
 
-    Stores `qweight` (uint8 [N, K/2]) + `scale` (fp16 [N, K/GROUP]); decode (M==1, fp16)
-    runs the hand-written int4 GEMV, everything else dequantizes to the activation dtype
-    and uses F.linear (correctness-first; prefill is compute-bound). Buffers are named to
-    match the bench/quant_w4.py checkpoint keys."""
+    Stores `qweight` (uint8 [N, K/2]) + `scale` (fp16 [N, K/GROUP]). CUDA uses
+    its architecture-specific decode paths; ROCm uses a HIP M<=8 kernel and a
+    fixed-tile fused-dequant Triton path through the 256-row stable prefill tile.
+    Remaining shapes dequantize to the activation dtype and use F.linear.
+    Buffers are named to match the bench/quant_w4.py checkpoint keys."""
 
     def __init__(self, in_features: int, out_features: int, group: int = w4_linear.GROUP):
         super().__init__()
@@ -448,6 +493,11 @@ class W4Linear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         M = x.shape[0]
+        if (
+            _IS_ROCM
+            and rocm_quant.w4_supported(x, self.qweight)
+        ):
+            return rocm_quant.linear_w4(x, self.qweight, self.scale)
         if (
             x.dtype == torch.float16
             and (x.shape[-1] % self.group) == 0
@@ -490,7 +540,7 @@ class W4Linear(nn.Module):
                     scale_t = self.scale.t().contiguous()
                     self._scale_t = scale_t
                 return w4_linear.gemm_w4a8_tc(x, self.qweight, scale_t)
-        # M>64 / prefill: dequant -> cuBLAS (compute-bound regime; weight read amortized)
+        # Remaining CUDA/ROCm shapes: correctness-first dequant -> vendor BLAS.
         w = w4_linear.dequant(self.qweight, self.scale, self.group).to(x.dtype)
         return torch.nn.functional.linear(x, w)
 
@@ -505,8 +555,9 @@ M_CROSS = 256
 
 class W8Linear(nn.Module):
     """Weight-only group-wise symmetric int8 (w8a16) bias-free projection — the 8-bit
-    sibling of W4Linear (same dispatch shape: M==1 GEMV / 2<=M<=8 small-GEMM /
-    M>8 dequant->cuBLAS). Near-lossless; runs on every arch (JIT, no cutlass)."""
+    sibling of W4Linear. Near-lossless; runs on every arch (JIT, no cutlass).
+    ROCm adds a measured, shape-gated M=9..256 fused-dequant path and deliberately
+    retains dequant->rocBLAS wherever that path did not win."""
 
     def __init__(self, in_features: int, out_features: int, group: int = w4_linear.GROUP):
         super().__init__()
@@ -523,6 +574,11 @@ class W8Linear(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         M = x.shape[0]
         if (
+            _IS_ROCM
+            and rocm_quant.w8_supported(x, self.qweight)
+        ):
+            return rocm_quant.linear_w8(x, self.qweight, self.scale)
+        if (
             x.dtype == torch.float16
             and (x.shape[-1] % self.group) == 0
             and w4_linear.w8_available()
@@ -536,7 +592,8 @@ class W8Linear(nn.Module):
             # up to bsz~32 (1.02-1.47x); at bsz64 it's already 0.77x.
             if 8 < M <= 32 and (self.out_features % 64) == 0 and w4_linear.tc_supported():
                 return w4_linear.gemm_w8_tc(x, self.qweight, self.scale)
-        # M>32 / prefill: dequant -> cuBLAS. High concurrency is compute-bound and the TC
+        # Remaining CUDA/ROCm shapes: dequant -> vendor BLAS. On CUDA, high
+        # concurrency is compute-bound and the TC
         # MMAs run in fp16 regardless, so a weight-only-int8 GEMM has NO FLOP advantage and
         # the dequant is pure overhead — measured: gemm_w8_tc_large is 0.53-0.85x cuBLAS at
         # M=96-256 (F0018), i.e. slower than this fallback. int8's win is bandwidth, which
@@ -662,7 +719,7 @@ def _proj_gemv(
     if _CALIB and getattr(layer, "_qname", None):
         _calib_accumulate(layer._qname, x)
     if isinstance(layer, (W4Linear, W8Linear)):
-        return layer(x)
+        return _stable_linear_output(layer, x)
     if fast and x.dtype == torch.float16 and (x.shape[-1] % 4) == 0:
         w = layer.weight
         if (
@@ -674,7 +731,7 @@ def _proj_gemv(
                 return fast_linear.gemv_m1(x, w)
             if is_target_verify and x.shape[0] > 1:
                 return fast_linear.gemv_mb(x, w)
-    return layer(x)[0]
+    return _stable_linear_output(layer, x)
 
 
 def _proj_gemv_sqrelu(
@@ -695,7 +752,7 @@ def _proj_gemv_sqrelu(
     if _CALIB and getattr(layer, "_qname", None):
         _calib_accumulate(layer._qname, x)
     if isinstance(layer, (W4Linear, W8Linear)):
-        return torch.relu(layer(x)) ** 2
+        return torch.relu(_stable_linear_output(layer, x)) ** 2
     if fast and x.dtype == torch.float16 and (x.shape[-1] % 4) == 0:
         w = layer.weight
         if (
@@ -707,7 +764,7 @@ def _proj_gemv_sqrelu(
                 return fast_linear.gemv_m1_sqrelu(x, w)
             if is_target_verify and x.shape[0] > 1:
                 return torch.relu(fast_linear.gemv_mb(x, w)) ** 2
-    return torch.relu(layer(x)[0]) ** 2
+    return torch.relu(_stable_linear_output(layer, x)) ** 2
 
 
 class Rwkv7LoRA(nn.Module):
@@ -775,9 +832,9 @@ class Rwkv7LoRA(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h, _ = self.lora[0](x)
+        h = _stable_linear_output(self.lora[0], x)
         h = self.lora[1](h)
-        out, _ = self.lora[2](h)
+        out = _stable_linear_output(self.lora[2], h)
         return out
 
 
@@ -817,7 +874,6 @@ class Rwkv7Attention(nn.Module):
         import os
         if os.environ.get("RWKV_PAR_DEBUG") == "1" and layer_id in (0, 1):
             import sys
-            from sglang.srt.distributed import get_tensor_model_parallel_rank
             print(f"[par-debug] attn L{layer_id}: tp_size={tp_size} "
                   f"tp_rank={_tp_rank()} nh_local={self.local_num_heads}",
                   file=sys.stderr, flush=True)

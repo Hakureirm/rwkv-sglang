@@ -1,0 +1,38 @@
+{
+  "model": "RWKV-7 1.5B",
+  "dtype": "float16",
+  "device": "AMD Radeon Graphics",
+  "arch": "gfx1100",
+  "rocm": "7.2.1",
+  "pytorch": "2.9.1+rocm7.2.1.gitff65f5bc",
+  "triton": "3.5.1",
+  "wkv_numerics": {
+    "decode_b2": {
+      "output_max_abs": 0.0,
+      "state_max_abs": 7.45058e-09
+    },
+    "packed_varlen_3_2": {
+      "output_max_abs": 0.0,
+      "state_max_abs": 1.49012e-08
+    }
+  },
+  "decode_graph_batch_sizes": [1, 2, 4, 8],
+  "dynamic_batch": {
+    "batch_size": 8,
+    "exact_vs_batch1": true
+  },
+  "chunked_prefill": {
+    "prompt_tokens": 5000,
+    "chunked_shape": [4096, 904],
+    "single_shot_tokens": 5000,
+    "generated_tokens_compared": 24,
+    "exact": true
+  },
+  "state_cache": {
+    "prompt_tokens": 2052,
+    "cached_tokens": 2048,
+    "cache_hit_rate": 0.9980506822612085,
+    "generated_tokens_compared": 16,
+    "greedy_exact_after_restore": true
+  }
+}

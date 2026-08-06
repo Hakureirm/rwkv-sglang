@@ -83,6 +83,7 @@ findings, not this table.
 | F0081 | [Mixed-precision by layer for int4: testing the claim that protecting {0, N/4, 3N/4, N-1} rescues the reason...](findings/0081-int4-layer-protection.md) | open |
 | F0082 | [At 1.5B, our calibrated int4 (GPTQ) is 6.9 points WORSE on MATH500 than plain round-to-nearest — separated,...](findings/0082-gptq-loses-to-rtn-on-math500.md) | open |
 | F0083 | [At 1.5B a non-uniform 4-bit lattice beats int4 by 4.4-4.6 points of MATH500 (separated), and total weight e...](findings/0083-grid-and-group-size.md) | open |
+| F0084 | [ROCm fused-dequant prefill closes the W4 implementation gap: 1.31-2.89x at bsz1 and 2.06-3.15x at bsz8 acro...](findings/0084-rocm-quant-prefill.md) | closed |
 | F0085 | [Two ops, not one, made every ONNX export subtest fail: cumprod and linalg.solve_triangular](findings/0085-onnx-export-two-triggers.md) | closed |
 | F0086 | [A measured +10.7% never shipped: the default was raised in the tree that was about to be deleted](findings/0086-the-improvement-was-committed-to-the-retired-tree.md) | closed |
 | F0087 | [W1'': the 2<=T<=gate band was doing in torch what both of its neighbours had a kernel for — +5.2% at bs8, +...](findings/0087-the-band-between-the-two-fused-paths.md) | closed |

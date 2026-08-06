@@ -1,0 +1,29 @@
+{
+  "model": "/root/models/rwkv7-official/quant/rwkv7-g1h-2.9b-20260710-ctx10240-w4g64",
+  "tag": "rocm-2.9B-w4-prefill-fused",
+  "dtype": "bfloat16",
+  "cuda_graph": true,
+  "radix_cache": false,
+  "decode_tokens": 64,
+  "prefill_len": 256,
+  "short_len": 16,
+  "mem_fraction": 0.85,
+  "vram_backend": "rocm-smi",
+  "baseline_vram_mib": 26,
+  "rows": [
+    {
+      "bsz": 1,
+      "decode_tok_s": 66.86249636327001,
+      "prefill_tok_s": 2596.655757606536,
+      "ttft_ms": 98.58834743499756,
+      "peak_vram_mib": 18895
+    },
+    {
+      "bsz": 8,
+      "decode_tok_s": 415.57571589060313,
+      "prefill_tok_s": 3631.1996340714195,
+      "ttft_ms": 564.0009380877018,
+      "peak_vram_mib": 19223
+    }
+  ]
+}

@@ -1,0 +1,229 @@
+{
+  "gpu": "AMD Radeon Graphics (gfx1100, 48 GiB)",
+  "software": {
+    "rocm": "7.2.1",
+    "torch": "2.9.1+rocm7.2.1.gitff65f5bc",
+    "dtype": "bfloat16"
+  },
+  "protocol": {
+    "cuda_graph": true,
+    "radix_cache": false,
+    "decode_tokens": 64,
+    "prefill_length": 256,
+    "batches": [
+      1,
+      8
+    ],
+    "rocm_prefill_tile": 256
+  },
+  "operator_gates": [
+    "rocm_gfx1100_quant_prefill.json",
+    "rocm_gfx1100_quant_prefill_extra.json",
+    "rocm_gfx1100_quant_prefill_fp16.json"
+  ],
+  "chunk64": {
+    "model": "RWKV-7 G1h 1.5B",
+    "prompt_tokens": 512,
+    "generated_tokens": 24,
+    "w8": "24/24 exact",
+    "w4": "24/24 exact"
+  },
+  "w4": {
+    "0.1B": {
+      "1": {
+        "before_tok_s": 8446.5,
+        "after_tok_s": 11036.535069491594,
+        "speedup": 1.306640036641401,
+        "ratio_vs_dense": 0.9540490719730633,
+        "decode_tok_s": 270.3570660521678,
+        "ttft_ms": 23.19568581879139
+      },
+      "8": {
+        "before_tok_s": 17552.4,
+        "after_tok_s": 36196.00168860216,
+        "speedup": 2.062168232754618,
+        "ratio_vs_dense": 0.7933439786562987,
+        "decode_tok_s": 1989.02248121934,
+        "ttft_ms": 56.58083502203226
+      }
+    },
+    "0.4B": {
+      "1": {
+        "before_tok_s": 4243.707454198839,
+        "after_tok_s": 5743.540600343096,
+        "speedup": 1.3534251977384262,
+        "ratio_vs_dense": 0.9588316870797968,
+        "decode_tok_s": 125.84546176824549,
+        "ttft_ms": 44.57180993631482
+      },
+      "8": {
+        "before_tok_s": 7672.345987925341,
+        "after_tok_s": 16126.514782674723,
+        "speedup": 2.1019014012212778,
+        "ratio_vs_dense": 0.8035857766098495,
+        "decode_tok_s": 905.570539090973,
+        "ttft_ms": 126.99582194909453
+      }
+    },
+    "1.5B": {
+      "1": {
+        "before_tok_s": 2399.3741446054314,
+        "after_tok_s": 4241.8643898899345,
+        "speedup": 1.76790451769559,
+        "ratio_vs_dense": 0.8893360170901771,
+        "decode_tok_s": 99.48607593110444,
+        "ttft_ms": 60.35082135349512
+      },
+      "8": {
+        "before_tok_s": 3100.5096684190985,
+        "after_tok_s": 6448.610084542408,
+        "speedup": 2.079854854260285,
+        "ratio_vs_dense": 0.6251277267295745,
+        "decode_tok_s": 631.6544248808763,
+        "ttft_ms": 317.5878170877695
+      }
+    },
+    "2.9B": {
+      "1": {
+        "before_tok_s": 1334.623218093226,
+        "after_tok_s": 2596.655757606536,
+        "speedup": 1.9456096090673247,
+        "ratio_vs_dense": 0.8516800957338949,
+        "decode_tok_s": 66.86249636327001,
+        "ttft_ms": 98.58834743499756
+      },
+      "8": {
+        "before_tok_s": 1527.8178083149855,
+        "after_tok_s": 3631.1996340714195,
+        "speedup": 2.3767229405947505,
+        "ratio_vs_dense": 0.5925715835302258,
+        "decode_tok_s": 415.57571589060313,
+        "ttft_ms": 564.0009380877018
+      }
+    },
+    "7.2B": {
+      "1": {
+        "before_tok_s": 479.1063965731431,
+        "after_tok_s": 1376.4414131400856,
+        "speedup": 2.872934744735662,
+        "ratio_vs_dense": 0.9617286584327339,
+        "decode_tok_s": 47.308430768330986,
+        "ttft_ms": 185.9868480823934
+      },
+      "8": {
+        "before_tok_s": 516.9272282056363,
+        "after_tok_s": 1627.9547119604017,
+        "speedup": 3.1492918599226756,
+        "ratio_vs_dense": 0.7755533388049701,
+        "decode_tok_s": 264.38956439676764,
+        "ttft_ms": 1258.0202538520098
+      }
+    },
+    "13.3B": {
+      "1": {
+        "before_tok_s": 251.66619392818447,
+        "after_tok_s": 726.4750652780002,
+        "speedup": 2.8866613109161072,
+        "ratio_vs_dense": 0.9620018206151371,
+        "decode_tok_s": 24.694624848110976,
+        "ttft_ms": 352.3864923045039
+      },
+      "8": {
+        "before_tok_s": 271.8637416107906,
+        "after_tok_s": 853.2603325317502,
+        "speedup": 3.1385587775559523,
+        "ratio_vs_dense": 0.7737659949318079,
+        "decode_tok_s": 138.9644111821177,
+        "ttft_ms": 2400.2053323201835
+      }
+    }
+  },
+  "w8": {
+    "0.1B": {
+      "dispatch": "fallback",
+      "reason": "no M=256 projection shape passed the end-to-end speed gate"
+    },
+    "0.4B": {
+      "dispatch": "fallback",
+      "reason": "no M=256 projection shape passed the all-batch end-to-end speed gate"
+    },
+    "1.5B": {
+      "1": {
+        "before_tok_s": 3492.103396851677,
+        "after_tok_s": 3625.1302083082965,
+        "speedup": 1.038093606156264,
+        "ratio_vs_dense": 0.7600334580648481,
+        "decode_tok_s": 89.25721940193336,
+        "ttft_ms": 70.61815308406949
+      },
+      "8": {
+        "before_tok_s": 5225.616805185396,
+        "after_tok_s": 5419.2131969019065,
+        "speedup": 1.0370475675760236,
+        "ratio_vs_dense": 0.5253380778227947,
+        "decode_tok_s": 593.600714543759,
+        "ttft_ms": 377.91463918983936
+      }
+    },
+    "2.9B": {
+      "1": {
+        "before_tok_s": 2072.051573641794,
+        "after_tok_s": 2120.6049144405624,
+        "speedup": 1.0234324962835901,
+        "ratio_vs_dense": 0.6955396344909636,
+        "decode_tok_s": 61.83030493429073,
+        "ttft_ms": 120.7202710211277
+      },
+      "8": {
+        "before_tok_s": 2801.2911881446207,
+        "after_tok_s": 2891.4490743608544,
+        "speedup": 1.0321844036056629,
+        "ratio_vs_dense": 0.4718524810958707,
+        "decode_tok_s": 418.48536611892325,
+        "ttft_ms": 708.2953727804124
+      }
+    },
+    "7.2B": {
+      "1": {
+        "before_tok_s": 880.3851779307208,
+        "after_tok_s": 1085.9705587971262,
+        "speedup": 1.2335175398450235,
+        "ratio_vs_dense": 0.7587747641410968,
+        "decode_tok_s": 39.65814832496618,
+        "ttft_ms": 235.73383083567023
+      },
+      "8": {
+        "before_tok_s": 1005.2566090697392,
+        "after_tok_s": 1268.6138835716504,
+        "speedup": 1.2619801472836085,
+        "ratio_vs_dense": 0.6043643142096602,
+        "decode_tok_s": 255.2709281568578,
+        "ttft_ms": 1614.3603869713843
+      }
+    },
+    "13.3B": {
+      "1": {
+        "before_tok_s": 461.82225624050517,
+        "after_tok_s": 572.5502306185027,
+        "speedup": 1.2397631835229987,
+        "ratio_vs_dense": 0.7581738046822623,
+        "decode_tok_s": 20.652060494444633,
+        "ttft_ms": 447.122341953218
+      },
+      "8": {
+        "before_tok_s": 527.9308797007341,
+        "after_tok_s": 664.3342292274076,
+        "speedup": 1.2583735007203896,
+        "ratio_vs_dense": 0.6024412670400017,
+        "decode_tok_s": 135.4571575310702,
+        "ttft_ms": 3082.7856068499386
+      }
+    }
+  },
+  "notes": [
+    "before values are the previously committed dequant-to-rocBLAS all-size baseline under the same protocol",
+    "W8 remains on fallback for non-winning shapes; small-model run-to-run differences are not attributed to the fused kernel",
+    "W4 RTN model-quality limitations are unchanged; this result certifies the projection implementation and serving performance, not RTN accuracy"
+  ],
+  "status": "pass"
+}

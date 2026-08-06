@@ -19,6 +19,20 @@ from sglang.srt.configs.mamba_utils import (
     Rwkv7StateShape,
 )
 
+RWKV7_ARCHITECTURES = ("RWKV7ForCausalLM", "Rwkv7ForCausalLM")
+
+
+def _attention_tp_size() -> int:
+    """Return the attention TP size across supported SGLang revisions."""
+    try:
+        from sglang.srt.layers.dp_attention import get_attention_tp_size
+
+        return get_attention_tp_size()
+    except ImportError:
+        from sglang.srt.runtime_context import get_parallel
+
+        return get_parallel().attn_tp_size
+
 
 class Rwkv7Config(PretrainedConfig):
     model_type = "rwkv7"
@@ -114,10 +128,8 @@ class Rwkv7Config(PretrainedConfig):
 
     @property
     def mamba2_cache_params(self) -> Rwkv7CacheParams:
-        from sglang.srt.layers.dp_attention import get_attention_tp_size
-
         shape = Rwkv7StateShape.create(
-            tp_world_size=get_attention_tp_size(),
+            tp_world_size=_attention_tp_size(),
             hidden_size=self.hidden_size,
             num_heads=self.num_heads,
             head_dim=self.head_dim,
@@ -141,3 +153,39 @@ class Rwkv7Config(PretrainedConfig):
         )
         dtype = Mamba2StateDType(conv=torch.float32, temporal=temporal_dtype)
         return Rwkv7CacheParams(shape=shape, layers=self.linear_layer_ids, dtype=dtype)
+
+
+def _register_linear_attention_model() -> None:
+    """Register with SGLang revisions that use declarative backend discovery."""
+    try:
+        from sglang.srt.configs.linear_attn_model_registry import (
+            LinearAttnModelSpec,
+            get_linear_attn_spec_by_arch,
+            register_linear_attn_model,
+        )
+    except ImportError:
+        # The base revision wired by sglang_main_port/upstream_edits.patch uses
+        # explicit RWKV dispatch and has no declarative registry.
+        return
+
+    if any(
+        get_linear_attn_spec_by_arch(arch) is not None
+        for arch in RWKV7_ARCHITECTURES
+    ):
+        return
+
+    register_linear_attn_model(
+        LinearAttnModelSpec(
+            config_class=Rwkv7Config,
+            backend_class_name=(
+                "sglang.srt.layers.attention.linear.rwkv7_backend.Rwkv7AttnBackend"
+            ),
+            arch_names=list(RWKV7_ARCHITECTURES),
+            uses_mamba_radix_cache=True,
+            support_mamba_cache=True,
+            support_mamba_cache_extra_buffer=False,
+        )
+    )
+
+
+_register_linear_attention_model()

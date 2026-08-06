@@ -30,9 +30,25 @@ Paths mirror their destination under `python/sglang/` in an sglang checkout:
 srt/configs/rwkv7.py                            model config
 srt/models/rwkv7.py                             the model
 srt/layers/attention/linear/rwkv7_backend.py    linear-attention backend
-srt/layers/attention/rwkv7_kernels/             12 modules + CUDA sources
+srt/layers/attention/rwkv7_kernels/             CUDA/HIP/Triton kernel modules
 srt/speculative/rwkv_spec_worker.py             speculative decode worker
 ```
+
+## AMD ROCm
+
+The ROCm path is part of this mainline tree rather than a second overlay:
+
+- `rwkv7_kernels/rocm_quant.py` provides fused group-64 W8/W4 decode and
+  prefill dispatch;
+- `rwkv7_kernels/hip/rwkv7_quant_hip.cu` is the standalone HIP small-batch
+  kernel;
+- dense recurrence stays on the portable Triton WKV implementation;
+- NVIDIA-only PDL and CUDA-extension paths are runtime-gated off under HIP;
+- `scripts/rocm_env.sh` records the supported launch defaults and kill switches.
+
+Contributor-owned gfx1100 gates and raw outputs are documented in
+[`docs/ROCM.md`](../docs/ROCM.md). They have not been independently reproduced
+by the maintainers.
 
 Wiring edits to sglang's own files stay in
 `sglang_main_port/upstream_edits.patch`.

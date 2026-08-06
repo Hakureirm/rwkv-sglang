@@ -1,0 +1,15 @@
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+
+==============================================================================
+THROUGHPUT  model=rocm-2.9B-w4-prefill-fused  dtype=bfloat16  cuda_graph=ON  radix_cache=OFF
+  decode=64tok (steady-state, prefill-subtracted)  prefill_len=256  mem_fraction=0.85
+  VRAM via rocm-smi GPU0; baseline(pre-Engine)=26 MiB
+------------------------------------------------------------------------------
+ bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base
+------------------------------------------------------------------------------
+   1 |          66.9 |         2596.7 |      98.6 |         18895 |      18869
+   8 |         415.6 |         3631.2 |     564.0 |         19223 |      19197
+==============================================================================
+wrote bench/results/rocm_gfx1100_29b_w4_prefill_fused.json
