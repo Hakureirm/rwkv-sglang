@@ -203,7 +203,11 @@ def main():
                 print(f"      req#{i}({mix_names[i]}) DIVERGED: {mix_out[i]} != {ref[mix_names[i]]}")
     print("-" * 78)
     overall = (not failures) and (eiffel_b1_exact or args.reference_only)
-    print(f"OVERALL: {'PASS (all batches exact)' if overall else 'FAIL: ' + ','.join(failures or ['B1!=oracle'])}")
+    verdict_mode = "REFERENCE-ONLY" if args.reference_only else "ORACLE"
+    verdict = "PASS (all batches exact)" if overall else "FAIL: " + ",".join(
+        failures or ["B1!=oracle"]
+    )
+    print(f"OVERALL: [{verdict_mode}] {verdict}")
     print("=" * 78)
     sys.exit(0 if overall else 1)
 
