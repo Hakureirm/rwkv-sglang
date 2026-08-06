@@ -1,0 +1,30 @@
+Quark quantization is unavailable in this ROCm environment (No module named 'aiter').
+Quark INT4/FP8 MoE is unavailable in this ROCm environment (No module named 'aiter').
+prompt=2048 tok, chunk=256 -> 8 chunks; gen=24
+Quark quantization is unavailable in this ROCm environment (No module named 'aiter').
+Quark INT4/FP8 MoE is unavailable in this ROCm environment (No module named 'aiter').
+Quark quantization is unavailable in this ROCm environment (No module named 'aiter').
+Quark INT4/FP8 MoE is unavailable in this ROCm environment (No module named 'aiter').
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+Multi-thread loading shards: 100% Completed | 1/1 [00:20<00:00, 20.31s/it]
+Multi-thread loading shards: 100% Completed | 1/1 [00:20<00:00, 20.31s/it]
+/usr/lib/python3.12/multiprocessing/resource_tracker.py:123: UserWarning: resource_tracker: process died unexpectedly, relaunching.  Some resources might leak.
+  warnings.warn('resource_tracker: process died unexpectedly, '
+Quark quantization is unavailable in this ROCm environment (No module named 'aiter').
+Quark INT4/FP8 MoE is unavailable in this ROCm environment (No module named 'aiter').
+Quark quantization is unavailable in this ROCm environment (No module named 'aiter').
+Quark INT4/FP8 MoE is unavailable in this ROCm environment (No module named 'aiter').
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+Multi-thread loading shards: 100% Completed | 1/1 [00:06<00:00,  6.57s/it]
+Multi-thread loading shards: 100% Completed | 1/1 [00:06<00:00,  6.57s/it]
+single-shot : [2049, 2050, 2051, 2052, 2053, 2054, 2055, 2056, 2057, 2058, 110, 2355, 2085, 2086, 2061, 2062, 2063, 2090, 2091, 2092, 2093, 2094, 2095, 1994]
+chunked(256): [2049, 2050, 2051, 2052, 2053, 2054, 2055, 2056, 2057, 2058, 110, 2355, 2085, 2086, 2061, 2062, 2063, 2090, 2091, 2092, 2093, 2094, 2095, 1994]
+CHUNKED-PREFILL MATCH 24/24  first_div=None  exact=True

@@ -1,0 +1,45 @@
+Quark quantization is unavailable in this ROCm environment (No module named 'aiter').
+Quark INT4/FP8 MoE is unavailable in this ROCm environment (No module named 'aiter').
+Quark quantization is unavailable in this ROCm environment (No module named 'aiter').
+Quark INT4/FP8 MoE is unavailable in this ROCm environment (No module named 'aiter').
+Quark quantization is unavailable in this ROCm environment (No module named 'aiter').
+Quark INT4/FP8 MoE is unavailable in this ROCm environment (No module named 'aiter').
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+Multi-thread loading shards: 100% Completed | 1/1 [00:36<00:00, 36.39s/it]
+Multi-thread loading shards: 100% Completed | 1/1 [00:36<00:00, 36.39s/it]
+
+  0%|          | 0/8 [00:00<?, ?it/s]
+Capturing batches (bs=32 avail_mem=24.77 GB):   0%|          | 0/8 [00:00<?, ?it/s]
+Capturing batches (bs=32 avail_mem=24.77 GB):  12%|█▎        | 1/8 [00:03<00:22,  3.20s/it]
+Capturing batches (bs=24 avail_mem=24.53 GB):  12%|█▎        | 1/8 [00:03<00:22,  3.20s/it]
+Capturing batches (bs=24 avail_mem=24.53 GB):  25%|██▌       | 2/8 [00:03<00:08,  1.50s/it]
+Capturing batches (bs=16 avail_mem=24.52 GB):  25%|██▌       | 2/8 [00:03<00:08,  1.50s/it]
+Capturing batches (bs=16 avail_mem=24.52 GB):  38%|███▊      | 3/8 [00:04<00:05,  1.04s/it]
+Capturing batches (bs=12 avail_mem=24.51 GB):  38%|███▊      | 3/8 [00:04<00:05,  1.04s/it]
+Capturing batches (bs=12 avail_mem=24.51 GB):  50%|█████     | 4/8 [00:04<00:02,  1.34it/s]
+Capturing batches (bs=8 avail_mem=24.51 GB):  50%|█████     | 4/8 [00:04<00:02,  1.34it/s]
+Capturing batches (bs=8 avail_mem=24.51 GB):  62%|██████▎   | 5/8 [00:04<00:01,  1.74it/s]
+Capturing batches (bs=4 avail_mem=24.51 GB):  62%|██████▎   | 5/8 [00:04<00:01,  1.74it/s]
+Capturing batches (bs=4 avail_mem=24.51 GB):  75%|███████▌  | 6/8 [00:04<00:00,  2.20it/s]
+Capturing batches (bs=2 avail_mem=24.50 GB):  75%|███████▌  | 6/8 [00:04<00:00,  2.20it/s]
+Capturing batches (bs=2 avail_mem=24.50 GB):  88%|████████▊ | 7/8 [00:05<00:00,  2.52it/s]
+Capturing batches (bs=1 avail_mem=24.50 GB):  88%|████████▊ | 7/8 [00:05<00:00,  2.52it/s]
+Capturing batches (bs=1 avail_mem=24.50 GB): 100%|██████████| 8/8 [00:05<00:00,  2.89it/s]
+Capturing batches (bs=1 avail_mem=24.50 GB): 100%|██████████| 8/8 [00:05<00:00,  1.51it/s]
+==============================================================================
+VERIFY_BATCH  model=/root/models/rwkv7-official/fla/rwkv7-g1h-7.2b-20260710-ctx10240
+  dtype=bfloat16  cuda_graph=ON  disable_radix_cache=True  n=24
+------------------------------------------------------------------------------
+ORACLE          [37138, 45, 44312, 47, 11, 6699, 304, 25740, 109, 37480, 4600, 332, 4865, 35311, 31169, 52099, 39990, 47, 11, 6699, 304, 25740, 109, 37480]
+eiffel B=1 == numpy-oracle : True
+------------------------------------------------------------------------------
+[1] IDENTICAL  bsz=8  every-output==oracle : True  (8/8)
+[2] SHARED-PREFIX  bsz=5  every-output==B1-ref : True  (5/5)  tags=['eiffel', 'sp1', 'eiffel', 'sp2', 'eiffel']
+[3] MIXED  bsz=6  every-output==B1-ref : True  (6/6)  eiffel==oracle : True  tags=['eiffel', 'eiffel', 'sp1', 'distinct', 'eiffel', 'sp2']
+------------------------------------------------------------------------------
+OVERALL: PASS (all batches exact)
+==============================================================================

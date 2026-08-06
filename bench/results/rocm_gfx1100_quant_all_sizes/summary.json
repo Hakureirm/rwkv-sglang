@@ -1,0 +1,823 @@
+{
+  "gpu": "gfx1100",
+  "dtype": "bfloat16",
+  "matrix": "/root/rwkv-sglang-amd/bench/rocm_model_matrix.json",
+  "coverage": {
+    "w8_dense_oracle_dynamic_batch_graph": true,
+    "w4_self_reference_dynamic_batch_graph": false,
+    "w8_w4_chunked_prefill": true,
+    "dense_w8_w4_throughput": true
+  },
+  "known_limitations": [
+    "W4 model-level batch/graph was explicitly skipped; passing rows cover only the selected gates and do not certify RTN W4 quality.",
+    "The retained 0.4B RTN W4 negative result is 04b_w4g64_batch_known_failure.log.",
+    "Quantized M>8 prefill uses dequantize-then-rocBLAS and is slower than dense."
+  ],
+  "results": [
+    {
+      "size": "0.4B",
+      "stages": [
+        {
+          "name": "0.4B w8g64 oracle/batch/graph",
+          "return_code": 0,
+          "seconds": 33.072,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/04b_w8g64_batch.log"
+        },
+        {
+          "name": "0.4B w8g64 chunked prefill",
+          "return_code": 0,
+          "seconds": 26.93,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/04b_w8g64_chunk.log"
+        },
+        {
+          "name": "0.4B w4g64 chunked prefill",
+          "return_code": 0,
+          "seconds": 27.341,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/04b_w4g64_chunk.log"
+        },
+        {
+          "name": "0.4B dense throughput",
+          "return_code": 0,
+          "seconds": 19.426,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/04b_dense_throughput.log"
+        },
+        {
+          "name": "0.4B w8g64 throughput",
+          "return_code": 0,
+          "seconds": 19.774,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/04b_w8g64_throughput.log"
+        },
+        {
+          "name": "0.4B w4g64 throughput",
+          "return_code": 0,
+          "seconds": 20.293,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/04b_w4g64_throughput.log"
+        }
+      ],
+      "paths": {
+        "dense": "/root/models/rwkv7-official/fla/rwkv7-g1d-0.4b-20260210-ctx8192",
+        "w8g64": "/root/models/rwkv7-official/quant/rwkv7-g1d-0.4b-20260210-ctx8192-w8g64",
+        "w4g64": "/root/models/rwkv7-official/quant/rwkv7-g1d-0.4b-20260210-ctx8192-w4g64"
+      },
+      "checkpoint_bytes": {
+        "dense": 901621099,
+        "w8g64": 609083782,
+        "w4g64": 458088718
+      },
+      "checkpoint_ratio_vs_dense": {
+        "w8g64": 0.6755429555447882,
+        "w4g64": 0.5080723138667366
+      },
+      "throughput": {
+        "dense": {
+          "model": "/root/models/rwkv7-official/fla/rwkv7-g1d-0.4b-20260210-ctx8192",
+          "tag": "rocm-0.4B-dense",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 100.30498837140553,
+              "prefill_tok_s": 5990.144754013643,
+              "ttft_ms": 42.73686371743679,
+              "peak_vram_mib": 18856
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 814.7366991745678,
+              "prefill_tok_s": 20068.193405200524,
+              "ttft_ms": 102.0520362071693,
+              "peak_vram_mib": 18980
+            }
+          ]
+        },
+        "w8g64": {
+          "model": "/root/models/rwkv7-official/quant/rwkv7-g1d-0.4b-20260210-ctx8192-w8g64",
+          "tag": "rocm-0.4B-w8g64",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 119.58210702039301,
+              "prefill_tok_s": 5695.496933280583,
+              "ttft_ms": 44.94778998196125,
+              "peak_vram_mib": 18712
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 889.0501980527304,
+              "prefill_tok_s": 12718.510766121412,
+              "ttft_ms": 161.02514183148742,
+              "peak_vram_mib": 18816
+            }
+          ]
+        },
+        "w4g64": {
+          "model": "/root/models/rwkv7-official/quant/rwkv7-g1d-0.4b-20260210-ctx8192-w4g64",
+          "tag": "rocm-0.4B-w4g64",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 126.35854266777666,
+              "prefill_tok_s": 4243.707454198839,
+              "ttft_ms": 60.32461067661643,
+              "peak_vram_mib": 18735
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 903.819439474045,
+              "prefill_tok_s": 7672.345987925341,
+              "ttft_ms": 266.9326961040497,
+              "peak_vram_mib": 18815
+            }
+          ]
+        }
+      },
+      "decode_ratio_vs_dense": {
+        "w8g64": {
+          "1": 1.1921850444527136,
+          "8": 1.0912116748312082
+        },
+        "w4g64": {
+          "1": 1.2597433559326183,
+          "8": 1.1093392999109153
+        }
+      },
+      "status": "pass",
+      "skipped_stages": [
+        {
+          "name": "0.4B w4g64 oracle/batch/graph",
+          "reason": "explicitly skipped for lossy RTN checkpoints; this is not a W4 model-quality pass"
+        }
+      ]
+    },
+    {
+      "size": "1.5B",
+      "stages": [
+        {
+          "name": "1.5B w8g64 oracle/batch/graph",
+          "return_code": 0,
+          "seconds": 21.55,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/15b_w8g64_batch.log"
+        },
+        {
+          "name": "1.5B w8g64 chunked prefill",
+          "return_code": 0,
+          "seconds": 28.279,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/15b_w8g64_chunk.log"
+        },
+        {
+          "name": "1.5B w4g64 chunked prefill",
+          "return_code": 0,
+          "seconds": 28.237,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/15b_w4g64_chunk.log"
+        },
+        {
+          "name": "1.5B dense throughput",
+          "return_code": 0,
+          "seconds": 22.96,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/15b_dense_throughput.log"
+        },
+        {
+          "name": "1.5B w8g64 throughput",
+          "return_code": 0,
+          "seconds": 21.486,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/15b_w8g64_throughput.log"
+        },
+        {
+          "name": "1.5B w4g64 throughput",
+          "return_code": 0,
+          "seconds": 22.138,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/15b_w4g64_throughput.log"
+        }
+      ],
+      "paths": {
+        "dense": "/root/models/rwkv7-official/fla/rwkv7-g1h-1.5b-20260710-ctx10240",
+        "w8g64": "/root/models/rwkv7-official/quant/rwkv7-g1h-1.5b-20260710-ctx10240-w8g64",
+        "w4g64": "/root/models/rwkv7-official/quant/rwkv7-g1h-1.5b-20260710-ctx10240-w4g64"
+      },
+      "checkpoint_bytes": {
+        "dense": 3054895708,
+        "w8g64": 1884699239,
+        "w4g64": 1280719391
+      },
+      "checkpoint_ratio_vs_dense": {
+        "w8g64": 0.6169438891365256,
+        "w4g64": 0.4192350618209713
+      },
+      "throughput": {
+        "dense": {
+          "model": "/root/models/rwkv7-official/fla/rwkv7-g1h-1.5b-20260710-ctx10240",
+          "tag": "rocm-1.5B-dense",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 60.78699794177344,
+              "prefill_tok_s": 4769.698188732884,
+              "ttft_ms": 53.67215909063816,
+              "peak_vram_mib": 17394
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 469.3271414414805,
+              "prefill_tok_s": 10315.66799680928,
+              "ttft_ms": 198.53295013308525,
+              "peak_vram_mib": 17726
+            }
+          ]
+        },
+        "w8g64": {
+          "model": "/root/models/rwkv7-official/quant/rwkv7-g1h-1.5b-20260710-ctx10240-w8g64",
+          "tag": "rocm-1.5B-w8g64",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 89.31552531776862,
+              "prefill_tok_s": 3492.103396851677,
+              "ttft_ms": 73.30825319513679,
+              "peak_vram_mib": 16836
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 594.0304113581604,
+              "prefill_tok_s": 5225.616805185396,
+              "ttft_ms": 391.91545732319355,
+              "peak_vram_mib": 17028
+            }
+          ]
+        },
+        "w4g64": {
+          "model": "/root/models/rwkv7-official/quant/rwkv7-g1h-1.5b-20260710-ctx10240-w4g64",
+          "tag": "rocm-1.5B-w4g64",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 99.44614203684569,
+              "prefill_tok_s": 2399.3741446054314,
+              "ttft_ms": 106.69448971748352,
+              "peak_vram_mib": 16715
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 629.649038503489,
+              "prefill_tok_s": 3100.5096684190985,
+              "ttft_ms": 660.5365630239248,
+              "peak_vram_mib": 16879
+            }
+          ]
+        }
+      },
+      "decode_ratio_vs_dense": {
+        "w8g64": {
+          "1": 1.469319564083787,
+          "8": 1.2657064953321668
+        },
+        "w4g64": {
+          "1": 1.635977189268386,
+          "8": 1.341599457831481
+        }
+      },
+      "status": "pass",
+      "skipped_stages": [
+        {
+          "name": "1.5B w4g64 oracle/batch/graph",
+          "reason": "explicitly skipped for lossy RTN checkpoints; this is not a W4 model-quality pass"
+        }
+      ]
+    },
+    {
+      "size": "2.9B",
+      "stages": [
+        {
+          "name": "2.9B w8g64 oracle/batch/graph",
+          "return_code": 0,
+          "seconds": 24.217,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/29b_w8g64_batch.log"
+        },
+        {
+          "name": "2.9B w8g64 chunked prefill",
+          "return_code": 0,
+          "seconds": 30.342,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/29b_w8g64_chunk.log"
+        },
+        {
+          "name": "2.9B w4g64 chunked prefill",
+          "return_code": 0,
+          "seconds": 29.925,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/29b_w4g64_chunk.log"
+        },
+        {
+          "name": "2.9B dense throughput",
+          "return_code": 0,
+          "seconds": 26.63,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/29b_dense_throughput.log"
+        },
+        {
+          "name": "2.9B w8g64 throughput",
+          "return_code": 0,
+          "seconds": 24.595,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/29b_w8g64_throughput.log"
+        },
+        {
+          "name": "2.9B w4g64 throughput",
+          "return_code": 0,
+          "seconds": 26.543,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/29b_w4g64_throughput.log"
+        }
+      ],
+      "paths": {
+        "dense": "/root/models/rwkv7-official/fla/rwkv7-g1h-2.9b-20260710-ctx10240",
+        "w8g64": "/root/models/rwkv7-official/quant/rwkv7-g1h-2.9b-20260710-ctx10240-w8g64",
+        "w4g64": "/root/models/rwkv7-official/quant/rwkv7-g1h-2.9b-20260710-ctx10240-w4g64"
+      },
+      "checkpoint_bytes": {
+        "dense": 5895585693,
+        "w8g64": 3457665376,
+        "w4g64": 2199374136
+      },
+      "checkpoint_ratio_vs_dense": {
+        "w8g64": 0.5864837788899221,
+        "w4g64": 0.37305439196844864
+      },
+      "throughput": {
+        "dense": {
+          "model": "/root/models/rwkv7-official/fla/rwkv7-g1h-2.9b-20260710-ctx10240",
+          "tag": "rocm-2.9B-dense",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 39.38511020726375,
+              "prefill_tok_s": 3048.862795565266,
+              "ttft_ms": 83.96573318168521,
+              "peak_vram_mib": 18808
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 311.1408523015518,
+              "prefill_tok_s": 6127.866632481205,
+              "ttft_ms": 334.21092899516225,
+              "peak_vram_mib": 19136
+            }
+          ]
+        },
+        "w8g64": {
+          "model": "/root/models/rwkv7-official/quant/rwkv7-g1h-2.9b-20260710-ctx10240-w8g64",
+          "tag": "rocm-2.9B-w8g64",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 61.074087653938015,
+              "prefill_tok_s": 2072.051573641794,
+              "ttft_ms": 123.54904832318425,
+              "peak_vram_mib": 17751
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 416.3943703241745,
+              "prefill_tok_s": 2801.2911881446207,
+              "ttft_ms": 731.0914369300008,
+              "peak_vram_mib": 18027
+            }
+          ]
+        },
+        "w4g64": {
+          "model": "/root/models/rwkv7-official/quant/rwkv7-g1h-2.9b-20260710-ctx10240-w4g64",
+          "tag": "rocm-2.9B-w4g64",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 66.72007931330947,
+              "prefill_tok_s": 1334.623218093226,
+              "ttft_ms": 191.8144361115992,
+              "peak_vram_mib": 17532
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 415.02652368723676,
+              "prefill_tok_s": 1527.8178083149855,
+              "ttft_ms": 1340.4739680700004,
+              "peak_vram_mib": 17670
+            }
+          ]
+        }
+      },
+      "decode_ratio_vs_dense": {
+        "w8g64": {
+          "1": 1.5506897741947716,
+          "8": 1.338282540669436
+        },
+        "w4g64": {
+          "1": 1.6940432300987789,
+          "8": 1.3338863110299672
+        }
+      },
+      "status": "pass",
+      "skipped_stages": [
+        {
+          "name": "2.9B w4g64 oracle/batch/graph",
+          "reason": "explicitly skipped for lossy RTN checkpoints; this is not a W4 model-quality pass"
+        }
+      ]
+    },
+    {
+      "size": "7.2B",
+      "stages": [
+        {
+          "name": "7.2B w8g64 oracle/batch/graph",
+          "return_code": 0,
+          "seconds": 32.36,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/72b_w8g64_batch.log"
+        },
+        {
+          "name": "7.2B w8g64 chunked prefill",
+          "return_code": 0,
+          "seconds": 34.561,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/72b_w8g64_chunk.log"
+        },
+        {
+          "name": "7.2B w4g64 chunked prefill",
+          "return_code": 0,
+          "seconds": 34.847,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/72b_w4g64_chunk.log"
+        },
+        {
+          "name": "7.2B dense throughput",
+          "return_code": 0,
+          "seconds": 41.816,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/72b_dense_throughput.log"
+        },
+        {
+          "name": "7.2B w8g64 throughput",
+          "return_code": 0,
+          "seconds": 33.716,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/72b_w8g64_throughput.log"
+        },
+        {
+          "name": "7.2B w4g64 throughput",
+          "return_code": 0,
+          "seconds": 38.82,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/72b_w4g64_throughput.log"
+        }
+      ],
+      "paths": {
+        "dense": "/root/models/rwkv7-official/fla/rwkv7-g1h-7.2b-20260710-ctx10240",
+        "w8g64": "/root/models/rwkv7-official/quant/rwkv7-g1h-7.2b-20260710-ctx10240-w8g64",
+        "w4g64": "/root/models/rwkv7-official/quant/rwkv7-g1h-7.2b-20260710-ctx10240-w4g64"
+      },
+      "checkpoint_bytes": {
+        "dense": 14398400335,
+        "w8g64": 8157296178,
+        "w4g64": 4936070674
+      },
+      "checkpoint_ratio_vs_dense": {
+        "w8g64": 0.5665418371630517,
+        "w4g64": 0.34282076891564633
+      },
+      "throughput": {
+        "dense": {
+          "model": "/root/models/rwkv7-official/fla/rwkv7-g1h-7.2b-20260710-ctx10240",
+          "tag": "rocm-7.2B-dense",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 22.997388945724843,
+              "prefill_tok_s": 1431.2159683201933,
+              "ttft_ms": 178.8688818924129,
+              "peak_vram_mib": 23015
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 170.5562693356843,
+              "prefill_tok_s": 2099.0880065952324,
+              "ttft_ms": 975.6618081592023,
+              "peak_vram_mib": 23455
+            }
+          ]
+        },
+        "w8g64": {
+          "model": "/root/models/rwkv7-official/quant/rwkv7-g1h-7.2b-20260710-ctx10240-w8g64",
+          "tag": "rocm-7.2B-w8g64",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 39.59086648545266,
+              "prefill_tok_s": 880.3851779307208,
+              "ttft_ms": 290.7818150706589,
+              "peak_vram_mib": 20470
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 255.25713803488838,
+              "prefill_tok_s": 1005.2566090697392,
+              "ttft_ms": 2037.2907589189708,
+              "peak_vram_mib": 20969
+            }
+          ]
+        },
+        "w4g64": {
+          "model": "/root/models/rwkv7-official/quant/rwkv7-g1h-7.2b-20260710-ctx10240-w4g64",
+          "tag": "rocm-7.2B-w4g64",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 47.37183712916909,
+              "prefill_tok_s": 479.1063965731431,
+              "ttft_ms": 534.3280779197812,
+              "peak_vram_mib": 19794
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 261.57872354113505,
+              "prefill_tok_s": 516.9272282056363,
+              "ttft_ms": 3961.872945073992,
+              "peak_vram_mib": 19954
+            }
+          ]
+        }
+      },
+      "decode_ratio_vs_dense": {
+        "w8g64": {
+          "1": 1.7215374570952109,
+          "8": 1.4966153928501924
+        },
+        "w4g64": {
+          "1": 2.0598789384729432,
+          "8": 1.5336799084547446
+        }
+      },
+      "status": "pass",
+      "skipped_stages": [
+        {
+          "name": "7.2B w4g64 oracle/batch/graph",
+          "reason": "explicitly skipped for lossy RTN checkpoints; this is not a W4 model-quality pass"
+        }
+      ]
+    },
+    {
+      "size": "13.3B",
+      "stages": [
+        {
+          "name": "13.3B w8g64 oracle/batch/graph",
+          "return_code": 0,
+          "seconds": 44.892,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/133b_w8g64_batch.log"
+        },
+        {
+          "name": "13.3B w8g64 chunked prefill",
+          "return_code": 0,
+          "seconds": 43.552,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/133b_w8g64_chunk.log"
+        },
+        {
+          "name": "13.3B w4g64 chunked prefill",
+          "return_code": 0,
+          "seconds": 43.874,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/133b_w4g64_chunk.log"
+        },
+        {
+          "name": "13.3B dense throughput",
+          "return_code": 0,
+          "seconds": 62.019,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/133b_dense_throughput.log"
+        },
+        {
+          "name": "13.3B w8g64 throughput",
+          "return_code": 0,
+          "seconds": 52.227,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/133b_w8g64_throughput.log"
+        },
+        {
+          "name": "13.3B w4g64 throughput",
+          "return_code": 0,
+          "seconds": 62.226,
+          "log": "/root/models/rwkv7-official/results/rocm_quant_matrix_v1/133b_w4g64_throughput.log"
+        }
+      ],
+      "paths": {
+        "dense": "/root/models/rwkv7-official/fla/rwkv7-g1h-13.3b-20260710-ctx10240",
+        "w8g64": "/root/models/rwkv7-official/quant/rwkv7-g1h-13.3b-20260710-ctx10240-w8g64",
+        "w4g64": "/root/models/rwkv7-official/quant/rwkv7-g1h-13.3b-20260710-ctx10240-w4g64"
+      },
+      "checkpoint_bytes": {
+        "dense": 26538714862,
+        "w8g64": 14641608802,
+        "w4g64": 8501147410
+      },
+      "checkpoint_ratio_vs_dense": {
+        "w8g64": 0.5517075290998693,
+        "w4g64": 0.3203300330933711
+      },
+      "throughput": {
+        "dense": {
+          "model": "/root/models/rwkv7-official/fla/rwkv7-g1h-13.3b-20260710-ctx10240",
+          "tag": "rocm-13.3B-dense",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 12.10283028395827,
+              "prefill_tok_s": 755.1701563448883,
+              "ttft_ms": 338.99644715711474,
+              "peak_vram_mib": 29043
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 89.70188627185817,
+              "prefill_tok_s": 1102.7369232049907,
+              "ttft_ms": 1857.1972670033574,
+              "peak_vram_mib": 29463
+            }
+          ]
+        },
+        "w8g64": {
+          "model": "/root/models/rwkv7-official/quant/rwkv7-g1h-13.3b-20260710-ctx10240-w8g64",
+          "tag": "rocm-13.3B-w8g64",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 20.663643335044753,
+              "prefill_tok_s": 461.82225624050517,
+              "ttft_ms": 554.3258180841804,
+              "peak_vram_mib": 23734
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 135.4834486853069,
+              "prefill_tok_s": 527.9308797007341,
+              "ttft_ms": 3879.295716062188,
+              "peak_vram_mib": 24234
+            }
+          ]
+        },
+        "w4g64": {
+          "model": "/root/models/rwkv7-official/quant/rwkv7-g1h-13.3b-20260710-ctx10240-w4g64",
+          "tag": "rocm-13.3B-w4g64",
+          "dtype": "bfloat16",
+          "cuda_graph": true,
+          "radix_cache": false,
+          "decode_tokens": 64,
+          "prefill_len": 256,
+          "short_len": 16,
+          "mem_fraction": 0.75,
+          "vram_backend": "rocm-smi",
+          "baseline_vram_mib": 26,
+          "rows": [
+            {
+              "bsz": 1,
+              "decode_tok_s": 24.577772400136194,
+              "prefill_tok_s": 251.66619392818447,
+              "ttft_ms": 1017.2204538248479,
+              "peak_vram_mib": 21596
+            },
+            {
+              "bsz": 8,
+              "decode_tok_s": 139.1623593925551,
+              "prefill_tok_s": 271.8637416107906,
+              "ttft_ms": 7533.185513690114,
+              "peak_vram_mib": 21755
+            }
+          ]
+        }
+      },
+      "decode_ratio_vs_dense": {
+        "w8g64": {
+          "1": 1.7073397585714671,
+          "8": 1.5103745786872222
+        },
+        "w4g64": {
+          "1": 2.0307458522914983,
+          "8": 1.551387213539722
+        }
+      },
+      "status": "pass",
+      "skipped_stages": [
+        {
+          "name": "13.3B w4g64 oracle/batch/graph",
+          "reason": "explicitly skipped for lossy RTN checkpoints; this is not a W4 model-quality pass"
+        }
+      ]
+    }
+  ]
+}

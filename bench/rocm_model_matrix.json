@@ -1,0 +1,47 @@
+{
+  "source": "BlinkDL/rwkv7-g1",
+  "models": [
+    {
+      "size": "0.1B",
+      "checkpoint": "rwkv7-g1d-0.1b-20260129-ctx8192.pth",
+      "model_dir": "rwkv7-g1d-0.1b-20260129-ctx8192",
+      "fixture": "oracle_rwkv7_01b_eiffel.json",
+      "context_length": 8192
+    },
+    {
+      "size": "0.4B",
+      "checkpoint": "rwkv7-g1d-0.4b-20260210-ctx8192.pth",
+      "model_dir": "rwkv7-g1d-0.4b-20260210-ctx8192",
+      "fixture": "oracle_rwkv7_g1d_04b_eiffel.json",
+      "context_length": 8192
+    },
+    {
+      "size": "1.5B",
+      "checkpoint": "rwkv7-g1h-1.5b-20260710-ctx10240.pth",
+      "model_dir": "rwkv7-g1h-1.5b-20260710-ctx10240",
+      "fixture": "oracle_rwkv7_g1h_15b_eiffel.json",
+      "context_length": 10240
+    },
+    {
+      "size": "2.9B",
+      "checkpoint": "rwkv7-g1h-2.9b-20260710-ctx10240.pth",
+      "model_dir": "rwkv7-g1h-2.9b-20260710-ctx10240",
+      "fixture": "oracle_rwkv7_g1h_29b_eiffel.json",
+      "context_length": 10240
+    },
+    {
+      "size": "7.2B",
+      "checkpoint": "rwkv7-g1h-7.2b-20260710-ctx10240.pth",
+      "model_dir": "rwkv7-g1h-7.2b-20260710-ctx10240",
+      "fixture": "oracle_rwkv7_g1h_72b_eiffel.json",
+      "context_length": 10240
+    },
+    {
+      "size": "13.3B",
+      "checkpoint": "rwkv7-g1h-13.3b-20260710-ctx10240.pth",
+      "model_dir": "rwkv7-g1h-13.3b-20260710-ctx10240",
+      "fixture": "oracle_rwkv7_g1h_133b_eiffel.json",
+      "context_length": 10240
+    }
+  ]
+}

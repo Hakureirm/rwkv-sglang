@@ -48,10 +48,18 @@ import triton.language as tl
 _PDL_TRITON = None
 
 
+def _is_hip_runtime() -> bool:
+    """Return whether PyTorch is using HIP rather than the CUDA runtime."""
+    return getattr(torch.version, "hip", None) is not None
+
+
 def _pdl_triton() -> bool:
     global _PDL_TRITON
     if _PDL_TRITON is None:
-        on = os.environ.get("RWKV_PDL", "0") == "1"
+        # PDL and triton.language.extra.cuda are NVIDIA-only.  In particular,
+        # gfx11 reports a capability major of 11 through PyTorch, which must
+        # not be mistaken for an sm90+ CUDA device.
+        on = not _is_hip_runtime() and os.environ.get("RWKV_PDL", "0") == "1"
         if on:
             scope = os.environ.get("RWKV_PDL_SCOPE", "")
             if scope and "tri" not in scope:
@@ -70,6 +78,15 @@ def _pdl_triton() -> bool:
             print("[rwkv7_pdl] triton glue joined the PDL chain "
                   "(kk_kmix + lora_gates)", file=sys.stderr, flush=True)
     return _PDL_TRITON
+
+
+def _pdl_launch_kwargs(use_pdl: bool) -> dict:
+    """Only pass the CUDA-only launch_pdl option to Triton's CUDA driver.
+
+    ROCm Triton rejects the keyword even when its value is False, so merely
+    disabling USE_PDL inside the kernel is insufficient.
+    """
+    return {} if _is_hip_runtime() else {"launch_pdl": use_pdl}
 
 
 # ----------------------------------------------------------------------------
@@ -189,7 +206,7 @@ def fused_kk_kmix(k, a, kk_param, ka_param, num_heads):
     _kk_kmix_kernel[grid](
         k, a, kk_param.reshape(-1), ka_param.reshape(-1),
         kk_out, knew_out, T, H, num_heads, BK=BK, USE_PDL=use_pdl,
-        enable_fp_fusion=False, launch_pdl=use_pdl,
+        enable_fp_fusion=False, **_pdl_launch_kwargs(use_pdl),
     )
     return kk_out.view(T, num_heads, HD), knew_out
 
@@ -344,8 +361,7 @@ def fused_lora_gates(lo, v, v_first, has_v):
     _lora_gates_kernel[grid](
         lo, vflat, vf, w_log, a, (v_out if has_v else w_log),
         _INV_SQRT_E, H, HAS_V=has_v, BLOCK=BLOCK, USE_PDL=use_pdl,
-        enable_fp_fusion=False, launch_pdl=use_pdl,
+        enable_fp_fusion=False, **_pdl_launch_kwargs(use_pdl),
     )
     return w_log, a, v_out
-
 

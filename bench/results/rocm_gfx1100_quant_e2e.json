@@ -1,0 +1,97 @@
+{
+  "gpu": "AMD Radeon Graphics (gfx1100, 48 GiB)",
+  "software": {
+    "rocm": "7.2.1",
+    "torch": "2.9.1+rocm7.2.1.gitff65f5bc",
+    "dtype": "bfloat16"
+  },
+  "model": "RWKV-7 G1d 0.1B ctx8192",
+  "protocol": {
+    "cuda_graph": true,
+    "radix_cache": false,
+    "decode_tokens": 64,
+    "prefill_length": 256,
+    "batches": [
+      1,
+      8
+    ]
+  },
+  "checkpoint_bytes": {
+    "dense": 382111842,
+    "w8g64": 299839157,
+    "w4g64": 257371829,
+    "w8_ratio_vs_dense": 0.78468951768315,
+    "w4_ratio_vs_dense": 0.6735510411111519,
+    "note": "Total checkpoint directories; embeddings, head, norms, and low-rank tensors remain unquantized."
+  },
+  "results": {
+    "dense": {
+      "1": {
+        "decode_tok_s": 219.0,
+        "prefill_tok_s": 11568.1,
+        "ttft_ms": 22.1
+      },
+      "8": {
+        "decode_tok_s": 1772.3,
+        "prefill_tok_s": 45624.6,
+        "ttft_ms": 44.9
+      }
+    },
+    "w8g64": {
+      "1": {
+        "decode_tok_s": 248.4,
+        "prefill_tok_s": 10782.4,
+        "ttft_ms": 23.7,
+        "decode_ratio_vs_dense": 1.1342465753424658,
+        "prefill_ratio_vs_dense": 0.9320804626516022
+      },
+      "8": {
+        "decode_tok_s": 1924.0,
+        "prefill_tok_s": 33505.5,
+        "ttft_ms": 61.1,
+        "decode_ratio_vs_dense": 1.0855949895615866,
+        "prefill_ratio_vs_dense": 0.7343735616312252
+      }
+    },
+    "w4g64": {
+      "1": {
+        "decode_tok_s": 270.2,
+        "prefill_tok_s": 8446.5,
+        "ttft_ms": 30.3,
+        "decode_ratio_vs_dense": 1.2337899543378994,
+        "prefill_ratio_vs_dense": 0.7301544765346081
+      },
+      "8": {
+        "decode_tok_s": 1995.8,
+        "prefill_tok_s": 17552.4,
+        "ttft_ms": 116.7,
+        "decode_ratio_vs_dense": 1.1261073181741241,
+        "prefill_ratio_vs_dense": 0.3847135098170724
+      }
+    }
+  },
+  "correctness": {
+    "w8": {
+      "dense_numpy_oracle_tokens": "24/24 exact",
+      "dynamic_batch_graph": "pass"
+    },
+    "w4": {
+      "dense_numpy_oracle_tokens": "1/24 (expected RTN quality loss)",
+      "checkpoint_b1_dynamic_batch_graph": "pass"
+    },
+    "kernel_reference": "bench/results/rocm_gfx1100_quant.json",
+    "chunked_prefill": {
+      "prompt_tokens": 512,
+      "chunk_tokens": 256,
+      "generated_tokens": 24,
+      "w8_single_shot_vs_chunked": "24/24 exact",
+      "w4_single_shot_vs_chunked": "24/24 exact"
+    }
+  },
+  "status": {
+    "w8_decode_b1_b8_faster_than_dense": true,
+    "w4_decode_b1_b8_faster_than_dense": true,
+    "prefill_faster_than_dense": false
+  },
+  "timestamp_unix": 1785928605.674098
+}

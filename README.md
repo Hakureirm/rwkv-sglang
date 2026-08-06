@@ -78,6 +78,18 @@ recommended production set is in [`scripts/serve.sh`](scripts/serve.sh). Models:
 fla-format RWKV-7 checkpoint (`fla-hub/rwkv7-*`), or our prequantized int8/int4 checkpoints
 on ModelScope (`Hakureirm/rwkv7-g1-*`).
 
+**On AMD ROCm**: source [`scripts/rocm_env.sh`](scripts/rocm_env.sh), then use
+[`scripts/serve_rocm.sh`](scripts/serve_rocm.sh). Contributor-owned `gfx1100`
+evidence covers the correctness-first ROCm path across the complete public
+0.1B / 0.4B / 1.5B / 2.9B /
+7.2B / 13.3B matrix; exact revisions, gates, and raw logs are in
+[`docs/ROCM.md`](docs/ROCM.md). A standalone HIP W8/W4 decode kernel now makes
+both quantized modes faster than dense at bsz1 and bsz8 across the measured
+size matrix. Fused ROCm quantized prefill covers M=9..256: W4 prefill improved
+1.31-2.89x at bsz1 and 2.06-3.15x at bsz8 across 0.1B-13.3B; W8 uses a
+measured shape gate. RTN W4 model quality and physical CDNA validation remain
+open gates.
+
 **On a Mac**: [`mlx_port/README.md`](mlx_port/README.md).
 
 ## Layout

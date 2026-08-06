@@ -11,12 +11,13 @@ For one model dir + compute dtype, measures across batch sizes:
   * prefill tok/s  : a ~PREFILL_LEN-token prompt x bsz, max_new_tokens=1; the
                      elapsed time is the batch time-to-first-token (TTFT).
                      prefill tok/s = bsz * PREFILL_LEN / TTFT.
-  * peak VRAM      : sampled via nvidia-smi (GPU `--gpu`) during each bsz phase.
+  * peak VRAM      : sampled via nvidia-smi or rocm-smi (GPU `--gpu`) during
+                     each bsz phase.
                      NB: sglang Engine runs the model in a *subprocess*, so the
                      driver-side torch.cuda.max_memory_allocated() reads ~0 and is
                      NOT usable here; nvidia-smi (whole-GPU used) is the honest
-                     proxy. Baseline (pre-Engine) is reported so footprint = peak
-                     - baseline.
+                     proxy. Baseline (pre-Engine) is reported so footprint =
+                     peak - baseline.
 
 cuda-graph is OFF (disable_cuda_graph + disable_piecewise_cuda_graph). This is the
 M2-baseline number; cuda-graph (M2b) will further speed decode.
@@ -25,17 +26,26 @@ M2-baseline number; cuda-graph (M2b) will further speed decode.
       bench/throughput.py --model <fla_dir> --dtype bfloat16 [--gpu 0]
 """
 import argparse
+import json
+import shutil
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 
 class VramSampler:
-    """Background thread polling nvidia-smi memory.used (MiB) for one GPU."""
+    """Background thread polling whole-device VRAM usage in MiB."""
 
     def __init__(self, gpu: int, period: float = 0.05):
         self.gpu = gpu
         self.period = period
+        if shutil.which("nvidia-smi"):
+            self.backend = "nvidia-smi"
+        elif shutil.which("rocm-smi"):
+            self.backend = "rocm-smi"
+        else:
+            self.backend = "unavailable"
         self._cur = 0
         self._peak = 0
         self._stop = False
@@ -43,16 +53,30 @@ class VramSampler:
 
     def _sample(self) -> int:
         try:
-            out = subprocess.check_output(
-                [
-                    "nvidia-smi",
-                    f"--id={self.gpu}",
-                    "--query-gpu=memory.used",
-                    "--format=csv,noheader,nounits",
-                ],
-                text=True,
-            )
-            return int(out.strip().splitlines()[0])
+            if self.backend == "nvidia-smi":
+                out = subprocess.check_output(
+                    [
+                        "nvidia-smi",
+                        f"--id={self.gpu}",
+                        "--query-gpu=memory.used",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    text=True,
+                )
+                return int(out.strip().splitlines()[0])
+            if self.backend == "rocm-smi":
+                out = subprocess.check_output(
+                    ["rocm-smi", "--showmeminfo", "vram", "--csv"],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                )
+                prefix = f"card{self.gpu},"
+                row = next(
+                    line for line in out.splitlines() if line.startswith(prefix)
+                )
+                used_bytes = int(row.split(",")[2])
+                return used_bytes // (1024 * 1024)
+            return 0
         except Exception:
             return self._cur
 
@@ -146,8 +170,11 @@ def main():
     ap.add_argument("--prefill-len", type=int, default=1024)
     ap.add_argument("--short-len", type=int, default=16)
     ap.add_argument("--mem-fraction", type=float, default=0.5)
-    ap.add_argument("--gpu", type=int, default=0, help="nvidia-smi GPU index to poll")
+    ap.add_argument(
+        "--gpu", type=int, default=0, help="nvidia-smi/rocm-smi GPU index to poll"
+    )
     ap.add_argument("--tag", default="", help="label for the printed table")
+    ap.add_argument("--output", default="", help="optional machine-readable JSON result")
     ap.add_argument(
         "--cuda-graph",
         action="store_true",
@@ -217,7 +244,10 @@ def main():
         f"  decode={args.decode_tokens}tok (steady-state, prefill-subtracted)  "
         f"prefill_len={args.prefill_len}  mem_fraction={args.mem_fraction}"
     )
-    print(f"  VRAM via nvidia-smi GPU{args.gpu}; baseline(pre-Engine)={baseline} MiB")
+    print(
+        f"  VRAM via {vram.backend} GPU{args.gpu}; "
+        f"baseline(pre-Engine)={baseline} MiB"
+    )
     print("-" * 78)
     print(
         f"{'bsz':>4} | {'decode tok/s':>13} | {'prefill tok/s':>14} | "
@@ -231,6 +261,26 @@ def main():
             f"{r['peak_vram_mib'] - baseline:>10}"
         )
     print("=" * 78)
+
+    if args.output:
+        result = {
+            "model": args.model,
+            "tag": tag,
+            "dtype": args.dtype,
+            "cuda_graph": args.cuda_graph,
+            "radix_cache": not args.disable_radix_cache,
+            "decode_tokens": args.decode_tokens,
+            "prefill_len": args.prefill_len,
+            "short_len": args.short_len,
+            "mem_fraction": args.mem_fraction,
+            "vram_backend": vram.backend,
+            "baseline_vram_mib": baseline,
+            "rows": rows,
+        }
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(result, indent=2) + "\n")
+        print(f"wrote {output}")
 
 
 if __name__ == "__main__":

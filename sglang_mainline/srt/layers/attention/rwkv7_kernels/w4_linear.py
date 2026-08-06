@@ -29,6 +29,9 @@ def _ensure_loaded():
         return True
     if _LOAD_FAILED:
         return False
+    if torch.version.hip is not None:
+        _LOAD_FAILED = True
+        return False
     try:
         from torch.utils.cpp_extension import load
 
@@ -159,6 +162,9 @@ def _ensure_w8_loaded():
     if _W8_LOADED:
         return True
     if _W8_FAILED:
+        return False
+    if torch.version.hip is not None:
+        _W8_FAILED = True
         return False
     try:
         from torch.utils.cpp_extension import load

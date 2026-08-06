@@ -11,7 +11,8 @@ not tested" gap.
   source ~/rwkv_env.sh && CUDA_VISIBLE_DEVICES=0 python bench/verify_chunked_prefill.py \
       --model <fla_dir> --prompt-len 2048 --chunk 256 --gen 48
 """
-import argparse, sys
+import argparse
+import sys
 
 
 def make_prompt(n):
@@ -20,16 +21,28 @@ def make_prompt(n):
 
 def greedy(model, chunk_size, prompt, gen, dtype, mem):
     import sglang as sgl
-    eng = sgl.Engine(
-        model_path=model, skip_tokenizer_init=True,
-        # disable_piecewise_cuda_graph was removed from ServerArgs when the
-        # cuda_graph_config rework landed; passing it raised TypeError and this
-        # gate crashed on every invocation instead of failing loudly, so the
-        # chunk-boundary carry-in went unchecked for as long as that was true.
+    from sglang.srt.server_args import ServerArgs
+
+    # SGLang's graph arguments changed across the versions covered by this
+    # gate. Keep the stricter old flag when available, but never let a removed
+    # keyword make the correctness test fail before an engine is constructed.
+    engine_kwargs = dict(
+        model_path=model,
+        skip_tokenizer_init=True,
         disable_cuda_graph=True,
-        disable_radix_cache=True, chunked_prefill_size=chunk_size,
-        dtype=dtype, tp_size=1, mem_fraction_static=mem,
+        disable_piecewise_cuda_graph=True,
+        disable_radix_cache=True,
+        chunked_prefill_size=chunk_size,
+        dtype=dtype,
+        tp_size=1,
+        mem_fraction_static=mem,
     )
+    engine_kwargs = {
+        key: value
+        for key, value in engine_kwargs.items()
+        if key in ServerArgs.__dataclass_fields__
+    }
+    eng = sgl.Engine(**engine_kwargs)
     out = eng.generate(input_ids=[prompt],
                        sampling_params={"temperature": 0.0, "max_new_tokens": gen})
     rec = out[0] if isinstance(out, list) else out

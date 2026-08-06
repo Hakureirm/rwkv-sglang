@@ -53,6 +53,7 @@ hides reasoning damage
 |---|---|
 | every benchmark's raw output | [`bench/results/`](../bench/results/) — committed, per-run JSON/JSONL |
 | per-card fleet runs | [`bench/results/fleet_main_10cards.json`](../bench/results/fleet_main_10cards.json), [`albatross_fleet_10cards.json`](../bench/results/albatross_fleet_10cards.json) |
+| ROCm W8/W4 prefill operator + all-size serving | [`rocm_gfx1100_quant_prefill_e2e.json`](../bench/results/rocm_gfx1100_quant_prefill_e2e.json), [F0084](findings/0084-rocm-quant-prefill.md) |
 | the scripts that produced them | [`bench/`](../bench/) — each table in BENCHMARKS.md names its script |
 | claim → raw-log map | [`CONTRIBUTIONS.md`](../CONTRIBUTIONS.md) |
 | dated methodology + negative results | [`docs/findings/`](findings/) via the [index](FINDINGS.md) |

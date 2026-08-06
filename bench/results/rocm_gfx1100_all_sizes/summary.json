@@ -1,0 +1,174 @@
+{
+  "date": "2026-08-05",
+  "source": "BlinkDL/rwkv7-g1 (ModelScope public files)",
+  "hardware": {
+    "device": "AMD Radeon Graphics",
+    "arch": "gfx1100",
+    "vram_bytes": 51522830336
+  },
+  "software": {
+    "rocm": "7.2.53211-e1a6bc5663",
+    "pytorch": "2.9.1+rocm7.2.1.gitff65f5bc",
+    "triton": "3.5.1+rocm7.2.1.gita272dfa8",
+    "sglang": "0.5.10.post1"
+  },
+  "settings": {
+    "dtype": "bfloat16",
+    "rocm_prefill_tile": 256,
+    "cuda_graph_max_tested_batch": 8,
+    "dynamic_batch_identical_bsz": 8,
+    "chunk_prompt_tokens": 2048,
+    "chunk_size": 256,
+    "chunk_count": 8,
+    "generated_tokens": 24,
+    "note": "wall_seconds include engine startup, model loading, graph capture, checks, and shutdown; they are not throughput benchmarks"
+  },
+  "gates": [
+    "pure-numpy fp32 oracle greedy token equality",
+    "HIP graph capture and decode through batch size 8",
+    "identical/shared-prefix/mixed dynamic batches equal batch-1 references",
+    "2048-token single-shot prefill equals 8x256 chunked prefill"
+  ],
+  "results": [
+    {
+      "size": "0.1B",
+      "checkpoint": "rwkv7-g1d-0.1b-20260129-ctx8192.pth",
+      "context_length": 8192,
+      "num_hidden_layers": 12,
+      "hidden_size": 768,
+      "mem_fraction_static": 0.7,
+      "oracle_dynamic_batch_graph": "pass",
+      "chunked_prefill": "pass",
+      "status": "pass",
+      "wall_seconds_including_engine_startup": {
+        "oracle_dynamic_batch_graph": 64.425,
+        "chunked_prefill": 86.913
+      },
+      "logs": {
+        "oracle_dynamic_batch_graph": "01b_batch.log",
+        "chunked_prefill": "01b_chunk.log"
+      }
+    },
+    {
+      "size": "0.4B",
+      "checkpoint": "rwkv7-g1d-0.4b-20260210-ctx8192.pth",
+      "context_length": 8192,
+      "num_hidden_layers": 24,
+      "hidden_size": 1024,
+      "mem_fraction_static": 0.7,
+      "oracle_dynamic_batch_graph": "pass",
+      "chunked_prefill": "pass",
+      "status": "pass",
+      "wall_seconds_including_engine_startup": {
+        "oracle_dynamic_batch_graph": 64.813,
+        "chunked_prefill": 63.16
+      },
+      "logs": {
+        "oracle_dynamic_batch_graph": "04b_batch.log",
+        "chunked_prefill": "04b_chunk.log"
+      }
+    },
+    {
+      "size": "1.5B",
+      "checkpoint": "rwkv7-g1h-1.5b-20260710-ctx10240.pth",
+      "context_length": 10240,
+      "num_hidden_layers": 24,
+      "hidden_size": 2048,
+      "mem_fraction_static": 0.7,
+      "oracle_dynamic_batch_graph": "pass",
+      "chunked_prefill": "pass",
+      "status": "pass",
+      "wall_seconds_including_engine_startup": {
+        "oracle_dynamic_batch_graph": 52.604,
+        "chunked_prefill": 68.692
+      },
+      "logs": {
+        "oracle_dynamic_batch_graph": "15b_batch.log",
+        "chunked_prefill": "15b_chunk.log"
+      }
+    },
+    {
+      "size": "2.9B",
+      "checkpoint": "rwkv7-g1h-2.9b-20260710-ctx10240.pth",
+      "context_length": 10240,
+      "num_hidden_layers": 32,
+      "hidden_size": 2560,
+      "mem_fraction_static": 0.75,
+      "oracle_dynamic_batch_graph": "pass",
+      "chunked_prefill": "pass",
+      "status": "pass",
+      "wall_seconds_including_engine_startup": {
+        "oracle_dynamic_batch_graph": 103.074,
+        "chunked_prefill": 127.42
+      },
+      "logs": {
+        "oracle_dynamic_batch_graph": "29b_batch.log",
+        "chunked_prefill": "29b_chunk.log"
+      }
+    },
+    {
+      "size": "7.2B",
+      "checkpoint": "rwkv7-g1h-7.2b-20260710-ctx10240.pth",
+      "context_length": 10240,
+      "num_hidden_layers": 32,
+      "hidden_size": 4096,
+      "mem_fraction_static": 0.82,
+      "oracle_dynamic_batch_graph": "pass",
+      "chunked_prefill": "pass",
+      "status": "pass",
+      "wall_seconds_including_engine_startup": {
+        "oracle_dynamic_batch_graph": 92.078,
+        "chunked_prefill": 80.519
+      },
+      "logs": {
+        "oracle_dynamic_batch_graph": "72b_batch.log",
+        "chunked_prefill": "72b_chunk.log"
+      }
+    },
+    {
+      "size": "13.3B",
+      "checkpoint": "rwkv7-g1h-13.3b-20260710-ctx10240.pth",
+      "context_length": 10240,
+      "num_hidden_layers": 61,
+      "hidden_size": 4096,
+      "mem_fraction_static": 0.75,
+      "oracle_dynamic_batch_graph": "pass",
+      "chunked_prefill": "pass",
+      "status": "pass",
+      "wall_seconds_including_engine_startup": {
+        "oracle_dynamic_batch_graph": 61.507,
+        "chunked_prefill": 59.767
+      },
+      "logs": {
+        "oracle_dynamic_batch_graph": "133b_batch.log",
+        "chunked_prefill": "133b_chunk.log"
+      }
+    }
+  ],
+  "rocm_prefill_tile_probe": {
+    "model": "1.5B",
+    "prompt_tokens": 2048,
+    "generated_tokens": 1,
+    "iterations": 5,
+    "radix_cache": false,
+    "cuda_graph": false,
+    "median_seconds": {
+      "tile_0": 0.23996223090216517,
+      "tile_256": 0.2242522779852152
+    },
+    "speedup_tile_256_vs_0": 1.0701,
+    "logs": [
+      "prefill_tile_0_15b.log",
+      "prefill_tile_256_15b.log"
+    ],
+    "note": "wall-clock probe after one warm-up; demonstrates that the correctness tile did not regress this tested prefill shape"
+  },
+  "standalone_wkv": {
+    "status": "pass",
+    "decode_b2_output_max_abs": 0.0,
+    "decode_b2_state_max_abs": 7.45058e-09,
+    "packed_varlen_output_max_abs": 0.0,
+    "packed_varlen_state_max_abs": 7.45058e-09,
+    "log": "wkv_kernel.log"
+  }
+}

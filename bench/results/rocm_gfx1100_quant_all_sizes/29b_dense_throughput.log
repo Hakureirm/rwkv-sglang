@@ -1,0 +1,44 @@
+Quark quantization is unavailable in this ROCm environment (No module named 'aiter').
+Quark INT4/FP8 MoE is unavailable in this ROCm environment (No module named 'aiter').
+Quark quantization is unavailable in this ROCm environment (No module named 'aiter').
+Quark INT4/FP8 MoE is unavailable in this ROCm environment (No module named 'aiter').
+Quark quantization is unavailable in this ROCm environment (No module named 'aiter').
+Quark INT4/FP8 MoE is unavailable in this ROCm environment (No module named 'aiter').
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+
+Multi-thread loading shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+Multi-thread loading shards: 100% Completed | 1/1 [00:03<00:00,  3.98s/it]
+Multi-thread loading shards: 100% Completed | 1/1 [00:03<00:00,  3.98s/it]
+
+  0%|          | 0/8 [00:00<?, ?it/s]
+Capturing batches (bs=32 avail_mem=30.18 GB):   0%|          | 0/8 [00:00<?, ?it/s]
+Capturing batches (bs=32 avail_mem=30.18 GB):  12%|█▎        | 1/8 [00:00<00:06,  1.05it/s]
+Capturing batches (bs=24 avail_mem=29.93 GB):  12%|█▎        | 1/8 [00:00<00:06,  1.05it/s]
+Capturing batches (bs=24 avail_mem=29.93 GB):  25%|██▌       | 2/8 [00:01<00:02,  2.21it/s]
+Capturing batches (bs=16 avail_mem=29.92 GB):  25%|██▌       | 2/8 [00:01<00:02,  2.21it/s]
+Capturing batches (bs=16 avail_mem=29.92 GB):  38%|███▊      | 3/8 [00:01<00:01,  3.08it/s]
+Capturing batches (bs=12 avail_mem=29.91 GB):  38%|███▊      | 3/8 [00:01<00:01,  3.08it/s]
+Capturing batches (bs=12 avail_mem=29.91 GB):  50%|█████     | 4/8 [00:01<00:00,  4.23it/s]
+Capturing batches (bs=8 avail_mem=29.91 GB):  50%|█████     | 4/8 [00:01<00:00,  4.23it/s] 
+Capturing batches (bs=8 avail_mem=29.91 GB):  62%|██████▎   | 5/8 [00:01<00:00,  5.32it/s]
+Capturing batches (bs=4 avail_mem=29.91 GB):  62%|██████▎   | 5/8 [00:01<00:00,  5.32it/s]
+Capturing batches (bs=4 avail_mem=29.91 GB):  75%|███████▌  | 6/8 [00:01<00:00,  6.31it/s]
+Capturing batches (bs=2 avail_mem=29.91 GB):  75%|███████▌  | 6/8 [00:01<00:00,  6.31it/s]
+Capturing batches (bs=2 avail_mem=29.91 GB):  88%|████████▊ | 7/8 [00:01<00:00,  7.16it/s]
+Capturing batches (bs=1 avail_mem=29.91 GB):  88%|████████▊ | 7/8 [00:01<00:00,  7.16it/s]
+Capturing batches (bs=1 avail_mem=29.91 GB): 100%|██████████| 8/8 [00:01<00:00,  7.73it/s]
+Capturing batches (bs=1 avail_mem=29.91 GB): 100%|██████████| 8/8 [00:01<00:00,  4.60it/s]
+
+==============================================================================
+THROUGHPUT  model=rocm-2.9B-dense  dtype=bfloat16  cuda_graph=ON  radix_cache=OFF
+  decode=64tok (steady-state, prefill-subtracted)  prefill_len=256  mem_fraction=0.75
+  VRAM via rocm-smi GPU0; baseline(pre-Engine)=26 MiB
+------------------------------------------------------------------------------
+ bsz |  decode tok/s |  prefill tok/s |   TTFT ms | peak VRAM MiB | minus base
+------------------------------------------------------------------------------
+   1 |          39.4 |         3048.9 |      84.0 |         18808 |      18782
+   8 |         311.1 |         6127.9 |     334.2 |         19136 |      19110
+==============================================================================
+wrote /root/models/rwkv7-official/results/rocm_quant_matrix_v1/29b_dense_throughput.json

@@ -20,6 +20,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 
 import torch
 from safetensors.torch import save_file
@@ -29,8 +30,13 @@ def _sq(t):  # squeeze (1,1,D)->(D)
     return t.squeeze()
 
 
-def convert(pth_path, out_dir):
-    w = torch.load(pth_path, map_location="cpu", weights_only=True)
+def convert(pth_path, out_dir, max_position_embeddings=None):
+    try:
+        w = torch.load(
+            pth_path, map_location="cpu", weights_only=True, mmap=True
+        )
+    except TypeError:  # torch releases before mmap= was added
+        w = torch.load(pth_path, map_location="cpu", weights_only=True)
     ks = list(w.keys())
     n_layer = 1 + max(int(k.split(".")[1]) for k in ks if k.startswith("blocks."))
     n_embd = w["emb.weight"].shape[1]
@@ -42,6 +48,10 @@ def convert(pth_path, out_dir):
     v_lr = w["blocks.1.att.v1"].shape[1]
     ffn_inter = w["blocks.0.ffn.key.weight"].shape[0]
     vocab = w["emb.weight"].shape[0]
+    weight_dtype = str(w["emb.weight"].dtype).removeprefix("torch.")
+    if max_position_embeddings is None:
+        match = re.search(r"ctx(\d+)", os.path.basename(pth_path), re.IGNORECASE)
+        max_position_embeddings = int(match.group(1)) if match else 8192
     print(f"n_layer={n_layer} n_embd={n_embd} n_head={n_head} head_dim={head_dim} "
           f"decay_lr={decay_lr} a_lr={a_lr} v_lr={v_lr} gate_lr={gate_lr} "
           f"ffn_inter={ffn_inter} vocab={vocab}")
@@ -125,17 +135,30 @@ def convert(pth_path, out_dir):
         "norm_bias": True,
         "norm_first": True,
         "vocab_size": vocab,
+        "max_position_embeddings": max_position_embeddings,
         "tie_word_embeddings": False,
         "attn": None,
         "attn_mode": "chunk",
         "bos_token_id": 0,
         "eos_token_id": 0,
         "use_cache": True,
-        "torch_dtype": "float32",
+        "torch_dtype": weight_dtype,
     }
     with open(os.path.join(out_dir, "config.json"), "w") as fh:
         json.dump(config, fh, indent=2)
-    print(f"wrote {len(out)} tensors + config.json -> {out_dir}")
+    generation_config = {
+        "_from_model_config": True,
+        "bos_token_id": 0,
+        "eos_token_id": 0,
+        "pad_token_id": 0,
+        "do_sample": False,
+        "use_cache": True,
+    }
+    with open(os.path.join(out_dir, "generation_config.json"), "w") as fh:
+        json.dump(generation_config, fh, indent=2)
+    print(
+        f"wrote {len(out)} tensors + config.json + generation_config.json -> {out_dir}"
+    )
     return out, config
 
 
@@ -143,5 +166,11 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--pth", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument(
+        "--max-position-embeddings",
+        type=int,
+        default=None,
+        help="override context length (default: infer ctxNNNN from checkpoint name)",
+    )
     args = ap.parse_args()
-    convert(args.pth, args.out)
+    convert(args.pth, args.out, args.max_position_embeddings)

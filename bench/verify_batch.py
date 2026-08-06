@@ -79,6 +79,14 @@ def main():
                     help="tokens to generate (default: len(fixture.greedy_tokens))")
     ap.add_argument("--radix-on", action="store_true",
                     help="DEMO ONLY: leave radix cache ON to try to reproduce the bug")
+    ap.add_argument(
+        "--reference-only",
+        action="store_true",
+        help=(
+            "check batch/graph invariance against this checkpoint's B=1 output "
+            "without requiring the dense numpy oracle; intended for lossy W4"
+        ),
+    )
     args = ap.parse_args()
 
     fx = json.load(open(args.fixture))
@@ -123,13 +131,14 @@ def main():
 
     # cross-check the fixture's own prompt B=1 against the numpy oracle
     eiffel_b1_exact = ref["eiffel"] == oracle
+    eiffel_target = ref["eiffel"] if args.reference_only else oracle
 
     failures = []
 
     # ---- BATCH 1: identical copies (the F0008 repro) --------------------------
     b = max(args.identical_bsz, 4)
     ident = _gen(engine, [list(prompt) for _ in range(b)], n)
-    ident_vs_oracle = [o == oracle for o in ident]
+    ident_vs_oracle = [o == eiffel_target for o in ident]
     ident_pass = all(ident_vs_oracle)
     if not ident_pass:
         failures.append("IDENTICAL")
@@ -151,7 +160,9 @@ def main():
     mix_vs_ref = [mix_out[i] == ref[mix_names[i]] for i in range(len(mix_out))]
     # identical (eiffel) members of the mix must ALSO equal the numpy oracle
     mix_eiffel_vs_oracle = [
-        mix_out[i] == oracle for i in range(len(mix_out)) if mix_names[i] == "eiffel"
+        mix_out[i] == eiffel_target
+        for i in range(len(mix_out))
+        if mix_names[i] == "eiffel"
     ]
     mix_pass = all(mix_vs_ref) and all(mix_eiffel_vs_oracle)
     if not mix_pass:
@@ -167,8 +178,11 @@ def main():
     print("-" * 78)
     print(f"ORACLE          {oracle}")
     print(f"eiffel B=1 == numpy-oracle : {eiffel_b1_exact}")
+    if args.reference_only:
+        print("lossy-quant mode: batch checks use the checkpoint B=1 output")
     print("-" * 78)
-    print(f"[1] IDENTICAL  bsz={b}  every-output==oracle : {ident_pass}  "
+    target_label = "B1-ref" if args.reference_only else "oracle"
+    print(f"[1] IDENTICAL  bsz={b}  every-output=={target_label} : {ident_pass}  "
           f"({sum(ident_vs_oracle)}/{b})")
     if not ident_pass:
         for i, ok in enumerate(ident_vs_oracle):
@@ -181,14 +195,14 @@ def main():
             if not ok:
                 print(f"      req#{i}({sp_names[i]}) DIVERGED: {sp_out[i]} != {ref[sp_names[i]]}")
     print(f"[3] MIXED  bsz={len(mix_out)}  every-output==B1-ref : {all(mix_vs_ref)}  "
-          f"({sum(mix_vs_ref)}/{len(mix_out)})  eiffel==oracle : {all(mix_eiffel_vs_oracle)}  "
+          f"({sum(mix_vs_ref)}/{len(mix_out)})  eiffel=={target_label} : {all(mix_eiffel_vs_oracle)}  "
           f"tags={mix_names}")
     if not mix_pass:
         for i, ok in enumerate(mix_vs_ref):
             if not ok:
                 print(f"      req#{i}({mix_names[i]}) DIVERGED: {mix_out[i]} != {ref[mix_names[i]]}")
     print("-" * 78)
-    overall = (not failures) and eiffel_b1_exact
+    overall = (not failures) and (eiffel_b1_exact or args.reference_only)
     print(f"OVERALL: {'PASS (all batches exact)' if overall else 'FAIL: ' + ','.join(failures or ['B1!=oracle'])}")
     print("=" * 78)
     sys.exit(0 if overall else 1)
