@@ -1,0 +1,91 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 9.95,
+      "out_tokens": 2048,
+      "out_tok_per_s": 205.8,
+      "req_per_s": 0.804,
+      "lat_p50_s": 1.244,
+      "lat_p99_s": 1.245,
+      "per_stream_tok_s": 205.8
+    },
+    {
+      "concurrency": 8,
+      "requests": 32,
+      "wall_s": 5.8,
+      "out_tokens": 8192,
+      "out_tok_per_s": 1412.5,
+      "req_per_s": 5.518,
+      "lat_p50_s": 1.442,
+      "lat_p99_s": 1.453,
+      "per_stream_tok_s": 176.6
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 9.44,
+      "out_tokens": 32768,
+      "out_tok_per_s": 3469.9,
+      "req_per_s": 13.554,
+      "lat_p50_s": 1.604,
+      "lat_p99_s": 3.223,
+      "per_stream_tok_s": 108.4
+    },
+    {
+      "concurrency": 64,
+      "requests": 256,
+      "wall_s": 16.61,
+      "out_tokens": 65536,
+      "out_tok_per_s": 3946.2,
+      "req_per_s": 15.415,
+      "lat_p50_s": 3.072,
+      "lat_p99_s": 4.573,
+      "per_stream_tok_s": 61.7
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 32.05,
+      "out_tokens": 131072,
+      "out_tok_per_s": 4090.1,
+      "req_per_s": 15.977,
+      "lat_p50_s": 7.596,
+      "lat_p99_s": 9.16,
+      "per_stream_tok_s": 32.0
+    },
+    {
+      "concurrency": 256,
+      "requests": 1024,
+      "wall_s": 62.32,
+      "out_tokens": 262144,
+      "out_tok_per_s": 4206.2,
+      "req_per_s": 16.43,
+      "lat_p50_s": 15.153,
+      "lat_p99_s": 16.673,
+      "per_stream_tok_s": 16.4
+    }
+  ],
+  "peak": {
+    "concurrency": 256,
+    "requests": 1024,
+    "wall_s": 62.32,
+    "out_tokens": 262144,
+    "out_tok_per_s": 4206.2,
+    "req_per_s": 16.43,
+    "lat_p50_s": 15.153,
+    "lat_p99_s": 16.673,
+    "per_stream_tok_s": 16.4
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30008,
+    "concurrencies": "1,8,32,64,128,256",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "/tmp/a800_tp2_sweep.json"
+  }
+}

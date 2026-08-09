@@ -1,0 +1,80 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "wall_s": 5.73,
+      "out_tokens": 2048,
+      "out_tok_per_s": 357.4,
+      "req_per_s": 1.396,
+      "lat_p50_s": 0.716,
+      "lat_p99_s": 0.716,
+      "per_stream_tok_s": 357.4
+    },
+    {
+      "concurrency": 32,
+      "requests": 128,
+      "wall_s": 9.9,
+      "out_tokens": 32768,
+      "out_tok_per_s": 3309.7,
+      "req_per_s": 12.929,
+      "lat_p50_s": 1.8,
+      "lat_p99_s": 3.493,
+      "per_stream_tok_s": 103.4
+    },
+    {
+      "concurrency": 128,
+      "requests": 512,
+      "wall_s": 34.08,
+      "out_tokens": 131072,
+      "out_tok_per_s": 3845.8,
+      "req_per_s": 15.023,
+      "lat_p50_s": 8.128,
+      "lat_p99_s": 9.757,
+      "per_stream_tok_s": 30.0
+    },
+    {
+      "concurrency": 256,
+      "requests": 1024,
+      "wall_s": 89.88,
+      "out_tokens": 262144,
+      "out_tok_per_s": 2916.8,
+      "req_per_s": 11.394,
+      "lat_p50_s": 16.314,
+      "lat_p99_s": 38.521,
+      "per_stream_tok_s": 11.4
+    },
+    {
+      "concurrency": 512,
+      "requests": 2048,
+      "wall_s": 161.84,
+      "out_tokens": 524288,
+      "out_tok_per_s": 3239.5,
+      "req_per_s": 12.654,
+      "lat_p50_s": 33.239,
+      "lat_p99_s": 58.758,
+      "per_stream_tok_s": 6.3
+    }
+  ],
+  "peak": {
+    "concurrency": 128,
+    "requests": 512,
+    "wall_s": 34.08,
+    "out_tokens": 131072,
+    "out_tok_per_s": 3845.8,
+    "req_per_s": 15.023,
+    "lat_p50_s": 8.128,
+    "lat_p99_s": 9.757,
+    "per_stream_tok_s": 30.0
+  },
+  "config": {
+    "host": "127.0.0.1",
+    "port": 30004,
+    "concurrencies": "1,32,128,256,512",
+    "in_len": 64,
+    "out_len": 256,
+    "reqs_mult": 4,
+    "min_reqs": 8,
+    "out": "/tmp/a800_w8g64_sweep.json"
+  }
+}

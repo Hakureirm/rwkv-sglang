@@ -1012,6 +1012,63 @@ the legend labels because they are the headline (multi-GPU changes nothing about
 *Protocol: 1.5B bf16, 2×L4, 64-in/256-out, cuda-graph ON. Raw: `tppp_l4_main.json`.
 Regenerate: `python bench/plots/make_benchmark_plots.py`.*
 
+## 6c. A800×8 on latest sglang main (2026-08-08)
+
+The full stack (overlay + port patch) moved to **latest sglang main** (`7af3d00`,
+`#33787`) and measured on **A800 ×8** (sm80, 80GB). **These are new-base numbers** --
+the A100/H100 rows elsewhere in this doc were measured on the 0705 base; the two are
+not directly comparable. Single-stream and accuracy do reproduce across bases on
+this stack.
+
+**Correctness.** Greedy vs oracle 24/24 EXACT; TP=2 and TP=4 output is
+token-identical to single-card (the §6b conclusion reproduced on the new base).
+
+**Speed.** 1.5B fp16, 64-in/256-out, whole-run timing. The single column is the same
+prefill-*included* c=1 wall-clock figure as the §6 fleet table, so it compares directly
+against the rows there (and is not the prefill-excluded `serving_scale` reading — the two
+[bsz1](#g-bsz1) conventions differ by ~10% and must not be mixed):
+
+| Config | Single (bsz1 steady) | Peak |
+|---|---|---|
+| 1 card, full hand-kernel stack | **336.2** | **4,571** @ c256 |
+| 1 card, plain fp16 baseline | see switch recipes | not measured |
+| 1 card, int8 w8a8 | 228.2 | 4,507 @ c512 |
+| 1 card, weight-only w8g64 | 357.4 | 3,846 @ c128 |
+| 1 card, int4 GPTQ w4gptq | 356.9 | 3,902 @ c128 |
+| **TP=2** (projection/LoRA on, full-width fusions off) | — | 4,206 @ c256 |
+| **TP=4** (same) | — | 4,443 @ c256 |
+
+Honest read: single-stream 336.2 beats the A100-80GB row (278.9, +20.5%); w4/w8g64
+single-stream 357 is the fastest tier (beats fp16, smaller weights); peak 4,571
+is below the 0705-base A100's 18,420 -- the new base + old sglang-kernel (0.4.5) +
+full-width fusions disabled under TP together account for it, and 1.5B is too small
+for TP to help (§6b's own conclusion). w4/w8g64 peaks hit the M-cliff (c>128 drops,
+§4b). Raw: `a800_main_sweep.json`, `a800_w8a8_sweep.json`, `a800_w8g64_sweep.json`,
+`a800_w4_sweep.json`, `a800_tp2_sweep.json`, `a800_tp4_sweep.json`.
+
+**Accuracy.** Uncheatable compression rate (§2 protocol, 7500 docs): fp16 **0.60846**,
+w8a8 **0.61606**, w8g64 **0.60862**, w4gptq **0.65136** -- all reproduce the §2
+values to the fourth decimal (w8g64 near-lossless +0.0002; w4 GPTQ +0.0429). Raw:
+`a800_bpb.json`, `a800_w8a8_bpb.json`, `a800_w8g64_bpb.json`, `a800_w4_bpb.json`.
+
+**Config switch recipes** (serve.sh now defaults every fast-path kernel via
+`${VAR:-1}` = on, env-overridable):
+
+| Config | Recipe |
+|---|---|
+| Full hand-kernel stack (default) | `bash scripts/serve.sh` (all env defaults 1) |
+| Plain fp16 baseline | `RWKV_FAST_LINEAR=0 RWKV_SPARSE_FFN=0 RWKV_FUSED_LORA=0 RWKV_FUSED_GLUE=0 RWKV_FUSED_GATES=0 RWKV_FUSED_SQRELU=0 RWKV_FUSED_ADDLN=0 RWKV_FUSED_GNGC=0 RWKV_FUSED_RELUSQ=0 RWKV_FUSED_VRESGATE=0 RWKV_FAST_LMHEAD=0 bash scripts/serve.sh` |
+| TP=2/4 (full-width fusions must be off) | `RWKV_FUSED_GLUE=0 RWKV_FUSED_ADDLN=0 RWKV_FUSED_GNGC=0 bash scripts/serve.sh -- --tp-size N` |
+| int8 w8a8 | `bash scripts/serve.sh -- --quantization w8a8_int8` |
+| weight-only w8g64 | `RWKV_W8=1 bash scripts/serve.sh` |
+| int4 GPTQ w4gptq | `RWKV_W4=1 bash scripts/serve.sh` |
+| Throughput switch (optional, fp16 state) | `RWKV_STATE_FP16=1 bash scripts/serve.sh` |
+
+> Known trap: the old serve.sh hardcoded `RWKV_FUSED_GLUE=1` (not `${VAR:-1}`), so
+> env overrides were ignored; 2026-08-08 converted all to overridable switches. Under
+> TP the full-width fusion kernels (Glue/AddLN/GNGC) crash on conv/hidden sharding
+> mismatch and must be disabled explicitly (see recipes).
+
 ## 7. Comparison with Albatross (BlinkDL's official speed reference)
 
 Albatross is a forward-loop benchmark (no scheduler, no dynamic batching, no API); this

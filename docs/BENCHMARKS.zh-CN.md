@@ -851,6 +851,57 @@ PP 的职责是装下超过单卡的模型,不是给小模型每 token 提速)�
 *协议:1.5B bf16,2×L4,64 进/256 出,cuda-graph 开。原始件:`tppp_l4_main.json`。
 重新生成:`python bench/plots/make_benchmark_plots.py`。*
 
+## 6c. A800×8 最新 sglang main 实测(2026-08-08)
+
+把整套栈(overlay + 移植补丁)搬到 **sglang main 最新**(`7af3d00`,`#33787`),在
+**A800 ×8**(sm80,80GB)上实测。**这是新 base 的数字**——文档其余表格的 A100/H100 行是
+0705 base 测的,两者不可直接比;单请求与精度在本栈上可跨 base 复现。
+
+**正确性。** greedy 对 oracle 24/24 EXACT;TP=2/TP=4 多卡输出与单卡逐 token 一致
+(§6b 结论在新 base 上复现)。
+
+**速度。** 1.5B fp16,64 进/256 出,全程计时。单请求这一列与 §6 舰队表同口径,是
+**含 prefill** 的 c=1 wall-clock 值,可直接与那张表的各行相比(不是扣 prefill 的
+`serving_scale` 口径——两个 [bsz1](#g-bsz1) 口径差约 10%,不可混填):
+
+| 配置 | 单请求(bsz1 稳态) | 峰值 |
+|---|---|---|
+| 单卡,手写核全开 | **336.2** | **4,571** @ c256 |
+| 单卡,未加速 fp16 基线 | 见开关配方 | 未测 |
+| 单卡,int8 w8a8 | 228.2 | 4,507 @ c512 |
+| 单卡,weight-only w8g64 | 357.4 | 3,846 @ c128 |
+| 单卡,int4 GPTQ w4gptq | 356.9 | 3,902 @ c128 |
+| **TP=2**(投影/LoRA 开,全宽融合关) | — | 4,206 @ c256 |
+| **TP=4**(同上) | — | 4,443 @ c256 |
+
+诚实读:单请求 336.2 超过同档 A100-80GB 的 278.9(+20.5%);w4/w8g64 单请求 357 是最快档
+(超 fp16,权重更小);峰值 4,571 低于 0705 base A100 的 18,420——**新 base + 旧
+sglang-kernel(0.4.5)+ 全宽融合在 TP 下需关**共同导致,且 1.5B 太小,TP 无扩展收益
+(§6b 自己的结论)。w4/w8g64 峰值受 M 断崖(c>128 掉,§4b)。原始件:`a800_main_sweep.json`、
+`a800_w8a8_sweep.json`、`a800_w8g64_sweep.json`、`a800_w4_sweep.json`、
+`a800_tp2_sweep.json`、`a800_tp4_sweep.json`。
+
+**精度。** uncheatable 压缩率(§2 同协议,7500 篇):fp16 **0.60846**、w8a8 **0.61606**、
+w8g64 **0.60862**、w4gptq **0.65136**——全部与文档 §2 逐位复现到小数点后第四位
+(w8g64 近乎无损 +0.0002;w4 GPTQ +0.0429)。原始件:`a800_bpb.json`、
+`a800_w8a8_bpb.json`、`a800_w8g64_bpb.json`、`a800_w4_bpb.json`。
+
+**配置开关配方**(serve.sh 已把全部 fast-path 核改为 `${VAR:-1}` 默认开、env 可覆盖):
+
+| 配置 | 配方 |
+|---|---|
+| 手写核全开(默认) | `bash scripts/serve.sh`(env 全默认 1) |
+| 未加速 fp16 基线 | `RWKV_FAST_LINEAR=0 RWKV_SPARSE_FFN=0 RWKV_FUSED_LORA=0 RWKV_FUSED_GLUE=0 RWKV_FUSED_GATES=0 RWKV_FUSED_SQRELU=0 RWKV_FUSED_ADDLN=0 RWKV_FUSED_GNGC=0 RWKV_FUSED_RELUSQ=0 RWKV_FUSED_VRESGATE=0 RWKV_FAST_LMHEAD=0 bash scripts/serve.sh` |
+| TP=2/4(全宽融合须关) | `RWKV_FUSED_GLUE=0 RWKV_FUSED_ADDLN=0 RWKV_FUSED_GNGC=0 bash scripts/serve.sh -- --tp-size N` |
+| int8 w8a8 | `bash scripts/serve.sh -- --quantization w8a8_int8` |
+| weight-only w8g64 | `RWKV_W8=1 bash scripts/serve.sh` |
+| int4 GPTQ w4gptq | `RWKV_W4=1 bash scripts/serve.sh` |
+| 吞吐开关(可选,fp16 state) | `RWKV_STATE_FP16=1 bash scripts/serve.sh` |
+
+> 已确认的坑:serve.sh 旧版硬编码 `RWKV_FUSED_GLUE=1`(非 `${VAR:-1}`),env 覆盖无效;
+> 2026-08-08 已全量改为可覆盖开关。TP 下全宽融合核(Glue/AddLN/GNGC)会因 conv 分片
+> 错位崩溃,须显式关闭(见配方)。
+
 ## 7. 与 Albatross 对比(BlinkDL 官方速度参照)
 
 Albatross 是一个纯前向测速程序(没有请求调度、动态批和服务接口),所以这个对比只回答

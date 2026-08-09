@@ -1,0 +1,253 @@
+{
+  "model": "/models/rwkv7-1.5b-w8a8",
+  "ctx_len": 4000,
+  "max_docs": 0,
+  "reset_token_id": 0,
+  "datasets": {
+    "ao3_english": {
+      "neg_log_prob_sum": 5406.353645188498,
+      "avg tokens": 2185.918,
+      "avg character count": 9041.522,
+      "avg bytes": 9213.662,
+      "sample_count": 500,
+      "total_nll_nats": 2703176.822594249,
+      "total_bytes": 4606831,
+      "bpc": 0.8626556008164794,
+      "bpb": 0.8465384982871541,
+      "compression_rate": 10.581731228589426
+    },
+    "ao3_nonenglish": {
+      "neg_log_prob_sum": 3780.2628011288543,
+      "avg tokens": 1657.484,
+      "avg character count": 2942.368,
+      "avg bytes": 5245.572,
+      "sample_count": 500,
+      "total_nll_nats": 1890131.4005644273,
+      "total_bytes": 2622786,
+      "bpc": 1.8535296728504456,
+      "bpb": 1.0396895508145956,
+      "compression_rate": 12.996119385182444
+    },
+    "arxiv_cs": {
+      "neg_log_prob_sum": 5063.520633193788,
+      "avg tokens": 2505.628,
+      "avg character count": 11865.894,
+      "avg bytes": 11874.246,
+      "sample_count": 500,
+      "total_nll_nats": 2531760.316596894,
+      "total_bytes": 5937123,
+      "bpc": 0.6156397576910447,
+      "bpb": 0.6152067345537243,
+      "compression_rate": 7.690084181921554
+    },
+    "arxiv_math": {
+      "neg_log_prob_sum": 3477.9506020149447,
+      "avg tokens": 2245.17,
+      "avg character count": 8435.788,
+      "avg bytes": 8440.04,
+      "sample_count": 500,
+      "total_nll_nats": 1738975.3010074724,
+      "total_bytes": 4220020,
+      "bpc": 0.5948018236095721,
+      "bpb": 0.5945021689451406,
+      "compression_rate": 7.431277111814258
+    },
+    "arxiv_other": {
+      "neg_log_prob_sum": 4412.724280872911,
+      "avg tokens": 2386.452,
+      "avg character count": 10817.836,
+      "avg bytes": 10825.358,
+      "sample_count": 500,
+      "total_nll_nats": 2206362.140436455,
+      "total_bytes": 5412679,
+      "bpc": 0.5884925078200174,
+      "bpb": 0.5880835938013012,
+      "compression_rate": 7.351044922516264
+    },
+    "arxiv_physics": {
+      "neg_log_prob_sum": 4738.2641275383485,
+      "avg tokens": 2638.652,
+      "avg character count": 11165.434,
+      "avg bytes": 11170.952,
+      "sample_count": 500,
+      "total_nll_nats": 2369132.0637691743,
+      "total_bytes": 5585476,
+      "bpc": 0.6122350603856193,
+      "bpb": 0.6119326409442675,
+      "compression_rate": 7.649158011803343
+    },
+    "bbc_news": {
+      "neg_log_prob_sum": 1408.1528201253013,
+      "avg tokens": 602.084,
+      "avg character count": 2745.97,
+      "avg bytes": 2748.114,
+      "sample_count": 500,
+      "total_nll_nats": 704076.4100626507,
+      "total_bytes": 1374057,
+      "bpc": 0.7398242116296175,
+      "bpb": 0.7392470219243382,
+      "compression_rate": 9.240587774054228
+    },
+    "biorxiv_all": {
+      "neg_log_prob_sum": 4929.223564712718,
+      "avg tokens": 2562.3,
+      "avg character count": 11560.664,
+      "avg bytes": 11566.146,
+      "sample_count": 500,
+      "total_nll_nats": 2464611.782356359,
+      "total_bytes": 5783073,
+      "bpc": 0.6151347701346614,
+      "bpb": 0.6148432150384455,
+      "compression_rate": 7.685540187980569
+    },
+    "github_cpp": {
+      "neg_log_prob_sum": 1220.8165181602028,
+      "avg tokens": 1486.492,
+      "avg character count": 4752.824,
+      "avg bytes": 4844.66,
+      "sample_count": 500,
+      "total_nll_nats": 610408.2590801014,
+      "total_bytes": 2422330,
+      "bpc": 0.3705725136434793,
+      "bpb": 0.3635478932649671,
+      "compression_rate": 4.544348665812089
+    },
+    "github_javascript": {
+      "neg_log_prob_sum": 1393.5747772907857,
+      "avg tokens": 1541.046,
+      "avg character count": 5202.974,
+      "avg bytes": 5367.664,
+      "sample_count": 500,
+      "total_nll_nats": 696787.3886453928,
+      "total_bytes": 2683832,
+      "bpc": 0.3864142738951527,
+      "bpb": 0.3745583591494099,
+      "compression_rate": 4.681979489367624
+    },
+    "github_markdown": {
+      "neg_log_prob_sum": 2559.1822695429046,
+      "avg tokens": 1565.416,
+      "avg character count": 4927.866,
+      "avg bytes": 5355.16,
+      "sample_count": 500,
+      "total_nll_nats": 1279591.1347714523,
+      "total_bytes": 2677580,
+      "bpc": 0.7492329476898338,
+      "bpb": 0.689450841618273,
+      "compression_rate": 8.618135520228412
+    },
+    "github_other": {
+      "neg_log_prob_sum": 1395.0839199530615,
+      "avg tokens": 1614.406,
+      "avg character count": 5229.94,
+      "avg bytes": 5324.37,
+      "sample_count": 500,
+      "total_nll_nats": 697541.9599765308,
+      "total_bytes": 2662185,
+      "bpc": 0.3848381918225099,
+      "bpb": 0.37801292039062223,
+      "compression_rate": 4.725161504882778
+    },
+    "github_python": {
+      "neg_log_prob_sum": 1404.6599881099385,
+      "avg tokens": 1506.072,
+      "avg character count": 5274.818,
+      "avg bytes": 5432.234,
+      "sample_count": 500,
+      "total_nll_nats": 702329.9940549693,
+      "total_bytes": 2716117,
+      "bpc": 0.3841831128545778,
+      "bpb": 0.37305020346718465,
+      "compression_rate": 4.663127543339808
+    },
+    "wikipedia_english": {
+      "neg_log_prob_sum": 1559.5877453276225,
+      "avg tokens": 727.702,
+      "avg character count": 3127.092,
+      "avg bytes": 3143.596,
+      "sample_count": 500,
+      "total_nll_nats": 779793.8726638113,
+      "total_bytes": 1571798,
+      "bpc": 0.7195213655419669,
+      "bpb": 0.71574385067781,
+      "compression_rate": 8.946798133472624
+    },
+    "wikipedia_nonenglish": {
+      "neg_log_prob_sum": 1687.1395583285475,
+      "avg tokens": 1112.008,
+      "avg character count": 2498.564,
+      "avg bytes": 3509.576,
+      "sample_count": 500,
+      "total_nll_nats": 843569.7791642738,
+      "total_bytes": 1754788,
+      "bpc": 0.9741707132929922,
+      "bpb": 0.6935390127149808,
+      "compression_rate": 8.66923765893726
+    }
+  },
+  "overall": {
+    "mean_compression_rate": 7.6982887546601795,
+    "pooled_compression_rate": 7.700783506460181,
+    "pooled_bpb": 0.6160626805168145,
+    "total_docs": 7500,
+    "wall_time_s": 524.434647321701
+  },
+  "position_curve": [
+    {
+      "bucket": "[0-64)",
+      "tokens": 480000,
+      "mean_neg_log2_p": 3.7165722354473805
+    },
+    {
+      "bucket": "[64-128)",
+      "tokens": 480000,
+      "mean_neg_log2_p": 2.8331060484017123
+    },
+    {
+      "bucket": "[128-256)",
+      "tokens": 958794,
+      "mean_neg_log2_p": 2.6885519780719207
+    },
+    {
+      "bucket": "[256-512)",
+      "tokens": 1797091,
+      "mean_neg_log2_p": 2.4895761446610125
+    },
+    {
+      "bucket": "[512-1024)",
+      "tokens": 3045215,
+      "mean_neg_log2_p": 2.399260834882433
+    },
+    {
+      "bucket": "[1024-1536)",
+      "tokens": 2590013,
+      "mean_neg_log2_p": 2.299835217560482
+    },
+    {
+      "bucket": "[1536-2048)",
+      "tokens": 2020353,
+      "mean_neg_log2_p": 2.18087350755556
+    },
+    {
+      "bucket": "[2048-2560)",
+      "tokens": 1336324,
+      "mean_neg_log2_p": 2.265828033248872
+    },
+    {
+      "bucket": "[2560-3072)",
+      "tokens": 457182,
+      "mean_neg_log2_p": 2.5215143102379063
+    },
+    {
+      "bucket": "[3072-3584)",
+      "tokens": 3443,
+      "mean_neg_log2_p": 2.577775303685554
+    },
+    {
+      "bucket": "[3584+)",
+      "tokens": 0,
+      "mean_neg_log2_p": NaN
+    }
+  ],
+  "methodology": "uncheatable_eval (Jellyfish042) via sglang /generate input_token_logprobs"
+}
