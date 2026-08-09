@@ -70,6 +70,54 @@ def load_numbers(path: pathlib.Path) -> set[float]:
     return out
 
 
+def expand_citations(sec: str) -> set[str]:
+    """The citations as this document actually writes them, not as one wishes it did.
+
+    BENCHMARKS.md uses three forms, and a checker that only understands the first
+    is worse than useless -- it invents a missing file for the second and stays
+    silent about the third:
+
+      `bsz_sweep_fullstack_5090.json`              plain
+      `..._cliff_stage1_w4a8.json`                 elided common prefix
+      `..._cliff_stage1_{base,w4a8}.json`          brace set, and `{,_fine}`
+
+    The elided form is resolved by suffix against what is on disk, which is the
+    only thing it can mean. Brace sets are expanded before anything else, so the
+    members are checked individually rather than skipped -- the previous regex
+    did not admit `{` at all, so those citations were never checked and a genuine
+    absence there would have passed silently.
+    """
+    def expand_braces(s: str) -> list[str]:
+        # Recursive, because the document nests them:
+        # `bsz_sweep_{1.5b,7.2b}_{fp16,w4gptq,w4rtn}_3090.json` is six files, and
+        # expanding only the leftmost group leaves `{` in the name, which then
+        # reports as a missing file that was never cited. That false positive is
+        # worse than the gap it replaced -- a checker that cries wolf gets muted.
+        m = re.search(r"\{([^{}]*)\}", s)
+        if not m:
+            return [s]
+        return [
+            out
+            for part in m.group(1).split(",")
+            for out in expand_braces(s[: m.start()] + part.strip() + s[m.end():])
+        ]
+
+    out: set[str] = set()
+    for raw in re.findall(r"`([A-Za-z0-9_./{},-]+\.json)`", sec):
+        for name in expand_braces(raw):
+            if name.startswith("..."):
+                tail = name[3:]
+                hits = [p.name for p in RESULTS.rglob(f"*{tail}")]
+                # An elided citation that resolves to exactly one file on disk is
+                # that file. Zero or several, and the shorthand is genuinely
+                # ambiguous -- keep it verbatim so it is reported rather than
+                # quietly resolved to a guess.
+                out.add(hits[0] if len(hits) == 1 else name)
+            else:
+                out.add(name)
+    return out
+
+
 def section_text(doc: pathlib.Path, section: str) -> str | None:
     text = doc.read_text()
     m = re.search(rf"^##+\s*{re.escape(section)}\b.*?$", text, re.M)
@@ -101,7 +149,7 @@ def main() -> int:
         print(f"REFUSED: no section '{args.section}' in {[str(d) for d in docs]}", file=sys.stderr)
         return 2
 
-    cited = sorted(set(re.findall(r"`([A-Za-z0-9_./-]+\.json)`", sec)))
+    cited = sorted(expand_citations(sec))
     if not cited:
         # A section with no citations cannot be checked, and passing it silently
         # would be the worst outcome: it would read as verified.
@@ -136,6 +184,15 @@ def main() -> int:
     print(f"cited    : {len(cited)} artifact(s); {len(present)} present, {len(missing)} missing")
     for m in missing:
         print(f"  MISSING  {m}")
+    if missing:
+        # §4 is the worked example of a MISSING that is correct as it stands: the
+        # caption cites the `{fp16,w8,w8a8,w4}_{1.5b,7.2b}` family and the very next
+        # clause says "7.2B has no landed w8g64 raw -- that slot is left empty, not
+        # filled". A family shorthand with a gap the prose owns is not the defect
+        # this gate is looking for. Read the sentence around the citation before
+        # touching anything.
+        print("  (a brace-family member can be absent on purpose -- check whether the "
+              "surrounding prose already declares the gap before 'fixing' it)")
     print(f"backing  : {len(backing)} distinct numeric values across present artifacts")
     if unbacked:
         print(f"UNBACKED : {len(unbacked)} printed value(s) not found in any cited artifact")

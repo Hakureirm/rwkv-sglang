@@ -720,7 +720,7 @@ plotted as unconnected markers rather than a curve implying coverage that wasn't
 *Protocol: 64-in/256-out, wall-clock, cuda-graph ON. Raw: the `bsz_sweep_{0.1b,1.5b,7.2b}_{fp16,w4gptq,w4rtn}_5090*.json`
 family + `bsz_sweep_fullstack_5090.json` + `bsz_sweep_w8a8v2_5090main.json` (§4b/§5) +
 `w1prime_leg{Ef_1.5b,Final_B_7.2b}_5090.json` (F0056) +
-`72b/sweep_72b_{fp16_v3,w8a8,w8a8_ceil,w8a8_max}_5090.json` (F0047). Regenerate:
+`72b/sweep_72b_fp16_v3_5090.json` + `72b/sweep_72b_w8a8{,_ceil,_max}.json` (F0047). Regenerate:
 `python bench/plots/make_benchmark_plots.py`.*
 
 ### The desktop 3090 + five more cards, same recipe (measured on the real cards)
