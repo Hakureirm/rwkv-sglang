@@ -18,6 +18,7 @@ Usage:
   python convert_rwkv7_blinkdl_to_fla.py --pth IN.pth --out OUT_DIR
 """
 import argparse
+import glob
 import json
 import os
 import re
@@ -30,13 +31,67 @@ def _sq(t):  # squeeze (1,1,D)->(D)
     return t.squeeze()
 
 
-def convert(pth_path, out_dir, max_position_embeddings=None):
-    try:
-        w = torch.load(
-            pth_path, map_location="cpu", weights_only=True, mmap=True
+def _load_official_hf(model_dir):
+    """Read an official RWKV-7 HF release (safetensors) into BlinkDL .pth naming.
+
+    The official repos (RWKV/RWKV7-*-hf) carry the same tensors under the same names
+    as the .pth, with `rwkv7.` prefixed on everything except `head.weight`:
+    `rwkv7.emb.weight`, `rwkv7.blocks.N.att.*`, `rwkv7.ln_out.*`. Stripping that one
+    prefix lands exactly on what the rest of this file already expects, so the
+    conversion below -- the LoRA transposes, the head-count derivation, the dropped
+    block-0 v_lora -- is shared rather than reimplemented for a second input format.
+    """
+    from safetensors.torch import load_file
+
+    shards = sorted(glob.glob(os.path.join(model_dir, "*.safetensors")))
+    if not shards:
+        raise SystemExit(f"no .safetensors found in {model_dir}")
+    w = {}
+    for shard in shards:
+        for k, v in load_file(shard).items():
+            w[k.removeprefix("rwkv7.")] = v
+    missing = [k for k in ("emb.weight", "head.weight", "ln_out.weight") if k not in w]
+    if missing:
+        raise SystemExit(
+            f"{model_dir} does not look like an official RWKV-7 HF release "
+            f"(missing after prefix strip: {missing})"
         )
-    except TypeError:  # torch releases before mmap= was added
-        w = torch.load(pth_path, map_location="cpu", weights_only=True)
+    return w
+
+
+def _copy_tokenizer(src_dir, out_dir):
+    """Carry the source repo's tokenizer into the converted directory.
+
+    A .pth carries no tokenizer, so this only applies to the official-HF input: those
+    repos ship `tokenizer.json` (the World vocabulary as an ordinary fast tokenizer)
+    and its config. Without them the converted directory loads its weights and then
+    fails at the tokenizer, which is a worse failure than not converting at all --
+    the weights look fine and the error points somewhere else.
+    """
+    import shutil
+
+    carried = []
+    for name in ("tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
+                 "chat_template.jinja", "rwkv_vocab_v20230424.txt", "hf_rwkv_tokenizer.py"):
+        src = os.path.join(src_dir, name)
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(out_dir, name))
+            carried.append(name)
+    if not carried:
+        print(f"WARNING: {src_dir} had no tokenizer files; the output will not load")
+    return carried
+
+
+def convert(pth_path, out_dir, max_position_embeddings=None):
+    if os.path.isdir(pth_path):
+        w = _load_official_hf(pth_path)
+    else:
+        try:
+            w = torch.load(
+                pth_path, map_location="cpu", weights_only=True, mmap=True
+            )
+        except TypeError:  # torch releases before mmap= was added
+            w = torch.load(pth_path, map_location="cpu", weights_only=True)
     ks = list(w.keys())
     n_layer = 1 + max(int(k.split(".")[1]) for k in ks if k.startswith("blocks."))
     n_embd = w["emb.weight"].shape[1]
@@ -159,12 +214,22 @@ def convert(pth_path, out_dir, max_position_embeddings=None):
     print(
         f"wrote {len(out)} tensors + config.json + generation_config.json -> {out_dir}"
     )
+    if os.path.isdir(pth_path):
+        carried = _copy_tokenizer(pth_path, out_dir)
+        if carried:
+            print(f"carried tokenizer: {', '.join(carried)}")
     return out, config
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pth", required=True)
+    ap.add_argument(
+        "--pth",
+        required=True,
+        help="BlinkDL .pth, or a directory holding an official RWKV-7 HF release "
+        "(RWKV/RWKV7-*-hf) -- the safetensors there are the same tensors under a "
+        "`rwkv7.` prefix and are read directly",
+    )
     ap.add_argument("--out", required=True)
     ap.add_argument(
         "--max-position-embeddings",
