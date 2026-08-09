@@ -940,6 +940,28 @@ class Rwkv7Attention(nn.Module):
             print("[rwkv7] M6 fused fp16 GEMV projection path armed "
                   "(fp16 bsz1 decode only; inactive for other dtypes)",
                   file=sys.stderr, flush=True)
+            # The line above says "armed", which is a load-time fact: the extension
+            # built. Every fused path then gates on fp16 per call, so under another
+            # dtype they all decline and the torch fallbacks run -- correct output,
+            # quietly slower, and until now the only [rwkv7] line a bf16 user saw was
+            # the "armed" one. The official RWKV-7 HF checkpoints are bf16, so that
+            # was the default experience for anyone arriving with them.
+            # The loader wraps model construction in set_default_torch_dtype(
+            # model_config.dtype), so this reads the serving dtype, not a guess.
+            if torch.get_default_dtype() is not torch.float16:
+                print(
+                    f"[rwkv7] NOTE: serving in {torch.get_default_dtype()}. The fused "
+                    "fast paths in this file gate on fp16 per call and are therefore "
+                    "INACTIVE -- the torch fallbacks run, output stays correct, and the "
+                    "speed is not what this stack is benchmarked at. Pass "
+                    "--dtype float16 to get them. (A two-arm probe on the port-patched "
+                    "overlay line -- same weights, only --dtype differing -- put the "
+                    "cost near 1.8x single-stream on an A800; that tree is not this "
+                    "one, so treat it as the order of magnitude, not this tree's "
+                    "number.) The official RWKV-7 HF checkpoints are bf16, so this is "
+                    "the default path for anyone arriving with them.",
+                    file=sys.stderr, flush=True,
+                )
         # M9: fused 4-chain LoRA (see _FUSED_LORA above). The packed weight
         # tensors are built lazily (like _mix6 / the sparse-ffn tiles) on the
         # first eligible forward — i.e. the eager warmup run, post weight-load,
