@@ -1020,6 +1020,18 @@ the A100/H100 rows elsewhere in this doc were measured on the 0705 base; the two
 not directly comparable. Single-stream and accuracy do reproduce across bases on
 this stack.
 
+> **Which tree produced these.** Not `sglang_mainline/`. This section was measured on
+> the `sglang_overlay/` line carried onto sglang main by the port patch, and **that tree
+> does not contain the megakernel** (verified 2026-08-09: the deployed
+> `models/rwkv7.py` references `mega` zero times; `sglang_mainline/`'s references it 13).
+> So F0063-F0066c -- the Stage-A grouped r/k/v GEMV and the fused-epilogue line that the
+> single-stream ladder elsewhere in this doc is built on -- **are absent here**. Read
+> every number below as "the port-patched overlay on new base", not as this project's
+> best stack, and do not line it up against sections that were produced by
+> `sglang_mainline/`. `sglang_mainline/README.md` claims every post-2026-07-05 figure in
+> this document came from that tree; **this section is the exception**, and the claim is
+> qualified there accordingly.
+
 **Correctness.** Greedy vs oracle 24/24 EXACT; TP=2 and TP=4 output is
 token-identical to single-card (the §6b conclusion reproduced on the new base).
 

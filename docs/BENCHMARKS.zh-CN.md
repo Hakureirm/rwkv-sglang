@@ -857,6 +857,16 @@ PP 的职责是装下超过单卡的模型,不是给小模型每 token 提速)�
 **A800 ×8**(sm80,80GB)上实测。**这是新 base 的数字**——文档其余表格的 A100/H100 行是
 0705 base 测的,两者不可直接比;单请求与精度在本栈上可跨 base 复现。
 
+> **这些数字出自哪棵树。** 不是 `sglang_mainline/`。本节测的是 `sglang_overlay/` 那条线
+> 经移植补丁搬到 sglang main 之后的产物,而**那棵树里没有 megakernel**
+> (2026-08-09 核实:部署中的 `models/rwkv7.py` 引用 `mega` **0 次**,
+> `sglang_mainline/` 的引用 **13 次**)。也就是说 F0063–F0066c —— 本文档单请求阶梯所
+> 依赖的 Stage-A 分组 r/k/v GEMV 与融合尾声那一整条线 —— **在这里是缺席的**。
+> 下面每个数字都应读作"移植补丁版 overlay 在新 base 上"的成绩,**不是本项目的最优栈**,
+> 也不要与由 `sglang_mainline/` 产出的章节并排比较。
+> `sglang_mainline/README.md` 声称本文档 2026-07-05 之后的每个数字都出自那棵树,
+> **本节是例外**,该处断言已相应限定。
+
 **正确性。** greedy 对 oracle 24/24 EXACT;TP=2/TP=4 多卡输出与单卡逐 token 一致
 (§6b 结论在新 base 上复现)。
 

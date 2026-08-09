@@ -3,7 +3,13 @@
 **This is the code that runs.** Every performance number in `docs/BENCHMARKS.md`
 measured after 2026-07-05, the same-card comparison in
 `bench/results/samecard_btl/`, and the correctness gates are produced by this
-tree, applied over sglang `main`.
+tree, applied over sglang `main` -- **with one exception, added here because an
+unqualified claim is worse than none**: `docs/BENCHMARKS.md` §6c (the A800×8
+sweep, 2026-08-08) was measured on the `sglang_overlay/` line carried onto sglang
+main by the port patch. That tree does not contain the megakernel (checked
+2026-08-09: its `models/rwkv7.py` references `mega` zero times against this
+tree's 13), so §6c is missing F0063-F0066c entirely. §6c says so on its own face
+now. Anything else post-2026-07-05 is this tree.
 
 It is committed here because it was not committed anywhere before. The repository
 carried two other copies, and neither was what we were running:
