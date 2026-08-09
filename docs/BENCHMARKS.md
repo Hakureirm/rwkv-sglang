@@ -1020,17 +1020,23 @@ the A100/H100 rows elsewhere in this doc were measured on the 0705 base; the two
 not directly comparable. Single-stream and accuracy do reproduce across bases on
 this stack.
 
-> **Which tree produced these.** Not `sglang_mainline/`. This section was measured on
-> the `sglang_overlay/` line carried onto sglang main by the port patch, and **that tree
-> does not contain the megakernel** (verified 2026-08-09: the deployed
-> `models/rwkv7.py` references `mega` zero times; `sglang_mainline/`'s references it 13).
-> So F0063-F0066c -- the Stage-A grouped r/k/v GEMV and the fused-epilogue line that the
-> single-stream ladder elsewhere in this doc is built on -- **are absent here**. Read
-> every number below as "the port-patched overlay on new base", not as this project's
-> best stack, and do not line it up against sections that were produced by
-> `sglang_mainline/`. `sglang_mainline/README.md` claims every post-2026-07-05 figure in
+> **Which tree produced these.** Not `sglang_mainline/`. This section was measured on the
+> `sglang_overlay/` line carried onto sglang main by the port patch (verified 2026-08-09
+> against the box's deployed `models/rwkv7.py`: 1,491 lines, no exact match to any tree
+> checked in here). `sglang_mainline/README.md` claims every post-2026-07-05 figure in
 > this document came from that tree; **this section is the exception**, and the claim is
-> qualified there accordingly.
+> qualified there accordingly. Check any future run with
+> `python bench/provenance_gate.py <deployed rwkv7.py> --require mainline`.
+>
+> **What that does and does not explain.** The deployed tree references `mega` zero times
+> where `sglang_mainline/` references it 13, so F0063-F0066c are absent from it. That is
+> *not* an explanation for the numbers below: the recipe here is `bash scripts/serve.sh`,
+> `RWKV_MEGA` defaults to `0`, and `serve.sh` never sets it -- so the megakernel was off
+> for these runs and would equally have been off had `sglang_mainline/` produced them.
+> (`RWKV_MEGA=1` is opt-in and scoped to fp16 bsz1 decode; the pre-megakernel path is the
+> default and is not going anywhere.) What the remaining tree differences do account for
+> is **not established** -- nobody has run this protocol on `sglang_mainline/` for
+> comparison. Treat the gap as unquantified rather than attributing it.
 
 **Correctness.** Greedy vs oracle 24/24 EXACT; TP=2 and TP=4 output is
 token-identical to single-card (the §6b conclusion reproduced on the new base).

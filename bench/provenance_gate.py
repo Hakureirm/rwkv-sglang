@@ -155,8 +155,14 @@ def main() -> int:
                   f"{stamp['candidates_missing']}")
         missing = [f for f in FEATURES if dep["features"][f] == 0 and any(r["features"][f] > 0 for r in rows)]
         if missing:
-            print(f"MISSING  : the deployed tree does not wire in {missing} "
-                  f"-- numbers from it are not this project's full stack")
+            # Absent is not the same as load-bearing. `mega` is the worked example:
+            # it is opt-in (`RWKV_MEGA` defaults to 0, `serve.sh` never sets it) and
+            # scoped to fp16 bsz1 decode, so a tree without it produces the same
+            # numbers as a tree with it for any run that did not turn it on. Report
+            # the fact; let the reader check the run's env before blaming it.
+            print(f"MISSING  : the deployed tree does not wire in {missing}. "
+                  f"Whether that changed a number depends on whether the run enabled "
+                  f"them -- check the recipe's env before attributing anything to this.")
 
     if args.require:
         ok = best["tree"] == args.require and verdict == "EXACT"
