@@ -173,6 +173,61 @@ class Rwkv7AttnBackend(MambaAttnBackendBase):
             x.contiguous(), x_k.reshape(-1).contiguous(), ci, conv
         )
 
+    def try_fused_addln_shift6(self, x, delta, ln, layer_id, conv_idx, mix6,
+                               forward_batch):
+        """add_ln + token-shift + 6-way lerp in one launch -> (x, lp6), or None.
+
+        F0066a: a net regression as shipped (the J=6 kernel's single 512-thread
+        block cannot match the composition's 16-block-parallel store), so
+        `RWKV_FUSED_ADDLN_SHIFT` is default OFF and nothing in `serve.sh` sets it.
+        It is here because the finding says the data supports arming J=1 later and
+        that the path was kept in-tree rather than deleted -- and for three commits
+        it was not: the call sites at `models/rwkv7.py` went in with `134259c`
+        while this half did not, so setting the documented flag raised
+        AttributeError instead of running the path it names. Same shape as the
+        `try_fused_shift_lerp6` stub above, one notch louder: that one fell back
+        silently, this one did not fall back at all."""
+        e = self._fused_glue_conv(layer_id, conv_idx, x, forward_batch)
+        if e is None or mix6.dtype != torch.float16:
+            return None
+        if delta.dtype != torch.float16 or ln.weight.dtype != torch.float16:
+            return None
+        if x.shape[-1] > 4096 or (x.shape[-1] % 4) != 0:
+            return None
+        conv, ci = e
+        from sglang.srt.layers.attention.rwkv7_kernels import ln_fused
+
+        if not ln_fused.available():
+            return None
+        return ln_fused.add_ln_shift6(
+            x.contiguous(), delta.contiguous(), ln, mix6, ci, conv
+        )
+
+    def try_fused_addln_shift1(self, x, delta, ln, layer_id, conv_idx, x_k,
+                               forward_batch):
+        """The FFN (channel-mix) counterpart of try_fused_addln_shift6.
+
+        This is the `J=1` arm, which the F0066a data has at parity on 7.2B
+        (5.48us vs 5.43 composed) and ahead on 1.5B (3.69 vs 4.29) -- i.e. the one
+        the finding says is worth arming on its own. It is gated behind the same
+        default-OFF flag as the J=6 arm."""
+        e = self._fused_glue_conv(layer_id, conv_idx, x, forward_batch)
+        if e is None or x_k.dtype != torch.float16:
+            return None
+        if delta.dtype != torch.float16 or ln.weight.dtype != torch.float16:
+            return None
+        if x.shape[-1] > 4096 or (x.shape[-1] % 4) != 0:
+            return None
+        conv, ci = e
+        from sglang.srt.layers.attention.rwkv7_kernels import ln_fused
+
+        if not ln_fused.available():
+            return None
+        return ln_fused.add_ln_shift1(
+            x.contiguous(), delta.contiguous(), ln,
+            x_k.reshape(-1).contiguous(), ci, conv
+        )
+
     # ---- token-shift (width-2 causal shift via the conv state) ----
     def token_shift(
         self,
