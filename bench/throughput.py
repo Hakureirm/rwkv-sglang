@@ -33,6 +33,8 @@ import threading
 import time
 from pathlib import Path
 
+from _engine_args import resolve as _resolve_engine_kwargs
+
 
 class VramSampler:
     """Background thread polling whole-device VRAM usage in MiB."""
@@ -214,10 +216,9 @@ def main():
     )
     if args.cuda_graph and args.cuda_graph_max_bs is not None:
         engine_kwargs["cuda_graph_max_bs"] = args.cuda_graph_max_bs
-    # keep the same invocation across sglang versions (e.g. main dropped
-    # disable_piecewise_cuda_graph): only pass kwargs ServerArgs still accepts
-    from sglang.srt.server_args import ServerArgs
-    engine_kwargs = {k: v for k, v in engine_kwargs.items() if k in ServerArgs.__dataclass_fields__}
+    # Was: drop any kwarg ServerArgs no longer accepts. That filter discarded
+    # `disable_piecewise_cuda_graph` -- a correctness switch here, not a knob.
+    engine_kwargs = _resolve_engine_kwargs(engine_kwargs)
     engine = sgl.Engine(**engine_kwargs)
 
     rows = []

@@ -14,6 +14,8 @@ not tested" gap.
 import argparse
 import sys
 
+from _engine_args import resolve as _resolve_engine_kwargs
+
 
 def make_prompt(n):
     return [(i % 60000) + 1 for i in range(n)]
@@ -42,7 +44,7 @@ def greedy(model, chunk_size, prompt, gen, dtype, mem):
         for key, value in engine_kwargs.items()
         if key in ServerArgs.__dataclass_fields__
     }
-    eng = sgl.Engine(**engine_kwargs)
+    eng = sgl.Engine(**_resolve_engine_kwargs(engine_kwargs))
     out = eng.generate(input_ids=[prompt],
                        sampling_params={"temperature": 0.0, "max_new_tokens": gen})
     rec = out[0] if isinstance(out, list) else out

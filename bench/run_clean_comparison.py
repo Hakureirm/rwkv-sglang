@@ -59,6 +59,8 @@ import threading
 import time
 from pathlib import Path
 
+from _engine_args import resolve as _resolve_engine_kwargs
+
 
 # --------------------------------------------------------------------------- #
 # VRAM sampler (whole-GPU nvidia-smi, ~20 Hz)                                  #
@@ -209,10 +211,10 @@ def run_ours(args):
         tp_size=1,
         mem_fraction_static=args.mem_fraction,
     )
-    # cross-version: only pass kwargs this sglang's ServerArgs still accepts
-    from sglang.srt.server_args import ServerArgs
-    engine_kwargs = {k: v for k, v in engine_kwargs.items() if k in ServerArgs.__dataclass_fields__}
-    engine = sgl.Engine(**engine_kwargs)
+    # Cross-version, but by translation rather than by deletion: the filter that used
+    # to stand here dropped `disable_piecewise_cuda_graph`, which decides whether this
+    # comparison is measuring the configuration it names.
+    engine = sgl.Engine(**_resolve_engine_kwargs(engine_kwargs))
 
     rows = []
     for bsz in batch_sizes:

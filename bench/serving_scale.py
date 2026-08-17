@@ -179,8 +179,6 @@ def main():
         tp_size=1,
         mem_fraction_static=args.mem_fraction,
     )
-    if args.cuda_graph_max_bs is not None:
-        engine_kwargs["cuda_graph_max_bs"] = args.cuda_graph_max_bs
     if args.max_context is not None:
         engine_kwargs["context_length"] = args.max_context
 
@@ -208,6 +206,24 @@ def main():
             raise RuntimeError(
                 f"this sglang build accepts none of {names}; RWKV-7 cannot be measured "
                 "without it — fix the alias list rather than dropping the switch"
+            )
+
+    # `cuda_graph_max_bs` is a tuning knob rather than a correctness switch, so this
+    # block is about the *asking*, not the value: sglang split the field into
+    # `_decode`/`_prefill`, and a caller who passed `--cuda-graph-max-bs` and had it
+    # quietly discarded would be measuring sglang's own cap (24 for this model, i.e.
+    # the slow path above bs=24) while reading the number as the configuration they
+    # named. That is F0067 again. Honour whichever spelling exists, or refuse.
+    if args.cuda_graph_max_bs is not None:
+        for name in ("cuda_graph_max_bs", "cuda_graph_max_bs_decode"):
+            if name in fields:
+                engine_kwargs[name] = args.cuda_graph_max_bs
+                break
+        else:
+            raise RuntimeError(
+                "this sglang build accepts neither `cuda_graph_max_bs` nor "
+                "`cuda_graph_max_bs_decode`; fix the alias list rather than dropping "
+                "the knob a caller explicitly passed"
             )
 
     unknown = [k for k in engine_kwargs if k not in fields]

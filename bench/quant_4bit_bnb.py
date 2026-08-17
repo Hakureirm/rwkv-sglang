@@ -10,6 +10,8 @@ import argparse
 import json
 import sys
 
+from _engine_args import resolve as _resolve_engine_kwargs
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -25,17 +27,18 @@ def main():
 
     import sglang as sgl
 
-    engine = sgl.Engine(
-        model_path=args.model,
-        skip_tokenizer_init=True,
-        disable_cuda_graph=True,
-        disable_piecewise_cuda_graph=True,
-        dtype="bfloat16",
-        quantization="bitsandbytes",
-        load_format="bitsandbytes",
-        tp_size=1,
-        mem_fraction_static=args.mem_fraction,
-    )
+    engine_kwargs = {
+        "model_path": args.model,
+        "skip_tokenizer_init": True,
+        "disable_cuda_graph": True,
+        "disable_piecewise_cuda_graph": True,
+        "dtype": "bfloat16",
+        "quantization": "bitsandbytes",
+        "load_format": "bitsandbytes",
+        "tp_size": 1,
+        "mem_fraction_static": args.mem_fraction,
+    }
+    engine = sgl.Engine(**_resolve_engine_kwargs(engine_kwargs))
     out = engine.generate(
         input_ids=[prompt_tokens],
         sampling_params={"temperature": 0.0, "max_new_tokens": n},

@@ -38,6 +38,8 @@ import argparse
 import json
 import sys
 
+from _engine_args import resolve as _resolve_engine_kwargs
+
 
 def _extract_ids(rec, n):
     got = (
@@ -118,10 +120,9 @@ def main():
     )
     if args.cuda_graph and args.cuda_graph_max_bs is not None:
         ekw["cuda_graph_max_bs"] = args.cuda_graph_max_bs
-    # keep the same invocation across sglang versions (e.g. main dropped
-    # disable_piecewise_cuda_graph): only pass kwargs ServerArgs still accepts
-    from sglang.srt.server_args import ServerArgs
-    ekw = {k: v for k, v in ekw.items() if k in ServerArgs.__dataclass_fields__}
+    # Was: drop any kwarg ServerArgs no longer accepts. This is the greedy-oracle
+    # gate; the switch that filter discarded is what makes its result mean anything.
+    ekw = _resolve_engine_kwargs(ekw)
     engine = sgl.Engine(**ekw)
 
     # ---- per-prompt B=1 references (trustworthy: no cross-request prefix) ------
