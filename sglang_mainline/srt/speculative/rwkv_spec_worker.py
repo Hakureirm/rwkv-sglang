@@ -455,12 +455,28 @@ class RwkvSpecWorker(BaseSpecWorker):
             move_accept_tokens_to_target_kvcache,
             prepare_mamba_track_for_verify,
         )
-        from sglang.srt.speculative.triton_ops.cache_locs import (
-            assign_extend_cache_locs_func,
-        )
-        from sglang.srt.layers.attention.mamba.mamba_state_scatter_triton import (
-            fused_conv_window_scatter_with_mask,
-        )
+        # Both of these moved when upstream lifted its triton kernels out of
+        # `srt/` into the top-level `sglang.kernels.ops` tree. Neither import was
+        # guarded, so on current main this function raised ImportError at its
+        # first call rather than at load, i.e. speculative decode failed only
+        # once a request arrived. Try the current path, fall back to the old one,
+        # matching `configs/rwkv7.py::_attention_tp_size`.
+        try:
+            from sglang.kernels.ops.speculative.cache_locs import (
+                assign_extend_cache_locs_func,
+            )
+        except ImportError:
+            from sglang.srt.speculative.triton_ops.cache_locs import (
+                assign_extend_cache_locs_func,
+            )
+        try:
+            from sglang.kernels.ops.mamba.mamba_state_scatter_triton import (
+                fused_conv_window_scatter_with_mask,
+            )
+        except ImportError:
+            from sglang.srt.layers.attention.mamba.mamba_state_scatter_triton import (
+                fused_conv_window_scatter_with_mask,
+            )
 
         bs = len(batch.reqs)
         K = self.k

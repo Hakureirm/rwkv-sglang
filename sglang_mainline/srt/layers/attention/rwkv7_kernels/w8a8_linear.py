@@ -107,9 +107,18 @@ def maybe_patch_w8a8_linear_method():
         from sglang.srt.layers.quantization import w8a8_int8 as _w8a8_mod
 
         def _apply(self, layer, x, bias=None):
-            from sglang.srt.layers.quantization.int8_kernel import (
-                per_token_quant_int8,
-            )
+            # `int8_kernel` moved to `sglang.kernels.ops.quantization` upstream.
+            # The `try` above guards the *definition* of this function, not this
+            # import, which runs per call -- so on current main the w8a8 path
+            # raised on its first forward rather than declining at load.
+            try:
+                from sglang.kernels.ops.quantization.int8_kernel import (
+                    per_token_quant_int8,
+                )
+            except ImportError:
+                from sglang.srt.layers.quantization.int8_kernel import (
+                    per_token_quant_int8,
+                )
 
             x_q, x_scale = per_token_quant_int8(x)
             x_q_2d = x_q.view(-1, x_q.shape[-1])

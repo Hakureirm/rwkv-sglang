@@ -142,7 +142,11 @@ def gemm_w4a8_tc(x: torch.Tensor, qweight: torch.Tensor, scale_t: torch.Tensor,
     (W4Linear stashes it as `_scale_t`): the kernel's per-group scale reads are
     coalesced in this layout and scattered in the checkpoint's [N, K/64].
     Caller guards fp16 + M>64 + K%64==0 + tc_s8_supported()."""
-    from sglang.srt.layers.quantization.int8_kernel import per_token_quant_int8
+    # Moved to `sglang.kernels.ops.quantization` upstream; keep both spellings.
+    try:
+        from sglang.kernels.ops.quantization.int8_kernel import per_token_quant_int8
+    except ImportError:
+        from sglang.srt.layers.quantization.int8_kernel import per_token_quant_int8
 
     x_q, x_scale = per_token_quant_int8(x.contiguous())
     return torch.ops.rwkv7_w4.gemm_w4a8_tc(
