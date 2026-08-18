@@ -444,7 +444,9 @@ GEMM 赢了,但 1.5B 端到端是 fp16 的 0.9466×(§5):逐 token 的激活量�
 
 §4 回答 int4 在精度上*付出什么*;本节回答它*服务起来多快*——起因是 BlinkDL 的直接提问:
 对称 GPTQ int4 速度如何?本节所有数据同一协议:64 进/256 出定长扫描,真实服务进程 +
-`bench/bsz_throughput.py`(全程计时),[cuda-graph](#g-cuda-graph) 开启并显式设置 `--cuda-graph-max-bs`,
+`bench/bsz_throughput.py`(全程计时),[cuda-graph](#g-cuda-graph) 开启并显式设置 decode 图上限
+(该旗标此后被 sglang 拆成 `--cuda-graph-max-bs-decode` / `--cuda-graph-max-bs-prefill`;
+`scripts/serve.sh` 现在会问装好的 build 认哪个拼写,配方本身不变),
 同一时刻每张卡只跑一个服务进程。"门"= 与 fp32 numpy oracle([§1 那把尺](#g-oracle))的贪心逐 token
 比对,针对的就是产出速度数字的同一套服务配置。
 

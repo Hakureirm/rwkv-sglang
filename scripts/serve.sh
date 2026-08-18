@@ -138,13 +138,45 @@ export RWKV_FAST_LMHEAD="${RWKV_FAST_LMHEAD:-1}"
 # configs/rwkv7.py). Opt in for peak-throughput serving:
 #   RWKV_STATE_FP16=1 bash scripts/serve.sh ...   # halves WKV state bytes
 
+# sglang renames these, and by 0.5.17 both old spellings are deprecated CLI aliases whose
+# dataclass field is already gone. Hard-coding either one dates the script: the old name
+# warns today and breaks when the alias is dropped, the new name breaks on a box older
+# than the rename. So ask the installed build which spelling it takes -- the same rule
+# bench/_engine_args.py applies to Engine kwargs: honour what the caller asked for under
+# whatever name this build accepts, or refuse, rather than serve a configuration nobody
+# chose. The prefill-graph switch is not a tuning knob here: with prefill CUDA graphs on,
+# RWKV-7 decodes from a state the graph never wrote.
+pick_flag() {   # pick_flag <field> <older field>... -> prints the first this build has
+  "$PYTHON" - "$@" <<'PYEOF'
+import sys
+from sglang.srt.server_args import ServerArgs
+fields = ServerArgs.__dataclass_fields__
+for name in sys.argv[1:]:
+    if name in fields:
+        print("--" + name.replace("_", "-")); break
+else:
+    sys.exit(1)
+PYEOF
+}
+
+PREFILL_GRAPH_FLAG="$(pick_flag disable_prefill_cuda_graph disable_piecewise_cuda_graph)" || {
+  echo "[serve] this sglang accepts neither --disable-prefill-cuda-graph nor --disable-piecewise-cuda-graph;" >&2
+  echo "        RWKV-7 cannot be served correctly without it. Add the current spelling to pick_flag." >&2
+  exit 1
+}
+CGMAXBS_FLAG="$(pick_flag cuda_graph_max_bs_decode cuda_graph_max_bs)" || {
+  echo "[serve] this sglang accepts neither --cuda-graph-max-bs-decode nor --cuda-graph-max-bs;" >&2
+  echo "        without it sglang caps decode graphs at 24 for this model." >&2
+  exit 1
+}
+
 COMMON=(--model-path "$MODEL" --dtype "$DTYPE" --trust-remote-code
         --port "$PORT" --mem-fraction-static "$MEMFRAC"
-        --page-size 1 --attention-backend triton --disable-piecewise-cuda-graph)
+        --page-size 1 --attention-backend triton "$PREFILL_GRAPH_FLAG")
 
 case "$MODE" in
   throughput)
-    EXTRA=(--disable-radix-cache --cuda-graph-max-bs "$CGMAXBS"
+    EXTRA=(--disable-radix-cache "$CGMAXBS_FLAG" "$CGMAXBS"
            --chunked-prefill-size 4096 --max-running-requests 512)
     ;;
   statecache)
@@ -159,5 +191,5 @@ esac
 
 # strip a leading `--` separator if the caller passed extra flags after it
 [ "${1:-}" = "--" ] && shift
-echo "[serve] MODE=$MODE dtype=$DTYPE port=$PORT cuda_graph_max_bs=$CGMAXBS fast_linear=$RWKV_FAST_LINEAR sparse_ffn=$RWKV_SPARSE_FFN wkv_cuda=${RWKV_WKV_CUDA:-0}"
+echo "[serve] MODE=$MODE dtype=$DTYPE port=$PORT ${CGMAXBS_FLAG#--}=$CGMAXBS prefill_graph=${PREFILL_GRAPH_FLAG#--} fast_linear=$RWKV_FAST_LINEAR sparse_ffn=$RWKV_SPARSE_FFN wkv_cuda=${RWKV_WKV_CUDA:-0}"
 exec "$PYTHON" -m sglang.launch_server "${COMMON[@]}" "${EXTRA[@]}" "$@"

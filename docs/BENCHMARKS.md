@@ -525,7 +525,10 @@ lives. Raw: `bench/verify_w8a8.py --bench`.
 §4 answers what int4 *costs* (accuracy); this section answers how fast it *serves* — a
 direct question from BlinkDL: how fast is symmetric GPTQ int4? Protocol at every point
 below: 64-in/256-out fixed-shape sweep, live server + `bench/bsz_throughput.py`
-(wall-clock window), [cuda-graph](#g-cuda-graph) ON with explicit `--cuda-graph-max-bs`, one
+(wall-clock window), [cuda-graph](#g-cuda-graph) ON with the decode-graph cap set
+explicitly (sglang has since split that flag into `--cuda-graph-max-bs-decode` /
+`--cuda-graph-max-bs-prefill`; `scripts/serve.sh` now asks the installed build which
+spelling it takes, so the recipe is unchanged), one
 server per GPU at a time. "Gate" = greedy token match vs the fp32 numpy oracle ([§1's
 ruler](#g-oracle)), run against the same serving setup that produced the speed numbers.
 
