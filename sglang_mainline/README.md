@@ -59,6 +59,22 @@ by the maintainers.
 Wiring edits to sglang's own files stay in
 `sglang_main_port/upstream_edits.patch`.
 
+## Which sglang this applies over
+
+Written against sglang `main` and last checked against `e5b3a48` (2026-08-15). Upstream
+moves things, so three kernel imports here try the current path and fall back to the old
+one rather than naming a single spelling:
+
+| import | current | previous |
+|---|---|---|
+| `cache_locs` | `sglang.kernels.ops.speculative` | `sglang.srt.speculative.triton_ops` |
+| `mamba_state_scatter_triton` | `sglang.kernels.ops.mamba` | `sglang.srt.layers.attention.mamba` |
+| `int8_kernel` | `sglang.kernels.ops.quantization` | `sglang.srt.layers.quantization` |
+
+`configs/rwkv7.py::_attention_tp_size` does the same for `get_attention_tp_size`, which
+upstream replaced with `get_parallel().attn_tp_size`. Add the new spelling in front when
+one of these moves again; do not replace the list, since a box may be older than main.
+
 ## Provenance
 
 `srt/layers/attention/rwkv7_kernels/cuda/` carries `NOTICE` and

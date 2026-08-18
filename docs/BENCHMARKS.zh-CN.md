@@ -239,7 +239,19 @@ RTX 5090 为 sglang main 实测;3090 列是 v0.5.10 的历史阶梯,供对照。
 这些数字过了门,不只是计了时:fp16 逐 token 复现 oracle fixture(greedy 精确);两个量化档在
 megakernel 旗标开与关下输出完全相同;w8g64 与 fp16 逐 token 一致(独立佐证了 §4 的 greedy-lossless
 论断)。当年在这里贡献 +9.2% 的 `RWKV_STATE_FP16` 档(409.8 → 447.3,见 §5),现在只剩 +0.1%
-(442.3 → 442.8)——当前栈已通过别的途径拿到了那部分收益,它不再是一个独立台阶。F0069 还查出并修复
+(442.3 → 442.8)——当前栈已通过别的途径拿到了那部分收益,它不再是一个独立台阶。
+
+> **2026-08-17 补**:F0069 当时只修了 `serving_scale.py` 一个文件,同一个过滤器一直活在
+> 另外五个 harness 里——其中包括 **`verify_batch.py`,即 greedy 正确性门本身**。六个现已
+> 统一走 `bench/_engine_args.py`:按别名表翻译成当前 sglang 认的拼写,一个都找不到就抛错,
+> 绝不静默丢弃。**本文档的对比表没有一张是经由那个静默过滤器测出来的**:对比表只出自
+> ① `serving_scale.py`(F0069 已修)、② `run_clean_comparison.py`(直传给 `Engine`,
+> 只会报错不会丢弃)、③ 经 `scripts/serve.sh` 的 `bsz_throughput.py`(HTTP 客户端,
+> 根本不传 `ServerArgs`)。`throughput.py` 确实丢过,但它的 eager 数字**从不进 cuda-graph
+> 对比表**(见「两个测量窗口」下的说明)。`verify_batch.py` 是门不是数字来源,
+> 且在开关确证送达的前提下重跑仍 PASS。
+
+F0069 还查出并修复
 了一个 harness 缺陷,它让本表的第一遍测量整体作废:sglang 把"禁用 prefill CUDA graph"的参数改名后,
 `serving_scale.py` 把它静默丢掉了,而 RWKV-7 会从一个该 graph 从未写入的状态开始解码。**上表已发布
 的行不受影响**——它们记录的 TTFT(36.0 / 37.3 / 40.4 ms)与修正后的复测(37.2 / 38.8 / 40.7)吻合,
@@ -1201,7 +1213,10 @@ kernel-loop 口径"并排读,是一个公允、虽不完全对齐的比较——
   边界)由单个 512 线程的 block 承担,要写出 6 个输出平面;这一个 block 的写带宽追不上
   未融合组合版本 16-block 并行的 shift 阶段——这是 launch 数预测没算到的存储侧墙。
   `J=1` 分支(ffn 边界)接近打平(7.2B 持平,1.5B 小赢)。这个核保留在代码里、挂着开关
-  (`RWKV_FUSED_ADDLN_SHIFT`,默认关)而不是删掉——如果以后想单独要 `J=1` 的赢面,数据
+  (`RWKV_FUSED_ADDLN_SHIFT`,默认关)而不是删掉(⚠️ 这句在 2026-08-17 之前对**发布的树**
+并不成立:`models/rwkv7.py` 有调用点,而 `rwkv7_backend.py` 从未有过
+`try_fused_addln_shift1/6`,照文档去开那个旗标只会 AttributeError;两半现已齐全)——
+如果以后想单独要 `J=1` 的赢面,数据
   支持按 `J` 分别开关——但按现状上线,这是一笔记录在案的亏损,不在 142.8 这个旗舰数字
   里面。
 

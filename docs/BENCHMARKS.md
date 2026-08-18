@@ -295,6 +295,20 @@ wrote. The published rows above are *not* affected — their recorded TTFT (36.0
 40.4 ms) matches the corrected re-measurement (37.2 / 38.8 / 40.7), not the broken
 configuration's ~23 ms.
 
+That fix was applied to `serving_scale.py` alone, and the same filter was still standing
+in five other harnesses until 2026-08-17 — including `verify_batch.py`, which is the
+greedy-oracle gate itself. All six now route their Engine kwargs through
+`bench/_engine_args.py`, which maps each one to whichever spelling the installed sglang
+accepts and raises naming the key when none exists, so nothing is dropped in silence.
+No comparison table here was measured through the silent filter. Those tables come from
+`serving_scale.py`, which F0069 fixed, from `run_clean_comparison.py`, which passed the
+kwarg straight to `Engine` and so would have raised rather than dropped it, and from
+`bsz_throughput.py`, which is an HTTP client against a `scripts/serve.sh` server and
+passes no `ServerArgs` at all. `throughput.py` did drop it, and its eager numbers are
+never quoted against the cuda-graph tables (see the note under "Two measurement
+windows"). `verify_batch.py` is a gate rather than a number source, and it re-passes with
+the switch now demonstrably arriving.
+
 **Figure — the ladder as bars.** Same build order as the table, top to bottom; every value
 and every percentage is recomputed from the logs' own context-1024/bsz-1 rows, not copied
 from the cells above. The 3090 (v0.5.10) column has no landed per-step raws, so the figure
@@ -1430,7 +1444,10 @@ outside this section.
   boundary) is close to neutral (parity on 7.2B, a small win on 1.5B). The kernel stays
   in-tree and gated (`RWKV_FUSED_ADDLN_SHIFT`, default OFF) rather than deleted — per-`J`
   arming is supported by the data if a future round wants the `J=1` win alone — but as shipped
-  it is a documented loss, not part of the 142.8 headline.
+  it is a documented loss, not part of the 142.8 headline. (That "stays in-tree" was not
+true of the published tree until 2026-08-17: `models/rwkv7.py` carried the call sites but
+`rwkv7_backend.py` never carried `try_fused_addln_shift1/6`, so setting the documented
+flag raised AttributeError instead of running the path. Both halves are in now.)
 
 **Disclaimers.** Single RTX 5090, not a fleet average — §7a's own large-batch grid shows the
 gap to Bo's Pro-6000-class hardware widens at scale, so this ratio should not be assumed to
