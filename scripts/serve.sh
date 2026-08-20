@@ -52,6 +52,14 @@ DTYPE="${DTYPE:-float16}"          # fast paths are fp16; bf16/fp32 fall back cl
 MEMFRAC="${MEMFRAC:-0.85}"
 CGMAXBS="${CGMAXBS:-512}"
 MODE="${MODE:-throughput}"
+# RWKV-7 has no full-attention KV cache, so sglang cannot size the token pool from
+# per-token KV bytes -- there are none. Its fallback for a zero-KV model is one
+# context length (8192 here), which is smaller than a serving batch needs: measured
+# on v0.5.17 at 128 requests x 200 tokens, the scheduler retracted requests
+# repeatedly and ran 31 of a possible 64. Sizing it by concurrency instead is what
+# `--max-total-tokens` is for. The default below is the cap the port patch used to
+# apply from inside pool_configurator.py before upstream grew this knob.
+MAXTOTALTOK="${MAXTOTALTOK:-1048576}"
 
 # Verified greedy-exact hand-written kernels (see findings F0015/F0020/F0025/F0026):
 export RWKV_FAST_LINEAR="${RWKV_FAST_LINEAR:-1}"          # fused fp16 GEMV, bsz1 r/k/v/o + ffn proj
@@ -164,6 +172,12 @@ PREFILL_GRAPH_FLAG="$(pick_flag disable_prefill_cuda_graph disable_piecewise_cud
   echo "        RWKV-7 cannot be served correctly without it. Add the current spelling to pick_flag." >&2
   exit 1
 }
+MAXTOTALTOK_FLAG="$(pick_flag max_total_tokens)" || {
+  echo "[serve] this sglang has no --max-total-tokens;" >&2
+  echo "        without it the token pool falls back to one context length and the" >&2
+  echo "        serving batch is retracted under load. Add the current spelling to pick_flag." >&2
+  exit 1
+}
 CGMAXBS_FLAG="$(pick_flag cuda_graph_max_bs_decode cuda_graph_max_bs)" || {
   echo "[serve] this sglang accepts neither --cuda-graph-max-bs-decode nor --cuda-graph-max-bs;" >&2
   echo "        without it sglang caps decode graphs at 24 for this model." >&2
@@ -172,7 +186,8 @@ CGMAXBS_FLAG="$(pick_flag cuda_graph_max_bs_decode cuda_graph_max_bs)" || {
 
 COMMON=(--model-path "$MODEL" --dtype "$DTYPE" --trust-remote-code
         --port "$PORT" --mem-fraction-static "$MEMFRAC"
-        --page-size 1 --attention-backend triton "$PREFILL_GRAPH_FLAG")
+        --page-size 1 --attention-backend triton "$PREFILL_GRAPH_FLAG"
+        "$MAXTOTALTOK_FLAG" "$MAXTOTALTOK")
 
 case "$MODE" in
   throughput)
@@ -191,5 +206,5 @@ esac
 
 # strip a leading `--` separator if the caller passed extra flags after it
 [ "${1:-}" = "--" ] && shift
-echo "[serve] MODE=$MODE dtype=$DTYPE port=$PORT ${CGMAXBS_FLAG#--}=$CGMAXBS prefill_graph=${PREFILL_GRAPH_FLAG#--} fast_linear=$RWKV_FAST_LINEAR sparse_ffn=$RWKV_SPARSE_FFN wkv_cuda=${RWKV_WKV_CUDA:-0}"
+echo "[serve] MODE=$MODE dtype=$DTYPE port=$PORT ${CGMAXBS_FLAG#--}=$CGMAXBS ${MAXTOTALTOK_FLAG#--}=$MAXTOTALTOK prefill_graph=${PREFILL_GRAPH_FLAG#--} fast_linear=$RWKV_FAST_LINEAR sparse_ffn=$RWKV_SPARSE_FFN wkv_cuda=${RWKV_WKV_CUDA:-0}"
 exec "$PYTHON" -m sglang.launch_server "${COMMON[@]}" "${EXTRA[@]}" "$@"

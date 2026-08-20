@@ -2,3 +2,4 @@ python/sglang/srt/configs/rwkv7.py
 python/sglang/srt/layers/attention/linear/rwkv7_backend.py
 python/sglang/srt/layers/attention/rwkv7_kernels/
 python/sglang/srt/models/rwkv7.py
+python/sglang/srt/speculative/rwkv_spec_worker.py

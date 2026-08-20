@@ -154,6 +154,12 @@ def main():
                     help="batch sizes to sweep (batch mode)")
     ap.add_argument("--decode-tokens", type=int, default=64)
     ap.add_argument("--mem-fraction", type=float, default=0.85)
+    ap.add_argument(
+        "--max-total-tokens",
+        type=int,
+        default=1 << 20,
+        help="token-pool size; RWKV-7 has no KV cache for sglang to size it from",
+    )
     ap.add_argument("--cuda-graph-max-bs", type=int, default=None)
     ap.add_argument("--max-context", type=int, default=None,
                     help="override the model's declared context_length. RWKV-7's "
@@ -178,6 +184,14 @@ def main():
         dtype=args.dtype,
         tp_size=1,
         mem_fraction_static=args.mem_fraction,
+        # RWKV-7 has no full-attention KV cache, so sglang cannot size the token
+        # pool from per-token KV bytes. Its zero-KV fallback is ONE context length,
+        # which a serving batch outgrows: on v0.5.17 at 128 requests x 200 tokens
+        # the scheduler retracted repeatedly and ran 31 of a possible 64. Sizing it
+        # by concurrency is what this knob is for; the default matches the cap the
+        # port patch used to apply from inside pool_configurator.py, before upstream
+        # grew the knob and that hunk was dropped.
+        max_total_tokens=args.max_total_tokens,
     )
     if args.max_context is not None:
         engine_kwargs["context_length"] = args.max_context

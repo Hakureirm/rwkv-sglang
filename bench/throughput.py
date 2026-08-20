@@ -173,6 +173,12 @@ def main():
     ap.add_argument("--short-len", type=int, default=16)
     ap.add_argument("--mem-fraction", type=float, default=0.5)
     ap.add_argument(
+        "--max-total-tokens",
+        type=int,
+        default=1 << 20,
+        help="token-pool size; RWKV-7 has no KV cache for sglang to size it from",
+    )
+    ap.add_argument(
         "--gpu", type=int, default=0, help="nvidia-smi/rocm-smi GPU index to poll"
     )
     ap.add_argument("--tag", default="", help="label for the printed table")
@@ -213,6 +219,14 @@ def main():
         dtype=args.dtype,
         tp_size=1,
         mem_fraction_static=args.mem_fraction,
+        # RWKV-7 has no full-attention KV cache, so sglang cannot size the token
+        # pool from per-token KV bytes. Its zero-KV fallback is ONE context length,
+        # which a serving batch outgrows: on v0.5.17 at 128 requests x 200 tokens
+        # the scheduler retracted repeatedly and ran 31 of a possible 64. Sizing it
+        # by concurrency is what this knob is for; the default matches the cap the
+        # port patch used to apply from inside pool_configurator.py, before upstream
+        # grew the knob and that hunk was dropped.
+        max_total_tokens=args.max_total_tokens,
     )
     if args.cuda_graph and args.cuda_graph_max_bs is not None:
         engine_kwargs["cuda_graph_max_bs"] = args.cuda_graph_max_bs
@@ -220,6 +234,13 @@ def main():
     # `disable_piecewise_cuda_graph` -- a correctness switch here, not a knob.
     engine_kwargs = _resolve_engine_kwargs(engine_kwargs)
     engine = sgl.Engine(**engine_kwargs)
+    # Label the table with what sglang RESOLVED, not what the CLI asked for. sglang
+    # forces the radix cache off for RWKV-7 -- a correctness requirement, not a
+    # preference -- so a run launched without --disable-radix-cache still has it off.
+    # Reading `args` here printed "radix_cache=ON" over a run that had it OFF, and
+    # wrote the same wrong field into the JSON result. Captured now because the
+    # labels below are built after engine.shutdown().
+    resolved_radix_off = bool(engine.tokenizer_manager.server_args.disable_radix_cache)
 
     rows = []
     for bsz in batch_sizes:
@@ -236,7 +257,7 @@ def main():
     tag = args.tag or args.model
     print("\n" + "=" * 78)
     cg_label = "ON" if args.cuda_graph else "OFF"
-    radix_label = "OFF" if args.disable_radix_cache else "ON"
+    radix_label = "OFF" if resolved_radix_off else "ON"
     print(
         f"THROUGHPUT  model={tag}  dtype={args.dtype}  cuda_graph={cg_label}  "
         f"radix_cache={radix_label}"
@@ -269,7 +290,7 @@ def main():
             "tag": tag,
             "dtype": args.dtype,
             "cuda_graph": args.cuda_graph,
-            "radix_cache": not args.disable_radix_cache,
+            "radix_cache": not resolved_radix_off,
             "decode_tokens": args.decode_tokens,
             "prefill_len": args.prefill_len,
             "short_len": args.short_len,

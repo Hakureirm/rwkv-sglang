@@ -1,1 +1,4 @@
-754524d [Fix] Skip cross-node probe in MultimemAllGatherer on single-node runs (fixes mooncake EP segfault) (#30139)
+2948168 [Cherry-pick to release/v0.5.17] fix(PP): size the mamba pool per pipeline stage, not per whole model (#33666) (#34035)
+
+Tagged v0.5.17. Full sha 29481685462732237d80d86076d6563e1f658102.
+Fetch it into a shallow clone with: git fetch --depth 1 origin tag v0.5.17

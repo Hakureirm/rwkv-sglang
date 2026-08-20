@@ -17,10 +17,12 @@ carried two other copies, and neither was what we were running:
 - `sglang_overlay/` — the v0.5.10 line. A different mechanism for the same job
   (its chunk-boundary state reset keys on `extend_prefix_lens`; this tree zeroes
   fresh slots upstream instead). Retired.
-- `sglang_main_port/new_files.tgz` — a snapshot of this line, but a stale one:
-  it carries 5 of the 12 kernel modules and is missing the megakernel, the fused
-  glue, the fused LoRA, w8a8, w4 and the WKV kernels, i.e. most of what the
-  benchmark flags turn on.
+- `sglang_main_port/new_files.tgz` — used to be a stale snapshot of this line: it
+  carried 5 of the 12 kernel modules, missing the megakernel, the fused glue, the
+  fused LoRA, w8a8 and the WKV kernels — most of what the benchmark flags turn on —
+  and it also shipped the speculative worker not at all. **Closed on 2026-08-20**:
+  that tarball is now generated from this directory rather than maintained beside
+  it, so it cannot drift again without this directory drifting too.
 
 That gap was found while reviewing an external PR that patched
 `sglang_overlay/`: the patch targeted code we publish but do not run, and a

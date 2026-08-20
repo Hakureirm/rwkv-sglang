@@ -75,15 +75,18 @@ KV 缓存随 token 数线性增长。实测效果:并发从 1 路加到 256 路�
 
 ## 快速上手
 
-**在 sglang main 上**(例如 `lmsysorg/sglang:dev-cu12` 容器内):
+**在 sglang v0.5.17 上**(例如 `lmsysorg/sglang:dev-cu12` 容器内)。
+RWKV-7 没有 KV cache 供 sglang 推算 token 池大小,所以服务批量需要
+`--max-total-tokens`;用 `scripts/serve.sh` 的话它会替你带上。
 
 ```bash
 cd /sgl-workspace/sglang
-git apply <本仓库>/sglang_main_port/upstream_edits.patch   # 7 处小的接线修改
+git apply <本仓库>/sglang_main_port/upstream_edits.patch   # 10 个文件的接线修改
 # 然后复制 RWKV-7 文件(模型、后端、计算核、配置):
 #   文件清单和目标路径见 sglang_main_port/README.md
 python -m sglang.launch_server --model-path <rwkv7模型目录> --trust-remote-code \
-    --attention-backend triton --dtype float16 --disable-radix-cache
+    --attention-backend triton --dtype float16 --disable-radix-cache \
+    --max-total-tokens 1048576
 ```
 
 

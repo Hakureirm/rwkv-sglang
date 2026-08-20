@@ -61,15 +61,18 @@ of extra VRAM. High concurrency and long context are where this architecture win
 
 ## Quickstart
 
-**On sglang main** (e.g. inside the `lmsysorg/sglang:dev-cu12` container):
+**On sglang v0.5.17** (e.g. inside the `lmsysorg/sglang:dev-cu12` container).
+RWKV-7 has no KV cache for sglang to size the token pool from, so a serving batch
+needs `--max-total-tokens`; `scripts/serve.sh` passes it for you.
 
 ```bash
 cd /sgl-workspace/sglang
-git apply <this-repo>/sglang_main_port/upstream_edits.patch   # 7 small wiring edits
+git apply <this-repo>/sglang_main_port/upstream_edits.patch   # 10 files of wiring edits
 # then copy the RWKV-7 files (model, backend, kernels, config):
 #   file list and destinations in sglang_main_port/README.md
 python -m sglang.launch_server --model-path <rwkv7-model-dir> --trust-remote-code \
-    --attention-backend triton --dtype float16 --disable-radix-cache
+    --attention-backend triton --dtype float16 --disable-radix-cache \
+    --max-total-tokens 1048576
 ```
 
 

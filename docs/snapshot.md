@@ -166,6 +166,23 @@ tiling, 7.2B GPTQ (streamed calibration), fp8, TP/PP, upstream PR.
   (`RWKV_FUSED_LORA=1`) — fp16 bsz1 decode **203.0 → 226.5 tok/s (+11.6%), greedy 24/24
   EXACT**; per-component profile shows lm_head = 58.5% of the graphed step (268 MB fp16
   read at ~91% BW — the head, not the layers, is the remaining fp16 wall).
+- ✅ **Port rebased onto sglang `v0.5.17`** (2026-08-20): base moved from a `main` commit to a
+  release tag, and the patch shrank from 11 files / 22 hunks to **10 files / 15 hunks**.
+  Upstream grew extension points that absorbed four of them: `register_linear_attn_model`
+  now selects the backend (so both `attention_registry.py` hunks and three `model_runner.py`
+  hunks are gone), and upstream's own zero-KV branch replaced the `pool_configurator.py`
+  hunk. `server_args.py` stays a core edit — `register_model_override` rejects
+  `disable_radix_cache`, which is not on ServerArgs' `resolvable=True` whitelist.
+  **Cost of the pool hunk leaving: `--max-total-tokens` is now required for a serving
+  batch** (without it the pool falls back to one context length; measured 128 reqs × 200
+  tok: repeated retraction, 31 of 64 running) — wired into `scripts/serve.sh` (`MAXTOTALTOK`,
+  default `1<<20`, the cap the removed hunk applied) and into `bench/throughput.py` /
+  `bench/serving_scale.py`. Clean-room verified on a fresh `v0.5.17` worktree: 17/17 modules
+  import, greedy 24/24 EXACT at 0.1B, `verify_batch` PASS at 1.5B (all three batches).
+  `new_files.tgz` is now generated from `sglang_mainline/` instead of drifting beside it.
+  Also fixed while here: `bench/throughput.py` labelled its table from the CLI arg, printing
+  `radix_cache=ON` over runs sglang had forced OFF, and wrote that same wrong field into the
+  JSON result; it now reads the resolved `server_args`.
 - 🔄 **remaining**: w4/w8 M=64 long-K final gap (cp.async landed; next lever = 256-thread TC block) · tp/pp throughput-tuned numbers (cuda-graph ON) + 7.2B multi-GPU · W4/W8 × tp>1 · per-arch small-M cutover (T4) ·
   7.2B GPTQ streamed calibration · fp8 · upstream PR (main port DONE — unblocked).
 
