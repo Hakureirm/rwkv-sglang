@@ -26,13 +26,21 @@ share, so it is the trustworthy per-prompt oracle.
 
   source ~/rwkv_env.sh && CUDA_VISIBLE_DEVICES=0 ~/envs/rwkv-sgl/bin/python \
       bench/verify_batch.py \
-      --model /home/user/rwkv_models/rwkv7-0.1b-fla \
-      --fixture bench/fixtures/oracle_rwkv7_01b_eiffel.json \
+      --model /home/user/rwkv_models/rwkv7-1.5b-fla \
+      --fixture bench/fixtures/oracle_rwkv7_15b_eiffel.json \
       --dtype bfloat16 --cuda-graph
 
 Exit 0 iff ALL batches are exact; non-zero otherwise. `--radix-on` flips the guard
 off to demonstrate the bug (divergence is intermittent, so a PASS there is not
 proof of safety — only the default radix-OFF run is the gate).
+
+Run this at 1.5B or larger. At 0.1B the SHARED-PREFIX and MIXED batches diverge from
+their own B=1 references while IDENTICAL still matches the oracle exactly -- and they
+diverge byte-for-byte the same way on sglang v0.5.17 and on the older base this port
+came from, so it tracks model size rather than the serving stack. (The 0.1B B=1
+reference for the `distinct` prompt is a single token repeated 24 times, which is the
+kind of output where a tie between two logits decides the greedy pick.) Reading a
+0.1B run as a port regression costs an afternoon; 1.5B passes all three batches.
 """
 import argparse
 import json
